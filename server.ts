@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import twilio from "twilio";
 import { readFileSync, existsSync } from "fs";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import "dotenv/config";
 
 // Firebase Client Imports (For Frontend / Shared types if needed)
@@ -281,12 +281,11 @@ async function processInferenceOnServer(activityId: string, data: any) {
       response: "⏳ Jan está pensando su respuesta paisa..." 
     });
 
-    const genAI = new GoogleGenAI(LLAVE_SECRETA_JAN as any);
-    const model = (genAI as any).getGenerativeModel({ 
+    const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || LLAVE_SECRETA_JAN);
+    const model = genAI.getGenerativeModel({ 
       model: "gemini-1.5-flash",
       generationConfig: {
         responseMimeType: "application/json",
-        responseSchema: JAN_RESPONSE_SCHEMA as any,
       }
     });
 
