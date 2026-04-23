@@ -1,0 +1,150 @@
+{
+  "entities": {
+    "Product": {
+      "title": "Product",
+      "description": "Un producto del catálogo con control de inventario.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "price": { "type": "number" },
+        "stock": { "type": "number" },
+        "currency": { "type": "string" },
+        "category": { "type": "string" },
+        "cost": { "type": "number" },
+        "freight": { "type": "number" },
+        "provider": { "type": "string" }
+      },
+      "required": ["id", "name", "price", "stock"]
+    },
+    "Order": {
+      "title": "Order",
+      "description": "Un pedido realizado por un cliente vía WhatsApp.",
+      "type": "object",
+      "properties": {
+        "customerName": { "type": "string" },
+        "customerPhone": { "type": "string" },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "productName": { "type": "string" },
+        "productId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "totalPrice": { "type": "number" },
+        "status": { "type": "string", "enum": ["pendiente", "despachado", "entregado"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["customerName", "customerPhone", "address", "city", "productId", "quantity"]
+    },
+    "Activity": {
+      "title": "Activity",
+      "description": "Log de actividad de WhatsApp en tiempo real.",
+      "type": "object",
+      "properties": {
+        "from": { "type": "string" },
+        "to": { "type": "string" },
+        "storeId": { "type": "string" },
+        "message": { "type": "string" },
+        "status": { "type": "string", "enum": ["recibido", "procesando", "respondido", "error"] },
+        "whatsappStatus": { "type": "string", "enum": ["sent", "delivered", "read", "failed"] },
+        "statusUpdateAt": { "type": "string", "format": "date-time" },
+        "response": { "type": "string" },
+        "manualAgent": { "type": "string", "description": "Nombre del asesor que intervino" },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["from", "storeId", "status", "timestamp"]
+    },
+    "Store": {
+      "title": "Store",
+      "description": "Configuración de una tienda en el SaaS.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "dropiApiKey": { "type": "string" },
+        "emailEnabled": { "type": "boolean" },
+        "recoveryFrequency": { "type": "number", "description": "Minutos de inactividad para marcar como abandono" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "phone"]
+    },
+    "TestConnection": {
+      "title": "TestConnection",
+      "description": "Documento para probar conectividad.",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" }
+      }
+    },
+    "SystemConfig": {
+      "title": "SystemConfig",
+      "description": "Estado global del sistema y alertas técnicas.",
+      "type": "object",
+      "properties": {
+        "twilioLimitReached": { "type": "boolean" },
+        "lastTwilioError": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    },
+    "Customer": {
+      "title": "Customer",
+      "description": "Perfil persistente de un cliente para memoria a largo plazo.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "gender": { "type": "string", "enum": ["male", "female", "unknown"] },
+        "phone": { "type": "string" },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "lastInteraction": { "type": "string", "format": "date-time" }
+      },
+      "required": ["phone", "name"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Estado de la conversación (ej: si la IA está pausada).",
+      "type": "object",
+      "properties": {
+        "phone": { "type": "string" },
+        "aiPaused": { "type": "boolean" },
+        "lastInterventionBy": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Colección de productos con stock."
+    },
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Colección de pedidos capturados por el bot."
+    },
+    "/activities/{activityId}": {
+      "schema": "Activity",
+      "description": "Log de eventos de entrada y salida de WhatsApp."
+    },
+    "/stores/{storeId}": {
+      "schema": "Store",
+      "description": "Configuraciones de tiendas en el SaaS."
+    },
+    "/test/{docId}": {
+      "schema": "TestConnection",
+      "description": "Prueba de conectividad."
+    },
+    "/config/{configId}": {
+      "schema": "SystemConfig",
+      "description": "Alertas y estados globales del sistema (ej. Límites Twilio)."
+    },
+    "/customers/{phone}": {
+      "schema": "Customer",
+      "description": "Base de datos de clientes recurrentes (Memoria de Jan)."
+    },
+    "/conversations/{phone}": {
+      "schema": "Conversation",
+      "description": "Estado operativo del chat (Pausa IA, etc)."
+    }
+  }
+}
