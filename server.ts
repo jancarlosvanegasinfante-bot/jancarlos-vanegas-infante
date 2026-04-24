@@ -337,7 +337,7 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
     ];
 
     try {
-      console.log(`[Server AI] Intentando con modelo principal: ${primaryModel}`);
+      console.log(`[Server AI] Intentando con modelo principal: ${primaryModel} (API v1)`);
       const model = ai.getGenerativeModel({ 
         model: primaryModel,
         systemInstruction: JAN_SYSTEM_INSTRUCTION,
@@ -345,7 +345,7 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
           responseMimeType: "application/json",
           responseSchema: JAN_RESPONSE_SCHEMA as any
         }
-      });
+      }, { apiVersion: "v1" });
       const res = await model.generateContent({ contents });
       result = res.response;
     } catch (primaryErr: any) {
@@ -357,7 +357,7 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
           responseMimeType: "application/json",
           responseSchema: JAN_RESPONSE_SCHEMA as any
         }
-      });
+      }, { apiVersion: "v1" });
       const resFallback = await modelFallback.generateContent({ contents });
       result = resFallback.response;
     }
