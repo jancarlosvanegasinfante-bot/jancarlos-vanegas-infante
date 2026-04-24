@@ -334,8 +334,41 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas.`;
 
     // 5. Notificar a los jefes si hay pedido
     if (jsonResponse.pedido_confirmado) {
-       console.log("[Server AI] ¡PEDIDO DETECTADO! Notificando administradores...");
-       // Aquí podrías disparar notifyAdmins si tienes los datos
+      console.log("[Server AI] ¡PEDIDO DETECTADO! Notificando administradores...");
+      try {
+        const orderInfo = {
+          customerName: customerProfile?.name || fromPhone,
+          productName: jsonResponse.pedido_producto || "No especificado",
+          quantity: jsonResponse.pedido_cantidad || 1,
+          totalPrice: jsonResponse.pedido_total || 0,
+          address: jsonResponse.pedido_direccion || "No especificada",
+          city: jsonResponse.pedido_ciudad || "No especificada",
+          addressIndicator: jsonResponse.pedido_referencia || "N/A"
+        };
+        await notifyAdmins(orderInfo, "Jan Vanegas");
+      } catch (e) {
+        console.error("[Server AI] Error notificando pedido:", e);
+      }
+    }
+
+    // 6. Notificar si se requiere atención humana
+    if (jsonResponse.requiere_asesoria) {
+      console.log("[Server AI] ¡ASESORÍA HUMANA SOLICITADA! Notificando...");
+      const message = `⚠️ *ASESORÍA HUMANA SOLICITADA*
+Cliente: ${customerProfile?.name || fromPhone}
+Mensaje: "${data.message}"
+Enfoque: ${jsonResponse.motivo_asesoria || 'Producto no encontrado o duda técnica'}`;
+      
+      const adminNumbersRaw = process.env.ADMIN_WHATSAPP_NUMBERS || "";
+      const adminNumbers = adminNumbersRaw.split(",").filter(n => n.trim().length > 0);
+      for (const num of adminNumbers) {
+          try {
+            const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
+            await sendWhatsApp(target, message);
+          } catch (e) {
+            console.error("[Server AI] Error notificando asesoría:", e);
+          }
+      }
     }
 
   } catch (err: any) {
