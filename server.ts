@@ -5,7 +5,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import twilio from "twilio";
 import { readFileSync, existsSync } from "fs";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import "dotenv/config";
 
 // Firebase Client Imports (For Frontend / Shared types if needed)
@@ -285,7 +285,7 @@ async function processInferenceOnServer(activityId: string, data: any) {
       processingAt: serverTimestamp()
     });
 
-    const ai = new GoogleGenAI({ apiKey: API_KEY, apiVersion: "v1" });
+    const ai = new GoogleGenerativeAI(API_KEY);
     const fromPhone = data.from.replace("whatsapp:", "").trim();
     const customerProfile = await getCustomerProfile(data.from);
     const history = await getCrmContext(data.from, "default");
@@ -338,30 +338,33 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
 
     try {
       console.log(`[Server AI] Intentando con modelo principal: ${primaryModel}`);
-      result = await ai.models.generateContent({
+      const model = ai.getGenerativeModel({ 
         model: primaryModel,
-        contents: contents,
-        config: {
-          systemInstruction: JAN_SYSTEM_INSTRUCTION,
+        systemInstruction: JAN_SYSTEM_INSTRUCTION,
+        generationConfig: {
           responseMimeType: "application/json",
-          responseSchema: JAN_RESPONSE_SCHEMA
+          responseSchema: JAN_RESPONSE_SCHEMA as any
         }
       });
+      const res = await model.generateContent({ contents });
+      result = res.response;
     } catch (primaryErr: any) {
       console.warn(`[Server AI] Error con ${primaryModel}: ${primaryErr.message}. Usando fallback...`);
-      result = await ai.models.generateContent({
+      const modelFallback = ai.getGenerativeModel({ 
         model: fallbackModel,
-        contents: contents,
-        config: {
-          systemInstruction: JAN_SYSTEM_INSTRUCTION,
+        systemInstruction: JAN_SYSTEM_INSTRUCTION,
+        generationConfig: {
           responseMimeType: "application/json",
-          responseSchema: JAN_RESPONSE_SCHEMA
+          responseSchema: JAN_RESPONSE_SCHEMA as any
         }
       });
+      const resFallback = await modelFallback.generateContent({ contents });
+      result = resFallback.response;
     }
 
-    if (!result.text) throw new Error("La IA no devolvió texto.");
-    const jsonResponse = JSON.parse(result.text);
+    const text = result.text();
+    if (!text) throw new Error("La IA no devolvió texto.");
+    const jsonResponse = JSON.parse(text);
     console.log(`[Server AI] Respuesta generada para ${fromPhone} (Acción: ${jsonResponse.accion}):`, jsonResponse.mensaje);
 
     // 3. Enviar respuesta por WhatsApp
