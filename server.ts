@@ -150,17 +150,23 @@ async function downloadMediaAsBase64(url: string): Promise<{ data: string, mimeT
     const response = await axios.get(url, {
       responseType: 'arraybuffer',
       auth: {
-        username: process.env.TWILIO_ACCOUNT_SID || "",
-        password: process.env.TWILIO_AUTH_TOKEN || ""
+        username: process.env.SID_DE_CUENTA_TWILIO || process.env.TWILIO_ACCOUNT_SID || "",
+        password: process.env.TOKEN_DE_AUTORIZACION_DE_TWILIO || process.env.TWILIO_AUTH_TOKEN || ""
       }
     });
     const mimeType = response.headers['content-type'] || 'image/jpeg';
-    if (!mimeType.startsWith('image/')) {
-       console.log(`[Media Download] Skipping non-image type: ${mimeType}`);
+    
+    // Support images and audio
+    if (!mimeType.startsWith('image/') && !mimeType.startsWith('audio/')) {
+       console.log(`[Media Download] Skipping unsupported type: ${mimeType}`);
        return null;
     }
+    
+    // Twilio audio often comes as audio/ogg; codecs=opus, we need the base mime type
+    const cleanMimeType = mimeType.split(';')[0].trim();
+    
     const base64Data = Buffer.from(response.data, 'binary').toString('base64');
-    return { data: base64Data, mimeType };
+    return { data: base64Data, mimeType: cleanMimeType };
   } catch (err: any) {
     console.warn(`[Media Download][Error] From ${url}:`, err.message);
     return null;
@@ -286,27 +292,55 @@ async function processInferenceOnServer(activityId: string, data: any) {
     const prodSnap = await getDocs(collection(db, "products"));
     const products = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-    const prompt = `CLIENTE: ${fromPhone}
+    // Prepare multimedial parts if any
+    const mediaParts: any[] = [];
+    const numMedia = parseInt(data.NumMedia || "0");
+    for (let i = 0; i < numMedia; i++) {
+      const mediaUrl = data[`MediaUrl${i}`];
+      if (mediaUrl) {
+        const media = await downloadMediaAsBase64(mediaUrl);
+        if (media) {
+          mediaParts.push({
+            inlineData: {
+              data: media.data,
+              mimeType: media.mimeType
+            }
+          });
+        }
+      }
+    }
+
+    const promptText = `CLIENTE: ${fromPhone}
 NOMBRE: ${customerProfile?.name || "Desconocido"}
 HISTORIAL:
 ${history}
 
-MENSAJE ACTUAL: ${data.message}
+MENSAJE ACTUAL: ${data.message || ""}${mediaParts.length > 0 ? " (El cliente envió archivos multimedia que adjunto)" : ""}
 
 INVENTARIO ACTUAL:
 ${JSON.stringify(products)}
 
-RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas.`;
+RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
 
     let result;
     const primaryModel = "gemini-2.5-flash";
     const fallbackModel = "gemini-1.5-pro";
 
+    const contents = [
+      { 
+        role: 'user', 
+        parts: [
+          { text: promptText },
+          ...mediaParts
+        ] 
+      }
+    ];
+
     try {
       console.log(`[Server AI] Intentando con modelo principal: ${primaryModel}`);
       result = await ai.models.generateContent({
         model: primaryModel,
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        contents: contents,
         config: {
           systemInstruction: JAN_SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
@@ -317,7 +351,7 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas.`;
       console.warn(`[Server AI] Error con ${primaryModel}: ${primaryErr.message}. Usando fallback...`);
       result = await ai.models.generateContent({
         model: fallbackModel,
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        contents: contents,
         config: {
           systemInstruction: JAN_SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
@@ -343,20 +377,30 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas.`;
 
     // 5. Notificar a los jefes si hay pedido
     if (jsonResponse.accion === "confirmar_pedido") {
-      console.log("[Server AI] ¡PEDIDO DETECTADO! Notificando administradores...");
+      console.log("[Server AI] ¡PEDIDO DETECTADO! Notificando y Persistiendo...");
       try {
         const orderInfo = {
           customerName: jsonResponse.datos_pedido?.nombre || customerProfile?.name || fromPhone,
+          customerPhone: fromPhone,
           productName: jsonResponse.producto || "No especificado",
-          quantity: 1, // Default to 1 if not in schema
+          productId: "manual", // Default since we don't strictly enforce ID in schema
+          quantity: 1,
           totalPrice: 0,
           address: jsonResponse.datos_pedido?.direccion || "No especificada",
           city: "No especificada",
-          addressIndicator: "N/A"
+          addressIndicator: "N/A",
+          status: 'pendiente',
+          createdAt: serverTimestamp()
         };
+
+        // 5.1 Persistir en Firestore para que aparezca en la APP
+        await addDoc(collection(db, "orders"), orderInfo);
+        console.log("[Server AI] Pedido guardado en base de datos.");
+
+        // 5.2 Notificar Admin
         await notifyAdmins(orderInfo, "Jan Vanegas");
       } catch (e) {
-        console.error("[Server AI] Error notificando pedido:", e);
+        console.error("[Server AI] Error persistiendo o notificando pedido:", e);
       }
     }
 
