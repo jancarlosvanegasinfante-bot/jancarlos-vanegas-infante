@@ -305,16 +305,17 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas.`;
 
     // Uso correcto de @google/genai: client.models.generateContent
     const result = await ai.models.generateContent({
-      model: "gemini-1.5-flash",
-      systemInstruction: JAN_SYSTEM_INSTRUCTION,
+      model: "gemini-3-flash-preview",
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
       config: {
+        systemInstruction: JAN_SYSTEM_INSTRUCTION,
         responseMimeType: "application/json",
         responseSchema: JAN_RESPONSE_SCHEMA
       }
     });
 
-    const jsonResponse = result.value;
+    if (!result.text) throw new Error("La IA no devolvió texto.");
+    const jsonResponse = JSON.parse(result.text);
     console.log(`[Server AI] Respuesta generada para ${fromPhone}:`, jsonResponse.respuesta);
 
     // 2. Ejecutar herramientas si es necesario (puedes añadir lógica de tools aquí si usas function calling real)
