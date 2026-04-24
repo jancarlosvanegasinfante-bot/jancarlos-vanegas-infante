@@ -381,14 +381,14 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
       try {
         const orderInfo = {
           customerName: jsonResponse.datos_pedido?.nombre || customerProfile?.name || fromPhone,
-          customerPhone: fromPhone,
+          customerPhone: jsonResponse.datos_pedido?.telefono || fromPhone,
           productName: jsonResponse.producto || "No especificado",
           productId: "manual", // Default since we don't strictly enforce ID in schema
           quantity: 1,
           totalPrice: 0,
           address: jsonResponse.datos_pedido?.direccion || "No especificada",
-          city: "No especificada",
-          addressIndicator: "N/A",
+          city: jsonResponse.datos_pedido?.ciudad || "No especificada",
+          addressIndicator: jsonResponse.datos_pedido?.referencia || "N/A",
           status: 'pendiente',
           createdAt: serverTimestamp()
         };
