@@ -279,15 +279,10 @@ async function processInferenceOnServer(activityId: string, data: any) {
       processingAt: serverTimestamp()
     });
 
-    // El cliente de @google/genai se inicializa con un objeto de configuración
     const ai = new GoogleGenAI({ apiKey: API_KEY });
-    
-    // 1. Preparar Contexto: Perfil, Historial e Inventario
     const fromPhone = data.from.replace("whatsapp:", "").trim();
     const customerProfile = await getCustomerProfile(data.from);
     const history = await getCrmContext(data.from, "default");
-    
-    // Obtener productos disponibles
     const prodSnap = await getDocs(collection(db, "products"));
     const products = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
@@ -303,47 +298,61 @@ ${JSON.stringify(products)}
 
 RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas.`;
 
-    // Uso correcto de @google/genai: client.models.generateContent
-    const result = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      config: {
-        systemInstruction: JAN_SYSTEM_INSTRUCTION,
-        responseMimeType: "application/json",
-        responseSchema: JAN_RESPONSE_SCHEMA
-      }
-    });
+    let result;
+    const primaryModel = "gemini-2.5-flash";
+    const fallbackModel = "gemini-1.5-pro";
+
+    try {
+      console.log(`[Server AI] Intentando con modelo principal: ${primaryModel}`);
+      result = await ai.models.generateContent({
+        model: primaryModel,
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          systemInstruction: JAN_SYSTEM_INSTRUCTION,
+          responseMimeType: "application/json",
+          responseSchema: JAN_RESPONSE_SCHEMA
+        }
+      });
+    } catch (primaryErr: any) {
+      console.warn(`[Server AI] Error con ${primaryModel}: ${primaryErr.message}. Usando fallback...`);
+      result = await ai.models.generateContent({
+        model: fallbackModel,
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        config: {
+          systemInstruction: JAN_SYSTEM_INSTRUCTION,
+          responseMimeType: "application/json",
+          responseSchema: JAN_RESPONSE_SCHEMA
+        }
+      });
+    }
 
     if (!result.text) throw new Error("La IA no devolvió texto.");
     const jsonResponse = JSON.parse(result.text);
-    console.log(`[Server AI] Respuesta generada para ${fromPhone}:`, jsonResponse.respuesta);
-
-    // 2. Ejecutar herramientas si es necesario (puedes añadir lógica de tools aquí si usas function calling real)
-    // Por ahora Jan lo hace via lógica de prompt y whitelisting.
+    console.log(`[Server AI] Respuesta generada para ${fromPhone} (Acción: ${jsonResponse.accion}):`, jsonResponse.mensaje);
 
     // 3. Enviar respuesta por WhatsApp
-    let mediaUrl = jsonResponse.imageUrl || jsonResponse.videoUrl || undefined;
-    await sendWhatsApp(data.from, jsonResponse.respuesta, mediaUrl, activityId, data.to);
+    let mediaUrl = jsonResponse.imageUrl || undefined;
+    await sendWhatsApp(data.from, jsonResponse.mensaje, mediaUrl, activityId, data.to);
 
     // 4. Actualizar actividad
     await updateDoc(doc(db, "activities", activityId), {
       status: "respondido",
-      response: jsonResponse.respuesta,
+      response: jsonResponse.mensaje,
       respondedAt: serverTimestamp()
     });
 
     // 5. Notificar a los jefes si hay pedido
-    if (jsonResponse.pedido_confirmado) {
+    if (jsonResponse.accion === "confirmar_pedido") {
       console.log("[Server AI] ¡PEDIDO DETECTADO! Notificando administradores...");
       try {
         const orderInfo = {
-          customerName: customerProfile?.name || fromPhone,
-          productName: jsonResponse.pedido_producto || "No especificado",
-          quantity: jsonResponse.pedido_cantidad || 1,
-          totalPrice: jsonResponse.pedido_total || 0,
-          address: jsonResponse.pedido_direccion || "No especificada",
-          city: jsonResponse.pedido_ciudad || "No especificada",
-          addressIndicator: jsonResponse.pedido_referencia || "N/A"
+          customerName: jsonResponse.datos_pedido?.nombre || customerProfile?.name || fromPhone,
+          productName: jsonResponse.producto || "No especificado",
+          quantity: 1, // Default to 1 if not in schema
+          totalPrice: 0,
+          address: jsonResponse.datos_pedido?.direccion || "No especificada",
+          city: "No especificada",
+          addressIndicator: "N/A"
         };
         await notifyAdmins(orderInfo, "Jan Vanegas");
       } catch (e) {
@@ -352,19 +361,20 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas.`;
     }
 
     // 6. Notificar si se requiere atención humana
-    if (jsonResponse.requiere_asesoria) {
+    if (jsonResponse.accion === "notificar_admin") {
       console.log("[Server AI] ¡ASESORÍA HUMANA SOLICITADA! Notificando...");
-      const message = `⚠️ *ASESORÍA HUMANA SOLICITADA*
-Cliente: ${customerProfile?.name || fromPhone}
-Mensaje: "${data.message}"
-Enfoque: ${jsonResponse.motivo_asesoria || 'Producto no encontrado o duda técnica'}`;
+      const adminMessage = `🚨 *ASESORÍA HUMANA SOLICITADA*
+Cliente: ${customerProfile?.name || fromPhone} (${fromPhone})
+Producto/Duda: ${jsonResponse.producto || 'No especificado'}
+Mensaje del cliente: "${data.message}"
+Jan respondió: "${jsonResponse.mensaje}"`;
       
       const adminNumbersRaw = process.env.ADMIN_WHATSAPP_NUMBERS || "";
       const adminNumbers = adminNumbersRaw.split(",").filter(n => n.trim().length > 0);
       for (const num of adminNumbers) {
           try {
             const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
-            await sendWhatsApp(target, message);
+            await sendWhatsApp(target, adminMessage);
           } catch (e) {
             console.error("[Server AI] Error notificando asesoría:", e);
           }
