@@ -285,7 +285,7 @@ async function processInferenceOnServer(activityId: string, data: any) {
       processingAt: serverTimestamp()
     });
 
-    const ai = new GoogleGenAI({ apiKey: API_KEY });
+    const ai = new GoogleGenAI({ apiKey: API_KEY, apiVersion: "v1" });
     const fromPhone = data.from.replace("whatsapp:", "").trim();
     const customerProfile = await getCustomerProfile(data.from);
     const history = await getCrmContext(data.from, "default");
@@ -323,7 +323,7 @@ ${JSON.stringify(products)}
 RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
 
     let result;
-    const primaryModel = "gemini-2.5-flash";
+    const primaryModel = "gemini-1.5-flash";
     const fallbackModel = "gemini-1.5-pro";
 
     const contents = [
