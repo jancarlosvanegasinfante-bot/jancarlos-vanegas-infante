@@ -262,7 +262,7 @@ const checkInventoryTool = {
 };
 
 async function processInferenceOnServer(data: any) {
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
   if (!GEMINI_API_KEY) throw new Error("No Gemini API Key");
 
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
