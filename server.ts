@@ -279,16 +279,9 @@ async function processInferenceOnServer(activityId: string, data: any) {
       processingAt: serverTimestamp()
     });
 
+    // El cliente de @google/genai se inicializa con un objeto de configuración
     const ai = new GoogleGenAI({ apiKey: API_KEY });
-    const model = ai.getGenerativeModel({ 
-      model: "gemini-3-flash-preview",
-      systemInstruction: JAN_SYSTEM_INSTRUCTION,
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: JAN_RESPONSE_SCHEMA
-      }
-    });
-
+    
     // 1. Preparar Contexto: Perfil, Historial e Inventario
     const fromPhone = data.from.replace("whatsapp:", "").trim();
     const customerProfile = await getCustomerProfile(data.from);
@@ -310,14 +303,18 @@ ${JSON.stringify(products)}
 
 RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas.`;
 
-    const chat = model.startChat({
-      history: [],
+    // Uso correcto de @google/genai: client.models.generateContent
+    const result = await ai.models.generateContent({
+      model: "gemini-1.5-flash",
+      systemInstruction: JAN_SYSTEM_INSTRUCTION,
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: JAN_RESPONSE_SCHEMA
+      }
     });
 
-    const result = await chat.sendMessage(prompt);
-    const textResponse = result.response.text();
-    const jsonResponse = JSON.parse(textResponse);
-
+    const jsonResponse = result.value;
     console.log(`[Server AI] Respuesta generada para ${fromPhone}:`, jsonResponse.respuesta);
 
     // 2. Ejecutar herramientas si es necesario (puedes añadir lógica de tools aquí si usas function calling real)
