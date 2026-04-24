@@ -697,7 +697,7 @@ function AIProcessor({ user }: { user: FirebaseUser }) {
     };
     ensureInventory();
 
-    console.log("[AI Agent] Starting listener for incoming messages...");
+    console.log("[AI Agent] Starting listener for incoming messages (MONITOR ONLY)...");
     const q = query(
       collection(db, "activities"), 
       where("status", "==", "recibido"),
@@ -705,42 +705,10 @@ function AIProcessor({ user }: { user: FirebaseUser }) {
     );
     
     const unsubscribe = onSnapshot(q, async (snapshot) => {
-      const pending = snapshot.docs.filter(d => !processingRef.current.has(d.id));
-
-      if (pending.length > 0) {
-        pending.forEach(async (docSnap) => {
-          const id = docSnap.id;
-          const data = docSnap.data();
-          if (processingRef.current.has(id)) return;
-          
-          // Check if AI is paused for this specific conversation
-          const fromField = data.from || "";
-          const cleanPhone = fromField.replace("whatsapp:", "").trim();
-          
-          // Try fetching with and without '+' to be robust
-          let convData: any = null;
-          const snap1 = await getDoc(doc(db, "conversations", cleanPhone));
-          if (snap1.exists()) {
-            convData = snap1.data();
-          } else if (!cleanPhone.startsWith("+")) {
-            const snap2 = await getDoc(doc(db, "conversations", `+${cleanPhone}`));
-            if (snap2.exists()) convData = snap2.data();
-          } else {
-            const snap2 = await getDoc(doc(db, "conversations", cleanPhone.substring(1)));
-            if (snap2.exists()) convData = snap2.data();
-          }
-          
-          if (convData?.aiPaused) {
-            console.log(`[AI Agent] Skipping ${cleanPhone} (AI Paused)`);
-            await updateDoc(doc(db, "activities", id), { status: "omitido_pausa" });
-            return;
-          }
-
-          processingRef.current.add(id);
-          setProcessingIds(new Set(processingRef.current));
-          processMessage(id, data, convData);
-        });
-      }
+       // SERVER IS NOW AUTONOMOUS - WE JUST LOG HERE
+       if (snapshot.docs.length > 0) {
+         console.log(`[AI Agent] ${snapshot.docs.length} messages pending (Server is processing them)`);
+       }
     });
 
     return () => unsubscribe();

@@ -27,10 +27,26 @@ import {
   updateDoc
 } from "firebase/firestore";
 import sgMail from '@sendgrid/mail';
+import { 
+  JAN_SYSTEM_INSTRUCTION, 
+  JAN_RESPONSE_SCHEMA, 
+  captureOrderTool, 
+  checkInventoryTool, 
+  updateCustomerProfileTool
+} from "./src/lib/janAgent.js";
 
 // 1. Initialize Firebase (Client SDK on server for cross-project compatibility)
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Robust Environment Variable Detection (Railway & Google Cloud compat)
+const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || process.env.SID_DE_CUENTA_TWILIO;
+const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || process.env.TOKEN_DE_AUTORIZACION_DE_TWILIO;
+const TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_DESDE_NÚMERO || process.env.TWILIO_NUMBER;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.Clave_API;
+const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
+const SENDGRID_FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL;
+
 const firebaseConfigPath = path.join(__dirname, "firebase-applet-config.json");
 const firebaseConfig = JSON.parse(readFileSync(firebaseConfigPath, "utf-8"));
 
@@ -38,12 +54,6 @@ console.log(`[Firebase] Initializing with project: ${firebaseConfig.projectId}, 
 
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
-
-const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN;
-const TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER;
-const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
-const SENDGRID_FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL;
 
 if (SENDGRID_API_KEY) {
   sgMail.setApiKey(SENDGRID_API_KEY);
@@ -253,36 +263,91 @@ async function seedDatabase(force = false, customCatalog?: any) {
 /**
  * Tool Definitions for Gemini (Reference for sync/seed)
  */
-const checkInventoryTool = {
-  name: "checkInventory",
-  parameters: {
-    type: "OBJECT",
-    properties: {}
+// Tools are imported from janAgent.ts
+
+async function processInferenceOnServer(activityId: string, data: any) {
+  const API_KEY = GEMINI_API_KEY;
+  if (!API_KEY) {
+    console.error("[Server AI] Faltan claves de Gemini en el servidor.");
+    await updateDoc(doc(db, "activities", activityId), { status: "error", response: "Error: No hay clave de IA configurada en Railway." });
+    return;
   }
-};
 
-async function processInferenceOnServer(data: any) {
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY;
-  console.log('[DEBUG] Entrando a processInferenceOnServer');
-  console.log('[DEBUG] KEY:', !!GEMINI_API_KEY);
-  console.log('[DEBUG] Data:', JSON.stringify(data).substring(0, 100));
-  if (!GEMINI_API_KEY) throw new Error("No Gemini API Key");
+  try {
+    await updateDoc(doc(db, "activities", activityId), { 
+      status: "procesando",
+      processingAt: serverTimestamp()
+    });
 
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-  const model = "gemini-flash-latest";
+    const ai = new GoogleGenAI({ apiKey: API_KEY });
+    const model = ai.getGenerativeModel({ 
+      model: "gemini-3-flash-preview",
+      systemInstruction: JAN_SYSTEM_INSTRUCTION,
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: JAN_RESPONSE_SCHEMA
+      }
+    });
 
-  // Get available products for whitelisting URLs
-  const prodSnap = await getDocs(collection(db, "products"));
-  const availableProducts = prodSnap.docs.map(d => ({
-    id: d.id,
-    name: d.data().name,
-    imageUrl: d.data().imageUrl,
-    videoUrl: d.data().videoUrl,
-  }));
+    // 1. Preparar Contexto: Perfil, Historial e Inventario
+    const fromPhone = data.from.replace("whatsapp:", "").trim();
+    const customerProfile = await getCustomerProfile(data.from);
+    const history = await getCrmContext(data.from, "default");
+    
+    // Obtener productos disponibles
+    const prodSnap = await getDocs(collection(db, "products"));
+    const products = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-  // ... (Inference and Whitelist Logic)
-  // This will require adding imports and function structure to server.ts.
-  console.log("[Server Inference] Processing message from:", data.from);
+    const prompt = `CLIENTE: ${fromPhone}
+NOMBRE: ${customerProfile?.name || "Desconocido"}
+HISTORIAL:
+${history}
+
+MENSAJE ACTUAL: ${data.message}
+
+INVENTARIO ACTUAL:
+${JSON.stringify(products)}
+
+RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas.`;
+
+    const chat = model.startChat({
+      history: [],
+    });
+
+    const result = await chat.sendMessage(prompt);
+    const textResponse = result.response.text();
+    const jsonResponse = JSON.parse(textResponse);
+
+    console.log(`[Server AI] Respuesta generada para ${fromPhone}:`, jsonResponse.respuesta);
+
+    // 2. Ejecutar herramientas si es necesario (puedes añadir lógica de tools aquí si usas function calling real)
+    // Por ahora Jan lo hace via lógica de prompt y whitelisting.
+
+    // 3. Enviar respuesta por WhatsApp
+    let mediaUrl = jsonResponse.imageUrl || jsonResponse.videoUrl || undefined;
+    await sendWhatsApp(data.from, jsonResponse.respuesta, mediaUrl, activityId, data.to);
+
+    // 4. Actualizar actividad
+    await updateDoc(doc(db, "activities", activityId), {
+      status: "respondido",
+      response: jsonResponse.respuesta,
+      respondedAt: serverTimestamp()
+    });
+
+    // 5. Notificar a los jefes si hay pedido
+    if (jsonResponse.pedido_confirmado) {
+       console.log("[Server AI] ¡PEDIDO DETECTADO! Notificando administradores...");
+       // Aquí podrías disparar notifyAdmins si tienes los datos
+    }
+
+  } catch (err: any) {
+    console.error(`[Server AI][Error] Falló procesamiento en Railway:`, err.message);
+    await updateDoc(doc(db, "activities", activityId), { 
+      status: "error", 
+      response: `Jan tuvo un mareo: ${err.message}`,
+      errorAt: serverTimestamp()
+    });
+  }
 }
 async function updateTwilioStatus(limitReached: boolean, error?: string) {
   try {
@@ -761,7 +826,7 @@ async function startServer() {
     // LOG IMMEDIATELY
     try {
       const cleanFrom = from.replace('whatsapp:', '').trim();
-      const activityRef = await addDoc(collection(db, "activities"), {
+      const activityData = {
         from,
         to,
         recipient: from, // THE CUSTOMER is always the recipient/thread-ID
@@ -773,8 +838,16 @@ async function startServer() {
         senderType: 'customer',
         receivedAt: serverTimestamp(),
         timestamp: serverTimestamp()
-      });
+      };
+      
+      const activityRef = await addDoc(collection(db, "activities"), activityData);
       console.log(`[Activity] Registered: ${activityRef.id}. Bot receiving: ${to}`);
+
+      // TRIGGER SERVER-SIDE INFERENCE IMMEDIATELY
+      processInferenceOnServer(activityRef.id, activityData).catch(e => {
+        console.error(`[Server Inference] Fatal error during async execution:`, e.message);
+      });
+
     } catch (e: any) {
       console.warn("[Activity] Registration failed:", e.message);
     }
