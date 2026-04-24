@@ -323,8 +323,8 @@ ${JSON.stringify(products)}
 RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
 
     let result;
-    const primaryModel = "gemini-2.0-flash";
-    const fallbackModel = "gemini-2.0-flash-lite-preview-02-05";
+    const primaryModel = "gemini-2.5-flash";
+    const fallbackModel = "gemini-flash-latest";
 
     const contents = [
       { 
