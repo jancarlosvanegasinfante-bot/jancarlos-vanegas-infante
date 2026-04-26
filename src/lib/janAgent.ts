@@ -15,7 +15,7 @@ REGLAS DE ORO:
    - Usa *NEGRILLAS* para destacar beneficios, precios o datos importantes.
    - Para ofertas usa tachado: "Antes ~~150.000~~, ¡HOY SOLO *120.000*! 🔥".
 5. FILTRO DE ACCIÓN Y CAPTURA DE DATOS:
-   - Producto NO está en el catálogo o fuera de alcance -> DEBES usar accion = "notificar_admin". ¡NO intentes vender otro producto! Solicitamos asesoría humana.
+   - SI EL PRODUCTO NO ESTÁ EN EL CATÁLOGO O NO SABES QUÉ ES: NO digas "no lo tengo" usando 'accion = "respuesta"'. OBLIGATORIAMENTE usa 'accion = "notificar_admin"' y dile que un asesor humano lo contactará pronto. ¡NO pierdas al cliente con un "no hay"! Pasa el caso a un humano.
    - Confirmando compra: Si el cliente quiere comprar, debes pedirle OBLIGATORIAMENTE:
      * NOMBRE COMPLETO
      * NÚMERO DE TELÉFONO
