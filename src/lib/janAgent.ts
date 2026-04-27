@@ -49,7 +49,8 @@ export const JAN_RESPONSE_SCHEMA = {
         direccion: { type: Type.STRING, description: "Dirección de entrega" },
         telefono: { type: Type.STRING, description: "Teléfono de contacto" },
         ciudad: { type: Type.STRING, description: "Ciudad de destino" },
-        referencia: { type: Type.STRING, description: "Punto de referencia o descripción del lugar" }
+        referencia: { type: Type.STRING, description: "Punto de referencia o descripción del lugar" },
+        valor: { type: Type.NUMBER, description: "Valor total del pedido o precio acordado" }
       }
     },
     imageUrl: { type: Type.STRING, description: "URL de la imagen del producto si aplica" }

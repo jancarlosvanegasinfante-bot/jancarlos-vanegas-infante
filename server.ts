@@ -379,13 +379,20 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
     if (jsonResponse.accion === "confirmar_pedido") {
       console.log("[Server AI] ¡PEDIDO DETECTADO! Notificando y Persistiendo...");
       try {
+        let finalPrice = jsonResponse.datos_pedido?.valor || 0;
+        if (finalPrice <= 0 && jsonResponse.producto) {
+          const checkProd = jsonResponse.producto.toLowerCase();
+          const match = products.find((p: any) => p.name.toLowerCase().includes(checkProd) || checkProd.includes(p.name.toLowerCase()));
+          if (match && match.price) finalPrice = match.price;
+        }
+
         const orderInfo = {
           customerName: jsonResponse.datos_pedido?.nombre || customerProfile?.name || fromPhone,
           customerPhone: jsonResponse.datos_pedido?.telefono || fromPhone,
           productName: jsonResponse.producto || "No especificado",
           productId: "manual", // Default since we don't strictly enforce ID in schema
           quantity: 1,
-          totalPrice: 0,
+          totalPrice: finalPrice,
           address: jsonResponse.datos_pedido?.direccion || "No especificada",
           city: jsonResponse.datos_pedido?.ciudad || "No especificada",
           addressIndicator: jsonResponse.datos_pedido?.referencia || "N/A",
