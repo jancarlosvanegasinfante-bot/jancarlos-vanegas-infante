@@ -1264,7 +1264,10 @@ INTENCION: ${fu.reason}
 HISTORIAL RECIENTE:
 ${history}
 
-TAREA: El cliente dejó de responder hace unos minutos. Escribe un mensaje MUY CORTO, paisa, carismático y "echado pa' lante" para reactivarlo. NO seas pesado, sé como un parcero que quiere ayudar. Máximo 15 palabras.
+TAREA: El cliente dejó de responder hace unos minutos. Escribe un mensaje MUY CORTO, profesional, amable y persuasivo para reactivar la conversación. 
+Integra gatillos mentales de ESCASEZ (pocas unidades disponibles) o BENEFICIO (recordando el envío gratis y el pago contra entrega hoy). 
+Mantenlo carismático y respetuoso. Si es mujer, usa un trato amable sin ser informal de más. 
+Máximo 18 palabras.
 NO RESPONDAS EN JSON, RESPONDE SOLO EL TEXTO DEL MENSAJE.`;
 
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
