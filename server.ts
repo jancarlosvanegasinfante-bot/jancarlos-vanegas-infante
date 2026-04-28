@@ -399,7 +399,7 @@ RECUERDA: Analiza al cliente como un experto en ventas. Devuelve JSON.
 ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urgencia, objeciones, nivel_interes y siguiente_mejor_accion, basado en si ha dado direccion, etc.`;
 
     let result;
-    const primaryModel = "gemini-3-flash-preview";
+    const primaryModel = "gemini-2.5-flash";
     const fallbackModel = "gemini-flash-latest";
 
     const contents = [
@@ -1269,7 +1269,7 @@ NO RESPONDAS EN JSON, RESPONDE SOLO EL TEXTO DEL MENSAJE.`;
 
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const result = await ai.models.generateContent({
-            model: "gemini-3-flash-preview",
+            model: "gemini-flash-latest",
             contents: prompt
           });
           const nudgeMsg = result.text.trim();
