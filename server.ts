@@ -142,6 +142,79 @@ async function getCustomerProfile(phone: string): Promise<any> {
 }
 
 /**
+ * Saves customer data
+ */
+async function saveCustomerProfile(phone: string, data: any): Promise<void> {
+  const cleanPhone = phone.replace('whatsapp:', '');
+  await setDoc(doc(db, "customers", cleanPhone), data, { merge: true });
+}
+
+function calcularScore(analisisIA: any, datosAdicionales: any): number {
+  let score = 0;
+  if (typeof analisisIA.probabilidad_compra === 'number') {
+    score += analisisIA.probabilidad_compra;
+  }
+  if (datosAdicionales.dio_direccion) score += 40;
+  if (datosAdicionales.pregunto_precio) score += 10;
+  if (datosAdicionales.pidio_envio) score += 30;
+  return Math.min(score, 100);
+}
+
+async function definirEtapa(score: number): Promise<string> {
+  if (score > 80) return "negociando";
+  if (score > 50) return "interesado";
+  return "nuevo";
+}
+
+async function cancelPendingFollowUps(phone: string) {
+  const cleanPhone = phone.replace('whatsapp:', '');
+  const q = query(
+    collection(db, "followups"),
+    where("phone", "==", cleanPhone),
+    where("status", "==", "pending")
+  );
+  try {
+    const snap = await getDocs(q);
+    if (!snap.empty) {
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => batch.update(d.ref, { status: "cancelled", updatedAt: serverTimestamp() }));
+      await batch.commit();
+      console.log(`[Follow-up] Cancelled ${snap.size} pending follow-ups for ${cleanPhone}`);
+    }
+  } catch (e) {
+    console.warn("[Follow-up] Error cancelling:", e);
+  }
+}
+
+async function scheduleFollowUp(phone: string, score: number, reason: string) {
+  const cleanPhone = phone.replace('whatsapp:', '');
+  
+  // Rule: Only one pending follow-up at a time
+  await cancelPendingFollowUps(phone);
+
+  let delayMs = 40 * 60 * 1000; // 40 mins
+  if (score > 80) delayMs = 10 * 60 * 1000; // AGRESIVO: 10 mins
+  else if (score > 50) delayMs = 20 * 60 * 1000; // AGRESIVO: 20 mins
+
+  const scheduledAt = new Date(Date.now() + delayMs);
+  
+  try {
+    await addDoc(collection(db, "followups"), {
+      phone: cleanPhone,
+      scheduledAt: scheduledAt.toISOString(),
+      status: "pending",
+      initialScore: score,
+      reason,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    console.log(`[Follow-up] Scheduled for ${cleanPhone} in ${delayMs / 60000} mins (Score: ${score})`);
+  } catch (e) {
+    console.error("[Follow-up] Error scheduling:", e);
+  }
+}
+
+/**
  * Downloads media from Twilio and prepares it for Gemini analysis
  */
 async function downloadMediaAsBase64(url: string): Promise<{ data: string, mimeType: string } | null> {
@@ -312,18 +385,21 @@ async function processInferenceOnServer(activityId: string, data: any) {
 
     const promptText = `CLIENTE: ${fromPhone}
 NOMBRE: ${customerProfile?.name || "Desconocido"}
+ETAPA CRM: ${customerProfile?.etapa || "nuevo"} (Probabilidad de compra: ${customerProfile?.score || 0}%)
+INTENCIÓN ANTERIOR: ${customerProfile?.intencion || "Ninguna"}
 HISTORIAL:
 ${history}
 
-MENSAJE ACTUAL: ${data.message || ""}${mediaParts.length > 0 ? " (El cliente envió archivos multimedia que adjunto)" : ""}
+MENSAJE ACTUAL: ${data.message || ""}${mediaParts.length > 0 ? " (El cliente envió archivos multimedia/audio que adjunto para tu análisis)" : ""}
 
 INVENTARIO ACTUAL:
 ${JSON.stringify(products)}
 
-RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
+RECUERDA: Analiza al cliente como un experto en ventas. Devuelve JSON. 
+ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urgencia, objeciones, nivel_interes y siguiente_mejor_accion, basado en si ha dado direccion, etc.`;
 
     let result;
-    const primaryModel = "gemini-2.5-flash";
+    const primaryModel = "gemini-3-flash-preview";
     const fallbackModel = "gemini-flash-latest";
 
     const contents = [
@@ -364,6 +440,29 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
     const jsonResponse = JSON.parse(result.text);
     console.log(`[Server AI] Respuesta generada para ${fromPhone} (Acción: ${jsonResponse.accion}):`, jsonResponse.mensaje);
 
+    // CRM / Scoring update
+    let profile = customerProfile || {};
+    profile.name = jsonResponse.datos_pedido?.nombre || profile.name || fromPhone;
+    profile.phone = profile.phone || fromPhone;
+    profile.intencion = jsonResponse.intencion || profile.intencion || "";
+    profile.producto_interes = jsonResponse.producto || profile.producto_interes || "";
+    profile.objeciones = jsonResponse.objeciones || "ninguna";
+    
+    const msgLower = (data.message || "").toLowerCase();
+    const score = calcularScore(jsonResponse, {
+      dio_direccion: msgLower.includes("cr") || msgLower.includes("#") || msgLower.includes("calle") || msgLower.includes("carrera") || !!jsonResponse.datos_pedido?.direccion,
+      pregunto_precio: msgLower.includes("precio") || msgLower.includes("cuanto") || msgLower.includes("costo") || msgLower.includes("vale"),
+      pidio_envio: msgLower.includes("envío") || msgLower.includes("envio") || msgLower.includes("llega") || msgLower.includes("domicilio")
+    });
+
+    profile.score = score;
+    profile.etapa = await definirEtapa(score);
+    profile.prioridad = score > 70 ? "alta" : "media";
+    profile.ultima_interaccion = serverTimestamp();
+    
+    // Save enriched CRM Data
+    await saveCustomerProfile(fromPhone, profile);
+
     // 3. Enviar respuesta por WhatsApp
     let mediaUrl = jsonResponse.imageUrl || undefined;
     await sendWhatsApp(data.from, jsonResponse.mensaje, mediaUrl, activityId, data.to);
@@ -382,8 +481,11 @@ RECUERDA: Mensajes cortos, estilo Paisa Jan Vanegas. Responde siempre en JSON.`;
         let finalPrice = jsonResponse.datos_pedido?.valor || 0;
         if (finalPrice <= 0 && jsonResponse.producto) {
           const checkProd = jsonResponse.producto.toLowerCase();
-          const match = products.find((p: any) => p.name.toLowerCase().includes(checkProd) || checkProd.includes(p.name.toLowerCase()));
-          if (match && match.price) finalPrice = match.price;
+          const match = products.find((p: any) => 
+            (p.name && p.name.toLowerCase().includes(checkProd)) || 
+            (p.name && checkProd.includes(p.name.toLowerCase()))
+          );
+          if (match && (match as any).price) finalPrice = (match as any).price;
         }
 
         const orderInfo = {
@@ -430,6 +532,12 @@ Jan respondió: "${jsonResponse.mensaje}"`;
             console.error("[Server AI] Error notificando asesoría:", e);
           }
       }
+    }
+
+    // 7. PROGRAMAR SEGUIMIENTO INTELIGENTE SI NO CERRÓ
+    if (jsonResponse.accion !== "confirmar_pedido" && score > 20) {
+      // Solo si el score es relevante (interesado de verdad)
+      await scheduleFollowUp(fromPhone, score, jsonResponse.intencion || "Interés general");
     }
 
   } catch (err: any) {
@@ -918,6 +1026,10 @@ async function startServer() {
     // LOG IMMEDIATELY
     try {
       const cleanFrom = from.replace('whatsapp:', '').trim();
+      
+      // CANCEL ANY PENDING FOLLOW-UP BECAUSE CLIENT RESPONDED
+      await cancelPendingFollowUps(from);
+
       const activityData = {
         from,
         to,
@@ -1093,8 +1205,106 @@ async function startServer() {
   }
 
   const server = app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[SERVER] Jan Vanegas Dashboard: http://localhost:${PORT}`);
+    console.log("[SERVER] Jan Vanegas Dashboard: http://localhost:3000");
   });
+
+  /**
+   * FOLLOW-UP ENGINE (individual per customer)
+   */
+  setInterval(async () => {
+    try {
+      const nowISO = new Date().toISOString();
+      const q = query(
+        collection(db, "followups"),
+        where("status", "==", "pending"),
+        where("scheduledAt", "<=", nowISO),
+        limit(5)
+      );
+      
+      const snap = await getDocs(q);
+      if (snap.empty) return;
+
+      console.log(`[Follow-up Engine] Processing ${snap.size} due follow-ups...`);
+      
+      for (const docSnap of snap.docs) {
+        const fu = docSnap.data();
+        const phone = fu.phone;
+        const cleanPhone = phone.replace('whatsapp:', '');
+        const formattedPhone = phone.includes(':') ? phone : `whatsapp:${phone}`;
+
+        // 1. Verify customer status (Double check they didn't respond)
+        // We do this by checking if the last activity was a 'bot' response and later than the follow-up creation
+        const lastActQ = query(
+          collection(db, "activities"),
+          where("from", "==", formattedPhone),
+          orderBy("timestamp", "desc"),
+          limit(1)
+        );
+        const lastActSnap = await getDocs(lastActQ);
+        
+        let shouldExecute = true;
+        if (!lastActSnap.empty) {
+          const lastMsgAt = lastActSnap.docs[0].data().timestamp?.toMillis?.() || 0;
+          const fuCreatedAt = fu.createdAt?.toMillis?.() || 0;
+          if (lastMsgAt > fuCreatedAt) {
+            console.log(`[Follow-up] Skipping ${phone}: Customer responded since scheduling.`);
+            shouldExecute = false;
+          }
+        }
+
+        if (shouldExecute) {
+          // 2. Generate nudge with IA
+          const profile = await getCustomerProfile(phone);
+          const history = await getCrmContext(formattedPhone, "default");
+          
+          const prompt = `CLIENTE: ${phone}
+ESTADO: ${profile?.etapa || "interesado"}
+SCORE: ${profile?.score || 0}
+INTENCION: ${fu.reason}
+HISTORIAL RECIENTE:
+${history}
+
+TAREA: El cliente dejó de responder hace unos minutos. Escribe un mensaje MUY CORTO, paisa, carismático y "echado pa' lante" para reactivarlo. NO seas pesado, sé como un parcero que quiere ayudar. Máximo 15 palabras.
+NO RESPONDAS EN JSON, RESPONDE SOLO EL TEXTO DEL MENSAJE.`;
+
+          const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+          const result = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt
+          });
+          const nudgeMsg = result.text.trim();
+
+          console.log(`[Follow-up] Sending nudge to ${phone}: ${nudgeMsg}`);
+          
+          // 3. Send
+          await sendWhatsApp(formattedPhone, nudgeMsg);
+          
+          // 4. Log as activity
+          await addDoc(collection(db, "activities"), {
+            from: TWILIO_FROM_NUMBER || "whatsapp:+14155238886",
+            to: formattedPhone,
+            recipient: formattedPhone,
+            message: "[Seguimiento Automático]",
+            response: nudgeMsg,
+            status: "respondido",
+            whatsappStatus: "sent",
+            senderType: 'bot',
+            timestamp: serverTimestamp(),
+            customerPhone: cleanPhone
+          });
+        }
+
+        // 5. Mark as executed (or cancelled if logic above decided)
+        await updateDoc(docSnap.ref, { 
+          status: shouldExecute ? "executed" : "cancelled", 
+          executedAt: serverTimestamp(),
+          updatedAt: serverTimestamp() 
+        });
+      }
+    } catch (e) {
+      console.error("[Follow-up Engine] Error:", e);
+    }
+  }, 60000); // Check every minute
 
   // Handle server errors (like port in use) gracefully
   server.on("error", (err: any) => {

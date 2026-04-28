@@ -111,6 +111,20 @@
         "lastInterventionBy": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
       }
+    },
+    "FollowUp": {
+      "title": "Follow Up",
+      "description": "Seguimiento individual programado para reactivar ventas.",
+      "type": "object",
+      "properties": {
+        "phone": { "type": "string" },
+        "scheduledAt": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["pending", "executed", "cancelled"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "initialScore": { "type": "number" },
+        "reason": { "type": "string" }
+      },
+      "required": ["phone", "scheduledAt", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -145,6 +159,10 @@
     "/conversations/{phone}": {
       "schema": "Conversation",
       "description": "Estado operativo del chat (Pausa IA, etc)."
+    },
+    "/followups/{followupId}": {
+      "schema": "FollowUp",
+      "description": "Cronómetros individuales de reactivación de ventas."
     }
   }
 }

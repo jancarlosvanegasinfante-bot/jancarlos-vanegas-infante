@@ -176,11 +176,11 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Catalog from "./components/Catalog";
 
 function JanAdmin() {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'orders' | 'inventory' | 'reports' | 'config' | 'recovery' | 'monitor'>('dashboard');
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
   const [webhookUrl, setWebhookUrl] = useState("");
   const [copied, setCopied] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
@@ -196,6 +196,7 @@ function JanAdmin() {
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [isClearing, setIsClearing] = useState(false);
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'crm' | 'orders' | 'inventory' | 'reports' | 'config' | 'recovery' | 'monitor'>('dashboard');
 
   // Close sidebar on navigation on mobile
   useEffect(() => {
@@ -237,6 +238,18 @@ function JanAdmin() {
         setActivities(docs);
       },
       (err) => console.error("[Firestore] Activity error:", err)
+    );
+    
+    // CRM
+    const qCustomers = collection(db, "customers");
+    const unsubCustomers = onSnapshot(qCustomers, 
+      (snapshot) => {
+        const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+        // local sort to avoid need of index for now because we might vary order fields
+        docs.sort((a: any, b: any) => (b.ultima_interaccion?.toMillis?.() || 0) - (a.ultima_interaccion?.toMillis?.() || 0));
+        setCustomers(docs);
+      },
+      (err) => console.error("[Firestore] Customers error:", err)
     );
 
     const qConversations = collection(db, "conversations");
@@ -469,6 +482,7 @@ function JanAdmin() {
 
         <nav className="flex-1 px-4 py-8 lg:py-0 space-y-2">
           <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<TrendingUp size={18} />} label="Dashboard" />
+          <NavItem active={activeTab === 'crm'} onClick={() => setActiveTab('crm')} icon={<User size={18} />} label="CRM / Pipeline" />
           <NavItem active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<History size={18} />} label="Reportes" />
           <NavItem active={activeTab === 'monitor'} onClick={() => setActiveTab('monitor')} icon={<Clock size={18} />} label="Monitor" />
           <NavItem active={activeTab === 'recovery'} onClick={() => setActiveTab('recovery')} icon={<Zap size={18} />} label="Recuperación" />
@@ -546,6 +560,7 @@ function JanAdmin() {
              <div className="w-[1px] h-6 bg-neutral-800 hidden md:block mx-2" />
              <h2 className="text-[9px] lg:text-xs font-black uppercase tracking-[0.2em] lg:tracking-[0.3em] text-neutral-400">
                {activeTab === 'dashboard' && 'Visión General del Negocio'}
+               {activeTab === 'crm' && 'CRM Pipeline de Clientes'}
                {activeTab === 'reports' && 'Reporte de Conversaciones'}
                {activeTab === 'monitor' && 'Monitor de Tiempo Real (Audit)'}
                {activeTab === 'recovery' && 'Activación de Ventas Abandonadas'}
@@ -598,6 +613,7 @@ function JanAdmin() {
            <AppErrorBoundary>
               <AnimatePresence mode="wait" initial={false}>
                  {activeTab === 'dashboard' && <Dashboard key="dash" orders={filteredOrders} products={products} activities={filteredActivities} onShowReports={() => setActiveTab('reports')} onShowRecovery={() => setActiveTab('recovery')} />}
+                 {activeTab === 'crm' && <CRMTab key="crm" customers={customers} selectedUser={selectedUser} onSelectUser={(phone: string) => { setSelectedUser(phone); setActiveTab('monitor'); }} />}
                  {activeTab === 'reports' && <ReportsTab key="reports"
                     activities={filteredActivities} 
                     conversations={conversations}
@@ -2469,6 +2485,111 @@ function RecoveryTab({ activities, onSelectUser }: { activities: Activity[], onS
               <p className="text-neutral-600 text-[10px] uppercase font-bold tracking-widest">¡Todos los clientes están atendidos!</p>
             </div>
           )}
+        </div>
+      </div>
+    </motion.div>
+  );
+}
+
+function CRMTab({ customers, selectedUser, onSelectUser }: { customers: any[], selectedUser: string | null, onSelectUser: (phone: string) => void, key?: string }) {
+  // Aggregate stats
+  const total = customers.length;
+  const inPipeline = customers.filter(c => c.etapa === 'negociando' || c.etapa === 'interesado').length;
+  const highPriority = customers.filter(c => c.prioridad === 'alta').length;
+
+  return (
+    <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+      {/* Top metrics */}
+      <div className="grid grid-cols-3 gap-4 mb-8">
+        <div className="bg-[#111] border border-neutral-800 p-6 rounded-2xl ring-1 ring-white/5">
+          <p className="text-[10px] uppercase font-black tracking-widest text-neutral-500 mb-2">Total Prospectos</p>
+           <p className="text-3xl font-mono text-white">{total}</p>
+        </div>
+        <div className="bg-[#111] border border-neutral-800 p-6 rounded-2xl ring-1 ring-white/5">
+          <p className="text-[10px] uppercase font-black tracking-widest text-neutral-500 mb-2">En Negociación</p>
+           <p className="text-3xl font-mono text-white">{inPipeline}</p>
+        </div>
+        <div className="bg-dark-accent/10 border border-dark-accent/20 p-6 rounded-2xl ring-1 ring-dark-accent/30">
+          <p className="text-[10px] uppercase font-black tracking-widest text-dark-accent/80 mb-2">Prioridad Alta (Score &gt; 70)</p>
+           <p className="text-3xl font-mono text-dark-accent">{highPriority}</p>
+        </div>
+      </div>
+
+      <div className="bg-[#111] border border-neutral-800 rounded-2xl overflow-hidden ring-1 ring-white/5">
+        <div className="p-6 border-b border-neutral-800 flex justify-between items-center">
+            <h3 className="text-white text-[10px] font-black uppercase tracking-widest flex items-center gap-2"><User size={14} /> Pipeline Activo</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[700px]">
+            <thead>
+              <tr className="border-b border-neutral-800 bg-neutral-900/30">
+                <th className="p-4 text-[10px] uppercase tracking-widest font-bold text-neutral-500 w-6"></th>
+                <th className="p-4 text-[10px] uppercase tracking-widest font-bold text-neutral-500">Cliente</th>
+                <th className="p-4 text-[10px] uppercase tracking-widest font-bold text-neutral-500">Etapa / Score</th>
+                <th className="p-4 text-[10px] uppercase tracking-widest font-bold text-neutral-500">Intención / Producto</th>
+                 <th className="p-4 text-[10px] uppercase tracking-widest font-bold text-neutral-500">Objeciones</th>
+                <th className="p-4 text-[10px] uppercase tracking-widest font-bold text-neutral-500 text-right">Interacción</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-800">
+              {customers.map(c => {
+                const getEtapaColor = (etapa: string) => {
+                  switch(etapa) {
+                    case 'negociando': return 'from-dark-accent/20 text-dark-accent border-dark-accent/30';
+                    case 'interesado': return 'from-blue-500/20 text-blue-400 border-blue-500/30';
+                    default: return 'from-neutral-500/20 text-neutral-400 border-neutral-500/30';
+                  }
+                };
+                
+                const timeStr = c.ultima_interaccion?.toMillis ? new Date(c.ultima_interaccion.toMillis()).toLocaleString() : 'N/A';
+
+                return (
+                  <tr key={c.id} className="hover:bg-neutral-900/50 transition-colors group cursor-pointer" onClick={() => onSelectUser(c.id)}>
+                    <td className="p-4 text-neutral-400">
+                      <div className="w-8 h-8 rounded-full bg-neutral-800 flex justify-center items-center">
+                        <User size={14} />
+                      </div>
+                    </td>
+                    <td className="p-4">
+                      <div className="font-bold text-sm text-white">{c.name || c.id}</div>
+                      <div className="text-[10px] text-neutral-500">{c.phone || c.id}</div>
+                    </td>
+                    <td className="p-4">
+                      <span className={cn("px-2 py-1 bg-gradient-to-r text-[9px] uppercase tracking-widest font-black rounded-lg border", getEtapaColor(c.etapa))}>
+                        {c.etapa || 'nuevo'}
+                      </span>
+                      <div className="mt-2 flex items-center gap-2">
+                        <div className="h-1.5 w-24 bg-neutral-800 rounded-full overflow-hidden">
+                          <div className={cn("h-full", (c.score || 0) > 70 ? "bg-dark-accent" : "bg-neutral-500")} style={{ width: `${Math.min(c.score || 0, 100)}%` }}></div>
+                        </div>
+                        <span className="text-[10px] text-white font-mono">{Math.floor(c.score || 0)}</span>
+                      </div>
+                    </td>
+                     <td className="p-4 max-w-[200px]">
+                      <div className="font-bold text-xs text-neutral-300 truncate">{c.intencion || 'Sin detectar'}</div>
+                      <div className="text-[10px] text-neutral-500 truncate">{c.producto_interes || 'Gral'}</div>
+                    </td>
+                     <td className="p-4 max-w-[150px]">
+                        <p className="text-[10px] text-neutral-400 truncate">{c.objeciones || 'ninguna'}</p>
+                     </td>
+                    <td className="p-4 text-right">
+                      <div className="text-[10px] font-mono text-neutral-500">{timeStr}</div>
+                      <div className="text-[9px] text-neutral-600 mt-1 uppercase font-bold tracking-widest group-hover:text-dark-accent transition-colors">
+                        Ver Chat →
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+              {customers.length === 0 && (
+                <tr>
+                   <td colSpan={6} className="p-8 text-center text-neutral-500 text-xs font-bold uppercase tracking-widest">
+                     No hay prospectos en el CRM todavía.
+                   </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
     </motion.div>
