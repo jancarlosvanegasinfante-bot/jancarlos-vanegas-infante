@@ -396,6 +396,7 @@ INVENTARIO ACTUAL:
 ${JSON.stringify(products)}
 
 RECUERDA: Analiza al cliente como un experto en ventas. Devuelve JSON. 
+IMPORTANTE: Sé extremadamente breve y directo. Evita explicaciones largas. El cliente quiere comprar rápido.
 ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urgencia, objeciones, nivel_interes y siguiente_mejor_accion, basado en si ha dado direccion, etc.`;
 
     let result;
