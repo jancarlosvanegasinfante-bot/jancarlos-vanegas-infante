@@ -596,8 +596,8 @@ function JanAdmin() {
             <div className="flex items-center gap-3">
               <AlertTriangle className="animate-bounce" size={18} />
               <div>
-                <p className="text-[10px] font-black uppercase tracking-widest leading-none">⚠️ SISTEMA SUSPENDIDO: Límite de WhatsApp alcanzado</p>
-                <p className="text-[9px] font-bold opacity-80 mt-1 uppercase">Twilio Trial restringe a 50 mensajes diarios. Se reseteará mañana automáticamente.</p>
+                <p className="text-[10px] font-black uppercase tracking-widest leading-none">SISTEMA ACTIVO: Plan Profesional</p>
+                <p className="text-[9px] font-bold opacity-80 mt-1 uppercase">Cuotas de base de datos ampliadas. El sistema operará sin interrupciones por límites de lectura/escritura.</p>
               </div>
             </div>
             <button 

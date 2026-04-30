@@ -616,14 +616,16 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
   const finalTo = normalizePhone(to);
   const finalFrom = normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886");
   
+  if (finalTo === finalFrom) {
+    console.warn(`[WhatsApp Block] Attempted to send message to itself: ${finalTo}. Aborting to prevent infinite loop.`);
+    return;
+  }
+
   console.log(`[Twilio Debug] Final Numbers: FROM=${finalFrom} TO=${finalTo}`);
 
-  // Check Twilio limits early
-  const canSend = await checkTwilioStatus();
-  if (!canSend) {
-    console.error("[Twilio Limit] Blocked: Trial 50-message limit reached.");
-    throw new Error("TWILIO_LIMIT_REACHED: Twilio 50-message trial limit exceeded.");
-  }
+  // Blaze Plan: No arbitrary blocking. Twilio will report its own status.
+  // const canSend = await checkTwilioStatus();
+  // if (!canSend) { ... }
 
   // Ensure mediaUrl is absolute
   if (mediaUrl && mediaUrl.startsWith("/")) {
@@ -686,7 +688,7 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
       }
     }
     
-    if (err.message.includes("limit") || err.message.includes("50")) {
+    if (err.message.includes("limit") && !process.env.VITE_BLAZE_ACTIVE) {
       await updateTwilioStatus(true, err.message);
     }
     throw err;
@@ -1231,6 +1233,15 @@ async function startServer() {
       for (const docSnap of snap.docs) {
         const fu = docSnap.data();
         const phone = fu.phone;
+        
+        // PRE-MARK as 'processing' to prevent infinite loops if Quota Exceeded later
+        try {
+          await updateDoc(docSnap.ref, { status: "processing", updatedAt: serverTimestamp() });
+        } catch (e: any) {
+          console.error(`[Follow-up] Failed to lock doc (Quota?). Skipping ${phone}`, e.message);
+          continue; 
+        }
+
         const cleanPhone = phone.replace('whatsapp:', '');
         const formattedPhone = phone.includes(':') ? phone : `whatsapp:${phone}`;
 
