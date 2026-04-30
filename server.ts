@@ -892,13 +892,8 @@ async function startServer() {
   });
 
   // Forced Sync on Boot (Self-Correction for Sincronizar button issues)
-  console.log("[Jan Sync] Ejecutando sincronización forzada de arranque...");
-  seedDatabase(true).catch(e => console.error("[Jan Sync] Error en arranque:", e));
-
-  // Initialize DB
-  seedDatabase().catch(err => {
-    console.warn("[DB] No se pudo sembrar el catálogo (posiblemente por permisos):", err.message);
-  });
+  // SEED ONLY IF EMPTY to save quota
+  seedDatabase().catch(e => console.error("[Jan Sync] Error en arranque:", e));
 
   // Admin Config Endpoints
   app.post("/api/admin/upload", express.raw({ type: "*/*", limit: "10mb" }), async (req, res) => {
@@ -967,11 +962,16 @@ async function startServer() {
       }
 
       if (mappedStatus) {
-        await updateDoc(doc(db, "activities", actId), { 
-          whatsappStatus: mappedStatus,
-          statusUpdateAt: serverTimestamp()
-        });
-        console.log(`[Twilio Status] Successfully updated Activity ${actId} to ${mappedStatus}`);
+        const existingStatus = snap.data()?.whatsappStatus;
+        if (existingStatus !== mappedStatus) {
+          await updateDoc(doc(db, "activities", actId), { 
+            whatsappStatus: mappedStatus,
+            statusUpdateAt: serverTimestamp()
+          });
+          console.log(`[Twilio Status] Successfully updated Activity ${actId} to ${mappedStatus}`);
+        } else {
+          console.log(`[Twilio Status] Status for Activity ${actId} is already ${mappedStatus}. Skipping update.`);
+        }
       }
     } catch (e: any) {
         console.error("[Twilio Status][Error] Update failed:", e.message);
@@ -998,10 +998,11 @@ async function startServer() {
     }
 
     // IGNORE MESSAGES FROM SELF (TWILIO ECHOES OR LOOPBACKS)
-    const normalizedFrom = from.toLowerCase();
-    const normalizedBot = (TWILIO_FROM_NUMBER || "").toLowerCase();
-    if (normalizedFrom === normalizedBot || normalizedFrom === `whatsapp:${normalizedBot}`) {
-      console.log("[WhatsApp Webhook] Ignoring message from bot's own number.");
+    const normBot = normalizePhone(TWILIO_FROM_NUMBER || "+14155238886");
+    const normFrom = normalizePhone(from);
+
+    if (normFrom === normBot) {
+      console.log(`[WhatsApp Webhook] Ignoring loopback message from bot (${normFrom})`);
       return res.status(200).send("");
     }
 
