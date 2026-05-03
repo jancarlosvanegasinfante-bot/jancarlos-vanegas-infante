@@ -26,7 +26,6 @@ import {
   serverTimestamp,
   updateDoc
 } from "firebase/firestore";
-
 import sgMail from '@sendgrid/mail';
 import { 
   JAN_SYSTEM_INSTRUCTION, 
@@ -99,11 +98,9 @@ async function getStoreByPhone(phone: string): Promise<StoreConfig> {
   
   if (!snap.empty) {
     const data = snap.docs[0].data();
-    console.log(`[Store] Found config for ${phone}: ${data.name}`);
     return { id: snap.docs[0].id, ...data } as StoreConfig;
   }
   
-  console.warn(`[Store] NO CONFIG FOUND for phone: ${phone} in Firebase: ${firebaseConfig.projectId}. Using legacy default.`);
   // Default store for legacy support
   return {
     id: "default",
@@ -348,17 +345,6 @@ async function seedDatabase(force = false, customCatalog?: any) {
 // Tools are imported from janAgent.ts
 
 async function processInferenceOnServer(activityId: string, data: any) {
-  // Optimization: Early check to avoid duplicate processing
-  try {
-    const freshDoc = await getDoc(doc(db, "activities", activityId));
-    if (freshDoc.exists() && (freshDoc.data().status === "procesando" || freshDoc.data().status === "respondido")) {
-      console.log(`[Server AI] Activity ${activityId} already being processed or finished. Skipping.`);
-      return;
-    }
-  } catch (e) {
-    console.warn(`[Server AI] Could not check status for ${activityId}, proceeding anyway.`);
-  }
-
   const API_KEY = GEMINI_API_KEY;
   if (!API_KEY) {
     console.error("[Server AI] Faltan claves de Gemini en el servidor.");
@@ -637,9 +623,12 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
 
   console.log(`[Twilio Debug] Final Numbers: FROM=${finalFrom} TO=${finalTo}`);
 
-  // Blaze Plan: No arbitrary blocking. Twilio will report its own status.
-  // const canSend = await checkTwilioStatus();
-  // if (!canSend) { ... }
+  // Check Twilio limits early
+  const canSend = await checkTwilioStatus();
+  if (!canSend) {
+    console.error("[Twilio Limit] Blocked: Trial 50-message limit reached.");
+    throw new Error("TWILIO_LIMIT_REACHED: Twilio 50-message trial limit exceeded.");
+  }
 
   // Ensure mediaUrl is absolute
   if (mediaUrl && mediaUrl.startsWith("/")) {
@@ -702,7 +691,7 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
       }
     }
     
-    if (err.message.includes("limit") && !process.env.VITE_BLAZE_ACTIVE) {
+    if (err.message.includes("limit") || err.message.includes("50")) {
       await updateTwilioStatus(true, err.message);
     }
     throw err;

@@ -1,22 +1,27 @@
-# Security Specification - Jan Shop
+# Security Specification - Jan Vanegas Sales App
 
-## 1. Data Invariants
-- **Products**: Must have `name` (string, max 100 chars), `price` (number, positive), `stock` (number, min 0).
-- **Orders**: Must link to a `productId` and have `customerPhone` matching the creator if not admin.
-- **Activities**: Immutable log entries once written. `from` and `to` are required.
-- **Customers**: PII (phone, name) restricted to self-read or admin-read.
-- **System Config**: Only modifiable by system/admin.
+## Data Invariants
+1. A Product must have a name, price, and stock. Stock cannot be negative.
+2. An Order must have a customer name, phone, address, and city.
+3. An Order must reference a valid productId.
+4. Activity logs must have a 'from' number and a status from the allowed enum.
+5. Only the designated admin (Jan) can read orders and delete products.
+6. The bot (server-side) is responsible for creating orders and updating stock, but since we are using the client-side SDK for simplicity in this demo environment, we allow public creation/update with strict schema validation.
 
-## 2. The Dirty Dozen Payloads
-1. **Negative Stock**: `{ "stock": -5 }` on `Product`.
-2. **Price Spoofing**: `{ "totalPrice": 0.01 }` on `Order`.
-3. **Identity Theft**: Creating an order with `customerPhone: "+1234567890"` when authenticated as `+9999999999`.
-4. **Denial of Wallet**: Sending a 1MB string as a message in `Activity`.
-5. **PII Scraping**: List query on `customers` without filter.
-6. **State Escalation**: Updating `Order` status to `entregado` by customer.
-7. **Bypassing Rules**: Using `.` in document IDs to traverse paths (guarded by `isValidId`).
-8. **Time Travel**: Setting `createdAt` to a future date.
-9. **Admin Spoofing**: Setting `role: "admin"` in user profile.
-10. **Unauthorized Follow-up**: Deleting someone else's `FollowUp`.
-11. **Shadow Fields**: Adding `isVerified: true` to a `Store` document.
-12. **Malicious IDs**: Creating a product with ID `../../../etc/passwd`.
+## The "Dirty Dozen" Payloads (Denial Tests)
+
+1. **Identity Spoofing (Orders)**: Try to create an order as an admin by setting a fake admin flag if it existed.
+2. **Identity Spoofing (Activity)**: Try to modify an activity log status to 'respondido' without being the bot logic.
+3. **State Shortcutting**: Try to update an order status directly from 'pendiente' to 'entregado' without passing through 'despachado' (if we had strict transitions, but here we'll at least protect against unauthorized updates).
+4. **Resource Poisoning (Product ID)**: Create a product with a 2MB string as ID.
+5. **Resource Poisoning (Long Strings)**: Create an order with a 100KB customer name.
+6. **Price Manipulation**: Create an order with a `totalPrice` of 0 for a premium product.
+7. **Stock Hijacking**: Update product stock to a negative number.
+8. **Unauthorized Read**: Try to list all orders as an unauthenticated user.
+9. **Unauthorized Delete**: Try to delete a product as an unauthenticated user.
+10. **Schema Break**: Create a product missing the 'price' field.
+11. **Type Mismatch**: Create an order where 'quantity' is a string.
+12. **PII Leak**: Try to read the `orders` collection without being the admin.
+
+## Test Runner (Logic Verification)
+See `firestore.rules.test.ts` (conceptual).
