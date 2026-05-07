@@ -443,19 +443,14 @@ async function processInferenceOnServer(activityId: string, data: any) {
 
     // Prepare multimedial parts if any
     const mediaParts: any[] = [];
-    const numMedia = parseInt(data.NumMedia || "0");
-    for (let i = 0; i < numMedia; i++) {
-      const mediaUrl = data[`MediaUrl${i}`];
-      if (mediaUrl) {
-        const media = await downloadMediaAsBase64(mediaUrl);
-        if (media) {
-          mediaParts.push({
-            inlineData: {
-              data: media.data,
-              mimeType: media.mimeType
-            }
-          });
-        }
+    if (data.mediaItems && Array.isArray(data.mediaItems)) {
+      for (const item of data.mediaItems) {
+        mediaParts.push({
+          inlineData: {
+            data: item.data,
+            mimeType: item.mimeType
+          }
+        });
       }
     }
 
@@ -1138,10 +1133,30 @@ async function startServer() {
 
     // EXRACT MEDIA IF ANY
     let finalMessage = messageBody;
+    const mediaItems: { data: string, mimeType: string }[] = [];
     if (numMedia > 0) {
       for (let i = 0; i < numMedia; i++) {
         const mUrl = req.body[`MediaUrl${i}`];
-        finalMessage += ` [Media: ${mUrl}]`;
+        try {
+          const mediaItem = await downloadMediaAsBase64(mUrl);
+          if (mediaItem) {
+            mediaItems.push(mediaItem);
+            const mediaId = Math.random().toString(36).substring(7) + Date.now().toString(36);
+            mediaCache.set(mediaId, {
+              data: Buffer.from(mediaItem.data, 'base64'),
+              mimeType: mediaItem.mimeType
+            });
+            const extension = mediaItem.mimeType.includes('audio') ? '.ogg' : (mediaItem.mimeType.includes('png') ? '.png' : '.jpg');
+            let baseUrl = currentAppUrl || process.env.APP_URL || `https://${req.headers.host}`;
+            const proxiedUrl = `${baseUrl.replace(/\/$/, '')}/api/media/${mediaId}${extension}`;
+            finalMessage += ` [Media (Audio/Imagen): ${proxiedUrl}]`;
+          } else {
+             finalMessage += ` [Media original Twilio: ${mUrl}]`;
+          }
+        } catch (e) {
+          console.error(`[Webhook Media] Could not cache media ${mUrl}`, e);
+          finalMessage += ` [Media: ${mUrl}]`;
+        }
       }
     }
 
@@ -1200,7 +1215,7 @@ async function startServer() {
       console.log(`[Activity] Registered: ${activityRef.id}. Bot receiving: ${to}`);
 
       // TRIGGER SERVER-SIDE INFERENCE IMMEDIATELY
-      processInferenceOnServer(activityRef.id, activityData).catch(e => {
+      processInferenceOnServer(activityRef.id, { ...activityData, mediaItems, NumMedia: numMedia }).catch(e => {
         console.error(`[Server Inference] Fatal error during async execution:`, e.message);
       });
 
