@@ -1102,7 +1102,10 @@ async function startServer() {
     }
 
     // IGNORE STATUS CALLBACKS ON INCOMING WEBHOOK (prevents infinite loops if misconfigured in Twilio)
-    if (req.body?.MessageStatus || req.body?.SmsStatus) {
+    // Twilio includes SmsStatus: 'received' for incoming messages, so we check for other statuses.
+    const isStatusCallback = (req.body?.MessageStatus || (req.body?.SmsStatus && req.body.SmsStatus !== "received")) && !req.body?.Body;
+    
+    if (isStatusCallback) {
        console.log(`[WhatsApp Webhook] Received status callback on incoming webhook for ${from}. Ignoring.`);
        return res.status(200).send("");
     }
