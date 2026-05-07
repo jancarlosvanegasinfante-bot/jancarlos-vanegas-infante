@@ -692,6 +692,7 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
 
   // Derive base URL for status callbacks
   const appUrl = currentAppUrl || process.env.APP_URL || "";
+  console.log(`[WhatsApp Send] Preparing message to ${to}. currentAppUrl: ${currentAppUrl}, APP_URL env: ${process.env.APP_URL}. Selected appUrl: ${appUrl}`);
   
   const finalTo = normalizePhone(to);
   const finalFrom = normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886");
@@ -1018,7 +1019,7 @@ async function startServer() {
 
   app.get("/api/public/config", (req, res) => {
     res.json({
-      whatsappNumber: (process.env.TWILIO_FROM_NUMBER || "14155238886").replace(/\D/g, '')
+      whatsappNumber: process.env.TWILIO_FROM_NUMBER ? process.env.TWILIO_FROM_NUMBER.replace(/\D/g, '') : null
     });
   });
 
@@ -1039,13 +1040,15 @@ async function startServer() {
       }
 
       const { activityId } = req.query as { activityId: string };
-      // Normalizing Twilio params (they can be in body or query depending on Twilio config)
-      const status = req.body.MessageStatus || req.body.SmsStatus || req.query.MessageStatus;
-      const actId = activityId || req.body.activityId;
+    // Normalizing Twilio params (they can be in body or query depending on Twilio config)
+    const status = req.body.MessageStatus || req.body.SmsStatus || req.query.MessageStatus;
+    const actId = activityId || req.body.activityId;
+    const errorCode = req.body.ErrorCode || req.query.ErrorCode;
+    const errorMsg = req.body.ErrorMessage || req.query.ErrorMessage;
 
-      console.log(`[Twilio Status] Event: ${status} for Activity: ${actId}`);
+    console.log(`[Twilio Status] Event: ${status} for Activity: ${actId}. Error: ${errorCode || 'None'} - ${errorMsg || 'No msg'}`);
 
-      if (!actId) return res.sendStatus(200);
+    if (!actId || actId === "undefined") return res.sendStatus(200);
 
     try {
       const snap = await getDoc(doc(db, "activities", actId));
@@ -1082,7 +1085,11 @@ async function startServer() {
 
   // Twilio Webhook
   app.post("/api/webhook/whatsapp", async (req, res) => {
+    console.log(">>> [WhatsApp Webhook] ATTEMPTING HANDLER <<<");
+    console.log(">>> Headers:", JSON.stringify(req.headers));
+    
     if (checkGlobalQuota()) {
+      console.warn(">>> [WhatsApp Webhook] REJECTED BY QUOTA <<<");
       return res.status(200).send(""); // Early exit
     }
 
