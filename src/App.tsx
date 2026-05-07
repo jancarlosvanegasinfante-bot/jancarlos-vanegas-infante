@@ -741,24 +741,15 @@ function AIProcessor({ user }: { user: FirebaseUser }) {
       if (!GEMINI_API_KEY) throw new Error("No Gemini API Key");
 
       const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-      // Using the exact requested models by user
-      const primaryModel = "gemini-2.5-flash"; 
-      const fallbackModel = "gemini-flash-latest";
+      // Using 'gemini-3-flash-preview' for better capacity and performance
+      const model = "gemini-3-flash-preview"; 
 
       const generateWithRetry = async (params: any, retries = 5) => {
         for (let i = 0; i < retries; i++) {
           try {
-            return await ai.models.generateContent({ ...params, model: primaryModel });
+            return await ai.models.generateContent(params);
           } catch (err: any) {
             const errStr = err.message || JSON.stringify(err) || String(err);
-            console.warn(`[Client AI] Intent ${i+1} failed with ${primaryModel}:`, errStr);
-            try {
-               console.log(`[Client AI] Trying fallback model: ${fallbackModel}`);
-               return await ai.models.generateContent({ ...params, model: fallbackModel });
-            } catch (fallbackErr: any) {
-               console.warn(`[Client AI] Fallback failed:`, fallbackErr.message);
-               // fallthrough to the retry logic for transient errors
-            }
             const isTransient = 
               errStr.includes("503") || 
               errStr.includes("429") || 
