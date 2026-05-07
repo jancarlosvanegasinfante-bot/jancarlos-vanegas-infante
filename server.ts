@@ -28,7 +28,7 @@ import {
 } from "firebase/firestore";
 import sgMail from '@sendgrid/mail';
 import { 
-  getSystemInstruction, 
+  JAN_SYSTEM_INSTRUCTION, 
   JAN_RESPONSE_SCHEMA, 
   captureOrderTool, 
   checkInventoryTool, 
@@ -94,7 +94,7 @@ const twilioClient = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN ? twilio(TWILIO_ACC
 
 // Global State
 const mediaCache = new Map<string, { data: Buffer, mimeType: string }>();
-const userRateLimitCache = new Map<string, { lastTime: number, msgCount: number }>();
+const userRateLimitCache = new Map<string, number>();
 let currentAppUrl = process.env.APP_URL || "";
 
 function detectCurrentUrl(req: express.Request) {
@@ -197,12 +197,11 @@ async function definirEtapa(score: number): Promise<string> {
   return "nuevo";
 }
 
-async function cancelPendingFollowUps(phone: string, storeId: string = "default") {
+async function cancelPendingFollowUps(phone: string) {
   const cleanPhone = phone.replace('whatsapp:', '');
   const q = query(
     collection(db, "followups"),
     where("phone", "==", cleanPhone),
-    where("storeId", "==", storeId),
     where("status", "==", "pending")
   );
   try {
@@ -218,11 +217,11 @@ async function cancelPendingFollowUps(phone: string, storeId: string = "default"
   }
 }
 
-async function scheduleFollowUp(phone: string, score: number, reason: string, storeId: string = "default") {
+async function scheduleFollowUp(phone: string, score: number, reason: string) {
   const cleanPhone = phone.replace('whatsapp:', '');
   
   // Rule: Only one pending follow-up at a time
-  await cancelPendingFollowUps(phone, storeId);
+  await cancelPendingFollowUps(phone);
 
   let delayMs = 40 * 60 * 1000; // 40 mins
   if (score > 80) delayMs = 10 * 60 * 1000; // AGRESIVO: 10 mins
@@ -233,7 +232,6 @@ async function scheduleFollowUp(phone: string, score: number, reason: string, st
   try {
     await addDoc(collection(db, "followups"), {
       phone: cleanPhone,
-      storeId: storeId,
       scheduledAt: scheduledAt.toISOString(),
       status: "pending",
       initialScore: score,
@@ -284,45 +282,25 @@ async function downloadMediaAsBase64(url: string): Promise<{ data: string, mimeT
  */
 function canReply(userId: string): boolean {
   const now = Date.now();
-  const record = userRateLimitCache.get(userId) || { lastTime: 0, msgCount: 0 };
-  
-  // If last message was more than 10 minutes ago, reset count
-  if (now - record.lastTime > 10 * 60 * 1000) {
-    record.msgCount = 0;
-  }
-  
-  if (now - record.lastTime < 3000) {
-    record.lastTime = now;
-    userRateLimitCache.set(userId, record);
-    return false; // 3 seconds cooldown
-  }
-  
-  record.msgCount++;
-  record.lastTime = now;
-  userRateLimitCache.set(userId, record);
-  
-  // Hard limit: 30 messages per 10 minutes (prevents bot loops)
-  if (record.msgCount > 30) {
-    console.warn(`[ANTI-BOT] Bloqueado ${userId} por más de 30 mensajes en 10 mins.`);
-    return false;
-  }
-
+  const lastTime = userRateLimitCache.get(userId) || 0;
+  if (now - lastTime < 3000) return false; // 3 seconds cooldown
+  userRateLimitCache.set(userId, now);
   return true;
 }
 
 /**
  * Seeding Function: Populates the products collection using Admin SDK to bypass rules
  */
-async function seedDatabase(force = false, customCatalog?: any, storeId: string = "default") {
+async function seedDatabase(force = false, customCatalog?: any) {
   const productsColl = collection(db, "products");
   
   if (!force) {
-    const qCount = query(productsColl, where("storeId", "==", storeId), limit(1));
+    const qCount = query(productsColl, limit(1));
     const snapshot = await getDocs(qCount);
     if (!snapshot.empty) return;
   }
 
-  console.log(`[DB] Iniciando reseteo de catálogo para store: ${storeId}...`);
+  console.log("[DB] Iniciando reseteo de catálogo con Client SDK (rules open)...");
 
   let catalogData: any = customCatalog;
   
@@ -348,10 +326,9 @@ async function seedDatabase(force = false, customCatalog?: any, storeId: string 
 
   if (force) {
     try {
-      const qDelete = query(productsColl, where("storeId", "==", storeId));
-      const snap = await getDocs(qDelete);
+      const snap = await getDocs(productsColl);
       if (!snap.empty) {
-        console.log(`[DB] Clearing ${snap.size} old products before re-seeding para ${storeId}...`);
+        console.log(`[DB] Clearing ${snap.size} old products before re-seeding...`);
         const batch = writeBatch(db);
         snap.docs.forEach(d => batch.delete(d.ref));
         await batch.commit();
@@ -362,15 +339,12 @@ async function seedDatabase(force = false, customCatalog?: any, storeId: string 
   }
 
   try {
-    console.log(`[DB] Inserting ${catalogData.products.length} products para ${storeId}...`);
+    console.log(`[DB] Inserting ${catalogData.products.length} products...`);
     const batch = writeBatch(db);
     for (const product of catalogData.products) {
-      // Must generate unique id combining storeId and product id to avoid overwriting other stores
-      const finalDocId = `${storeId}_${product.id}`;
-      const docRef = doc(db, "products", finalDocId);
+      const docRef = doc(db, "products", product.id);
       batch.set(docRef, {
         ...product,
-        storeId,
         stock: product.stock !== undefined ? product.stock : 20,
         updatedAt: serverTimestamp()
       });
@@ -414,31 +388,12 @@ async function processInferenceOnServer(activityId: string, data: any) {
       status: "procesando",
       processingAt: serverTimestamp()
     });
-    
-    const assignedStoreId = data.storeId || "default";
-
-    // Lookup Store Config
-    let storeConfig: any = {};
-    const storeSnap = await getDoc(doc(db, "stores", assignedStoreId));
-    if (storeSnap.exists()) {
-      storeConfig = storeSnap.data();
-    }
 
     const ai = new GoogleGenAI({ apiKey: API_KEY });
     const fromPhone = data.from.replace("whatsapp:", "").trim();
-    // Unique customer profile per store to prevent mixing CRM states
-    const customerProfileId = `${assignedStoreId}_${fromPhone}`;
-    const cxSnap = await getDoc(doc(db, "customers", customerProfileId));
-    const customerProfile = cxSnap.exists() ? cxSnap.data() : null;
-
-    const history = await getCrmContext(data.from, assignedStoreId);
-    
-    // Get products specific to this store, or fallback to default
-    const qProd = query(collection(db, "products"), where("storeId", "==", assignedStoreId));
-    let prodSnap = await getDocs(qProd);
-    if (prodSnap.empty && assignedStoreId === "default") {
-        prodSnap = await getDocs(collection(db, "products"));
-    }
+    const customerProfile = await getCustomerProfile(data.from);
+    const history = await getCrmContext(data.from, "default");
+    const prodSnap = await getDocs(collection(db, "products"));
     const products = prodSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
     // Prepare multimedial parts if any
@@ -495,7 +450,7 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
         model: primaryModel,
         contents: contents,
         config: {
-          systemInstruction: getSystemInstruction(storeConfig),
+          systemInstruction: JAN_SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
           responseSchema: JAN_RESPONSE_SCHEMA
         }
@@ -506,7 +461,7 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
         model: fallbackModel,
         contents: contents,
         config: {
-          systemInstruction: getSystemInstruction(storeConfig),
+          systemInstruction: JAN_SYSTEM_INSTRUCTION,
           responseMimeType: "application/json",
           responseSchema: JAN_RESPONSE_SCHEMA
         }
@@ -537,8 +492,8 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
     profile.prioridad = score > 70 ? "alta" : "media";
     profile.ultima_interaccion = serverTimestamp();
     
-    // Save enriched CRM Data per store
-    await setDoc(doc(db, "customers", customerProfileId), profile, { merge: true });
+    // Save enriched CRM Data
+    await saveCustomerProfile(fromPhone, profile);
 
     // 3. Enviar respuesta por WhatsApp
     let mediaUrl = jsonResponse.imageUrl || undefined;
@@ -566,7 +521,6 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
         }
 
         const orderInfo = {
-          storeId: assignedStoreId,
           customerName: jsonResponse.datos_pedido?.nombre || customerProfile?.name || fromPhone,
           customerPhone: jsonResponse.datos_pedido?.telefono || fromPhone,
           productName: jsonResponse.producto || "No especificado",
@@ -615,7 +569,7 @@ Jan respondió: "${jsonResponse.mensaje}"`;
     // 7. PROGRAMAR SEGUIMIENTO INTELIGENTE SI NO CERRÓ
     if (jsonResponse.accion !== "confirmar_pedido" && score > 20) {
       // Solo si el score es relevante (interesado de verdad)
-      await scheduleFollowUp(fromPhone, score, jsonResponse.intencion || "Interés general", assignedStoreId);
+      await scheduleFollowUp(fromPhone, score, jsonResponse.intencion || "Interés general");
     }
 
   } catch (err: any) {
@@ -692,7 +646,6 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
 
   // Derive base URL for status callbacks
   const appUrl = currentAppUrl || process.env.APP_URL || "";
-  console.log(`[WhatsApp Send] Preparing message to ${to}. currentAppUrl: ${currentAppUrl}, APP_URL env: ${process.env.APP_URL}. Selected appUrl: ${appUrl}`);
   
   const finalTo = normalizePhone(to);
   const finalFrom = normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886");
@@ -922,15 +875,10 @@ async function startServer() {
   // Admin Seed Trigger
   app.post("/api/admin/clear-transactions", async (req, res) => {
     try {
-      const { storeId } = req.body || {};
-      const targetStore = storeId || "default";
-      console.log(`[Admin Clear] Deleting all orders and activities for store ${targetStore}...`);
+      console.log("[Admin Clear] Deleting all orders and activities...");
       
-      const qOrders = query(collection(db, "orders"), where("storeId", "==", targetStore));
-      const qActivities = query(collection(db, "activities"), where("storeId", "==", targetStore));
-      
-      const ordersSnap = await getDocs(qOrders);
-      const activitiesSnap = await getDocs(qActivities);
+      const ordersSnap = await getDocs(collection(db, "orders"));
+      const activitiesSnap = await getDocs(collection(db, "activities"));
       
       const batch = writeBatch(db);
       ordersSnap.docs.forEach(doc => batch.delete(doc.ref));
@@ -954,8 +902,8 @@ async function startServer() {
 
   app.post("/api/admin/seed", async (req, res) => {
     try {
-      const { catalog, storeId } = req.body || {};
-      await seedDatabase(true, catalog, storeId || "default");
+      const { catalog } = req.body || {};
+      await seedDatabase(true, catalog);
       res.json({ success: true, message: "Catálogo actualizado con éxito (Admin)." });
     } catch (e: any) {
       console.error("[API Admin Seed] Error:", e);
@@ -1017,12 +965,6 @@ async function startServer() {
     }
   });
 
-  app.get("/api/public/config", (req, res) => {
-    res.json({
-      whatsappNumber: process.env.TWILIO_FROM_NUMBER ? process.env.TWILIO_FROM_NUMBER.replace(/\D/g, '') : null
-    });
-  });
-
   app.post("/api/admin/reset-db", async (req, res) => {
     try {
       // NOTE: Seeding is now handled CLIENT-SIDE in App.tsx via /api/admin/catalog
@@ -1040,15 +982,13 @@ async function startServer() {
       }
 
       const { activityId } = req.query as { activityId: string };
-    // Normalizing Twilio params (they can be in body or query depending on Twilio config)
-    const status = req.body.MessageStatus || req.body.SmsStatus || req.query.MessageStatus;
-    const actId = activityId || req.body.activityId;
-    const errorCode = req.body.ErrorCode || req.query.ErrorCode;
-    const errorMsg = req.body.ErrorMessage || req.query.ErrorMessage;
+      // Normalizing Twilio params (they can be in body or query depending on Twilio config)
+      const status = req.body.MessageStatus || req.body.SmsStatus || req.query.MessageStatus;
+      const actId = activityId || req.body.activityId;
 
-    console.log(`[Twilio Status] Event: ${status} for Activity: ${actId}. Error: ${errorCode || 'None'} - ${errorMsg || 'No msg'}`);
+      console.log(`[Twilio Status] Event: ${status} for Activity: ${actId}`);
 
-    if (!actId || actId === "undefined") return res.sendStatus(200);
+      if (!actId) return res.sendStatus(200);
 
     try {
       const snap = await getDoc(doc(db, "activities", actId));
@@ -1085,11 +1025,7 @@ async function startServer() {
 
   // Twilio Webhook
   app.post("/api/webhook/whatsapp", async (req, res) => {
-    console.log(">>> [WhatsApp Webhook] ATTEMPTING HANDLER <<<");
-    console.log(">>> Headers:", JSON.stringify(req.headers));
-    
     if (checkGlobalQuota()) {
-      console.warn(">>> [WhatsApp Webhook] REJECTED BY QUOTA <<<");
       return res.status(200).send(""); // Early exit
     }
 
@@ -1106,12 +1042,6 @@ async function startServer() {
     if (!from || !to) {
       console.warn("[WhatsApp Webhook] Missing From/To. Body:", JSON.stringify(req.body));
       return res.status(200).send(""); 
-    }
-
-    // IGNORE STATUS CALLBACKS ON INCOMING WEBHOOK (prevents infinite loops if misconfigured in Twilio)
-    if (req.body?.MessageStatus || req.body?.SmsStatus) {
-       console.log(`[WhatsApp Webhook] Received status callback on incoming webhook for ${from}. Ignoring.`);
-       return res.status(200).send("");
     }
 
     // IGNORE MESSAGES FROM SELF (TWILIO ECHOES OR LOOPBACKS)
@@ -1153,38 +1083,8 @@ async function startServer() {
     try {
       const cleanFrom = from.replace('whatsapp:', '').trim();
       
-      // -- MULTI-TENANT ROUTING LOGIC --
-      let assignedStoreId = "default";
-      
-      // Check for predefined trigger message (e.g. "Hola, vengo de la tienda XYZ ref: #odontologia-feliz")
-      const refMatch = finalMessage.match(/ref:\s*#([a-zA-Z0-9_\-]+)/i);
-      
-      if (refMatch && refMatch[1]) {
-        const storeSlug = refMatch[1];
-        const qStore = query(collection(db, "stores"), where("slug", "==", storeSlug), limit(1));
-        const snapStore = await getDocs(qStore);
-        if (!snapStore.empty) {
-          assignedStoreId = snapStore.docs[0].id;
-          await setDoc(doc(db, "conversations", cleanFrom), {
-            phone: cleanFrom,
-            storeId: assignedStoreId,
-            updatedAt: serverTimestamp()
-          }, { merge: true });
-        }
-      } else {
-        // Look up existing session
-        const convoSnap = await getDoc(doc(db, "conversations", cleanFrom));
-        if (convoSnap.exists() && convoSnap.data().storeId) {
-          assignedStoreId = convoSnap.data().storeId;
-        } else {
-          // Fallback to legacy default
-          const legacyStore = await getStoreByPhone(to);
-          assignedStoreId = legacyStore.id;
-        }
-      }
-      
       // CANCEL ANY PENDING FOLLOW-UP BECAUSE CLIENT RESPONDED
-      await cancelPendingFollowUps(from, assignedStoreId);
+      await cancelPendingFollowUps(from);
 
       const activityData = {
         from,
@@ -1192,7 +1092,7 @@ async function startServer() {
         recipient: from, // THE CUSTOMER is always the recipient/thread-ID
         customerPhone: cleanFrom,
         botNumber: to,   // Store which bot number received this
-        storeId: assignedStoreId,
+        storeId: "default",
         message: finalMessage,
         status: "recibido",
         senderType: 'customer',
@@ -1425,22 +1325,9 @@ async function startServer() {
         }
 
         if (shouldExecute) {
-          const storeId = fu.storeId || "default";
-
-          let storeConfig: any = {};
-          const storeSnap = await getDoc(doc(db, "stores", storeId));
-          if (storeSnap.exists()) {
-            storeConfig = storeSnap.data();
-          }
-          const tone = storeConfig.botTone || "carismático y respetuoso";
-          const botName = storeConfig.botName || "Jan";
-          const botGoal = storeConfig.botGoal || "reactivar ventas";
-
           // 2. Generate nudge with IA
-          const customerProfileId = `${storeId}_${cleanPhone}`;
-          const cxSnap = await getDoc(doc(db, "customers", customerProfileId));
-          const profile = cxSnap.exists() ? cxSnap.data() : null;
-          const history = await getCrmContext(formattedPhone, storeId);
+          const profile = await getCustomerProfile(phone);
+          const history = await getCrmContext(formattedPhone, "default");
           
           const prompt = `CLIENTE: ${phone}
 ESTADO: ${profile?.etapa || "interesado"}
@@ -1449,9 +1336,9 @@ INTENCION: ${fu.reason}
 HISTORIAL RECIENTE:
 ${history}
 
-TAREA: Actúa como ${botName}. El cliente dejó de responder hace unos minutos. Escribe un mensaje MUY CORTO con tono ${tone} para ${botGoal}.
+TAREA: El cliente dejó de responder hace unos minutos. Escribe un mensaje MUY CORTO, profesional, amable y persuasivo para reactivar la conversación. 
 Integra gatillos mentales de ESCASEZ (pocas unidades disponibles) o BENEFICIO (recordando el envío gratis y el pago contra entrega hoy). 
-Mantenlo respetuoso. Si es mujer, usa un trato amable sin ser informal de más. 
+Mantenlo carismático y respetuoso. Si es mujer, usa un trato amable sin ser informal de más. 
 Máximo 18 palabras.
 NO RESPONDAS EN JSON, RESPONDE SOLO EL TEXTO DEL MENSAJE.`;
 
@@ -1477,7 +1364,6 @@ NO RESPONDAS EN JSON, RESPONDE SOLO EL TEXTO DEL MENSAJE.`;
             status: "respondido",
             whatsappStatus: "sent",
             senderType: 'bot',
-            storeId: storeId,
             timestamp: serverTimestamp(),
             customerPhone: cleanPhone
           });

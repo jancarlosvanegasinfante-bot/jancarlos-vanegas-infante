@@ -6,7 +6,6 @@
       "type": "object",
       "properties": {
         "id": { "type": "string" },
-        "storeId": { "type": "string", "description": "ID del negocio al que pertenece" },
         "name": { "type": "string" },
         "description": { "type": "string" },
         "price": { "type": "number" },
@@ -17,14 +16,13 @@
         "freight": { "type": "number" },
         "provider": { "type": "string" }
       },
-      "required": ["id", "storeId", "name", "price", "stock"]
+      "required": ["id", "name", "price", "stock"]
     },
     "Order": {
       "title": "Order",
       "description": "Un pedido realizado por un cliente vía WhatsApp.",
       "type": "object",
       "properties": {
-        "storeId": { "type": "string", "description": "ID de la tienda" },
         "customerName": { "type": "string" },
         "customerPhone": { "type": "string" },
         "address": { "type": "string" },
@@ -36,7 +34,7 @@
         "status": { "type": "string", "enum": ["pendiente", "despachado", "entregado"] },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["storeId", "customerName", "customerPhone", "address", "city", "productId", "quantity"]
+      "required": ["customerName", "customerPhone", "address", "city", "productId", "quantity"]
     },
     "Activity": {
       "title": "Activity",
@@ -61,22 +59,15 @@
       "description": "Configuración de una tienda en el SaaS.",
       "type": "object",
       "properties": {
-        "id": { "type": "string", "description": "ID del negocio" },
-        "ownerId": { "type": "string", "description": "Firebase Auth UID del dueño" },
-        "slug": { "type": "string", "description": "URL amigable (ej: odontologia-feliz)" },
+        "id": { "type": "string" },
         "name": { "type": "string" },
-        "description": { "type": "string", "description": "Qué hace la tienda" },
-        "botName": { "type": "string", "description": "Nombre del bot (ej: Luis)" },
-        "botTone": { "type": "string", "description": "Tono de la IA (ej: Empático y profesional)" },
-        "botGoal": { "type": "string", "description": "Objetivo de la IA (ej: Agendar citas)" },
-        "themeColor": { "type": "string", "description": "Color hexadecimal principal" },
-        "phone": { "type": "string", "description": "Teléfono propio o dejar vacío si usa el global" },
+        "phone": { "type": "string" },
         "dropiApiKey": { "type": "string" },
         "emailEnabled": { "type": "boolean" },
         "recoveryFrequency": { "type": "number", "description": "Minutos de inactividad para marcar como abandono" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["name", "ownerId", "slug"]
+      "required": ["id", "name", "phone"]
     },
     "TestConnection": {
       "title": "TestConnection",
@@ -101,7 +92,6 @@
       "description": "Perfil persistente de un cliente para memoria a largo plazo.",
       "type": "object",
       "properties": {
-        "storeId": { "type": "string" },
         "name": { "type": "string" },
         "gender": { "type": "string", "enum": ["male", "female", "unknown"] },
         "phone": { "type": "string" },
@@ -109,7 +99,7 @@
         "city": { "type": "string" },
         "lastInteraction": { "type": "string", "format": "date-time" }
       },
-      "required": ["storeId", "phone", "name"]
+      "required": ["phone", "name"]
     },
     "Conversation": {
       "title": "Conversation",
@@ -117,7 +107,6 @@
       "type": "object",
       "properties": {
         "phone": { "type": "string" },
-        "storeId": { "type": "string", "description": "Con qué tienda está hablando actualmente" },
         "aiPaused": { "type": "boolean" },
         "lastInterventionBy": { "type": "string" },
         "updatedAt": { "type": "string", "format": "date-time" }
@@ -128,7 +117,6 @@
       "description": "Seguimiento individual programado para reactivar ventas.",
       "type": "object",
       "properties": {
-        "storeId": { "type": "string" },
         "phone": { "type": "string" },
         "scheduledAt": { "type": "string", "format": "date-time" },
         "status": { "type": "string", "enum": ["pending", "executed", "cancelled"] },
@@ -136,7 +124,7 @@
         "initialScore": { "type": "number" },
         "reason": { "type": "string" }
       },
-      "required": ["storeId", "phone", "scheduledAt", "status", "createdAt"]
+      "required": ["phone", "scheduledAt", "status", "createdAt"]
     }
   },
   "firestore": {
