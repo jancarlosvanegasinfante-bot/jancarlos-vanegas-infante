@@ -33,6 +33,16 @@ export default function Catalog() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string>("Todos");
+  const [officialBotNumber, setOfficialBotNumber] = useState("");
+
+  useEffect(() => {
+    fetch("/api/public/config")
+      .then(res => res.json())
+      .then(data => {
+        if (data.whatsappNumber) setOfficialBotNumber(data.whatsappNumber);
+      })
+      .catch(err => console.error("Error fetching bot config", err));
+  }, []);
 
   useEffect(() => {
     const q = query(collection(db, "products"), orderBy("name", "asc"));
@@ -61,7 +71,7 @@ export default function Catalog() {
     }).format(price);
   };
 
-  const currentWhatsApp = "15072233213"; // Jan Bot Phone
+  const currentWhatsApp = officialBotNumber || "15072233213"; // Jan Bot Phone
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-dark-accent selection:text-white">

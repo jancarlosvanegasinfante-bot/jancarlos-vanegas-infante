@@ -75,7 +75,6 @@ import {
 } from 'recharts';
 import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { 
-  JAN_SYSTEM_INSTRUCTION, 
   JAN_RESPONSE_SCHEMA, 
   captureOrderTool, 
   checkInventoryTool, 
@@ -114,6 +113,7 @@ type Product = {
   provider?: string;
   imageUrl?: string;
   videoUrl?: string;
+  storeId?: string;
 };
 
 type Activity = {
@@ -198,6 +198,10 @@ function JanAdmin() {
   const [isClearing, setIsClearing] = useState(false);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'crm' | 'orders' | 'inventory' | 'reports' | 'config' | 'recovery' | 'monitor'>('dashboard');
 
+  const [userStore, setUserStore] = useState<any>(null);
+  const [userStores, setUserStores] = useState<any[]>([]);
+  const [storeLoading, setStoreLoading] = useState(true);
+
   // Close sidebar on navigation on mobile
   useEffect(() => {
     setIsSidebarOpen(false);
@@ -212,8 +216,87 @@ function JanAdmin() {
 
   useEffect(() => {
     if (!user) return;
+    const loadStore = async () => {
+      try {
+        // Fetch all businesses for user
+        const qStore = query(collection(db, "stores"), where("ownerId", "==", user.uid));
+        const snap = await getDocs(qStore);
+        let list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-    const qOrders = query(collection(db, "orders"), orderBy("createdAt", "desc"));
+        const adminEmail = "jancarlosvanegasinfante@gmail.com";
+        // Backward compatibility for Jan's original store
+        if (user.email === adminEmail && !list.find(s => s.id === "default")) {
+           const defSnap = await getDoc(doc(db, "stores", "default"));
+           let finalStore;
+           if (!defSnap.exists()) {
+              const baseStore = {
+                ownerId: user.uid,
+                name: "JANSEL SHOP",
+                slug: "jansel-shop",
+                botName: "Jan",
+                botTone: "paisa, carismático y respetuoso",
+                botGoal: "persuadir y cerrar ventas rápido",
+                themeColor: "#F27D26"
+              };
+              await setDoc(doc(db, "stores", "default"), baseStore);
+              finalStore = { id: "default", ...baseStore };
+           } else {
+              // Ensure owner mapping
+              if (!defSnap.data().ownerId) await updateDoc(doc(db, "stores", "default"), { ownerId: user.uid });
+              const fetchDef = await getDoc(doc(db, "stores", "default"));
+              finalStore = { id: "default", ...fetchDef.data() };
+           }
+           list = [finalStore, ...list]; // Prepend default
+        }
+
+        if (list.length > 0) {
+          setUserStores(list);
+          setUserStore(list[0]);
+        } else {
+          const storeId = "store_" + Math.random().toString(36).substring(2, 9);
+          const newStore = {
+            ownerId: user.uid,
+            name: "Mi Tienda",
+            slug: "tienda-" + storeId.substring(6),
+            botName: "Asesor",
+            botTone: "amigable y respetuoso",
+            botGoal: "dar información y agendar ventas",
+            themeColor: "#4F46E5"
+          };
+          await setDoc(doc(db, "stores", storeId), newStore);
+          const finalStore = { id: storeId, ...newStore };
+          setUserStores([finalStore]);
+          setUserStore(finalStore);
+        }
+      } catch(e) {
+        console.error("Error loading store", e);
+      } finally {
+        setStoreLoading(false);
+      }
+    };
+    loadStore();
+  }, [user]);
+
+  useEffect(() => {
+    if (!user || !userStore) return;
+
+    let qOrders, qProducts, qActivity, qCustomers, qConversations;
+
+    // For the original default store, fetch without filter to prevent breaking old data
+    if (userStore.id === "default") {
+      qOrders = query(collection(db, "orders"), orderBy("createdAt", "desc"));
+      qProducts = query(collection(db, "products"), orderBy("name", "asc"));
+      qActivity = query(collection(db, "activities"), orderBy("timestamp", "desc"), limit(200));
+      qCustomers = collection(db, "customers");
+      qConversations = collection(db, "conversations");
+    } else {
+      qOrders = query(collection(db, "orders"), where("storeId", "==", userStore.id), orderBy("createdAt", "desc"));
+      qProducts = query(collection(db, "products"), where("storeId", "==", userStore.id), orderBy("name", "asc"));
+      qActivity = query(collection(db, "activities"), where("storeId", "==", userStore.id), orderBy("timestamp", "desc"), limit(200));
+      qCustomers = query(collection(db, "customers"), where("storeId", "==", userStore.id));
+      qConversations = query(collection(db, "conversations"), where("storeId", "==", userStore.id));
+    }
+
     const unsubOrders = onSnapshot(qOrders, 
       (snapshot) => {
         const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Order));
@@ -222,7 +305,6 @@ function JanAdmin() {
       (err) => console.error("[Firestore] Orders error:", err)
     );
 
-    const qProducts = query(collection(db, "products"), orderBy("name", "asc"));
     const unsubProducts = onSnapshot(qProducts, 
       (snapshot) => {
         const docs = snapshot.docs.map(d => ({ docId: d.id, ...d.data() } as Product));
@@ -231,7 +313,6 @@ function JanAdmin() {
       (err) => console.error("[Firestore] Products error:", err)
     );
 
-    const qActivity = query(collection(db, "activities"), orderBy("timestamp", "desc"), limit(200));
     const unsubActivity = onSnapshot(qActivity, 
       (snapshot) => {
         const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Activity));
@@ -241,7 +322,6 @@ function JanAdmin() {
     );
     
     // CRM
-    const qCustomers = collection(db, "customers");
     const unsubCustomers = onSnapshot(qCustomers, 
       (snapshot) => {
         const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -252,7 +332,6 @@ function JanAdmin() {
       (err) => console.error("[Firestore] Customers error:", err)
     );
 
-    const qConversations = collection(db, "conversations");
     const unsubConversations = onSnapshot(qConversations, (snapshot) => {
       const convs: Record<string, any> = {};
       snapshot.docs.forEach(d => {
@@ -265,9 +344,10 @@ function JanAdmin() {
       unsubOrders();
       unsubProducts();
       unsubActivity();
+      unsubCustomers();
       unsubConversations();
     };
-  }, [user]);
+  }, [user, userStore]);
 
   useEffect(() => {
     if (!user) return;
@@ -308,7 +388,11 @@ function JanAdmin() {
     
     setIsClearing(true);
     try {
-      const res = await fetch("/api/admin/clear-transactions", { method: "POST" });
+      const res = await fetch("/api/admin/clear-transactions", { 
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ storeId: userStore?.id || "default" })
+      });
       const data = await res.json();
       if (data.success) {
         toast.success("¡Viento en popa! El tablero ha sido reiniciado.");
@@ -374,26 +458,27 @@ function JanAdmin() {
     }
   };
 
-  const resetDatabase = async () => {
+  const resetDatabase = async (storeId?: string) => {
     if (isResetting) return;
-    if (!confirm("⚠️ ¿Estás seguro? Se borrará el catálogo actual y se cargará el estandar de la tienda desde el servidor.")) return;
+    const targetStore = storeId || userStore?.id || "default";
+    if (!confirm(`⚠️ ¿Estás seguro? Se borrará el catálogo actual de la tienda ${targetStore} y se cargará el estandar desde el servidor.`)) return;
     
     setIsResetting(true);
     try {
       const res = await fetch("/api/admin/seed", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ force: true })
+        body: JSON.stringify({ force: true, storeId: targetStore })
       });
       const data = await res.json();
       if (data.success) {
-        alert("¡Melo! Catálogo sincronizado con éxito desde el servidor.");
+        toast.success("¡Melo! Catálogo sincronizado con éxito desde el servidor.");
       } else {
         throw new Error(data.error || "Error en el servidor");
       }
     } catch (err: any) {
       console.error("Error resetting DB:", err);
-      alert(`Hubo un problema: ${err.message || "Error desconocido"}`);
+      toast.error(`Hubo un problema: ${err.message || "Error desconocido"}`);
     } finally {
       setIsResetting(false);
     }
@@ -633,10 +718,15 @@ function JanAdmin() {
                     }}
                   />}
                  {activeTab === 'orders' && <OrdersTab key="orders" orders={filteredOrders} onUpdateStatus={updateOrderStatus} />}
-                 {activeTab === 'inventory' && <InventoryTab key="inv" products={products} onUpdateStock={updateStock} onReset={resetDatabase} isResetting={isResetting} />}
+                 {activeTab === 'inventory' && <InventoryTab key="inv" products={products} onUpdateStock={updateStock} onReset={resetDatabase} isResetting={isResetting} userStore={userStore} />}
                  {activeTab === 'config' && (
                    <ConfigTab 
                      key="config"
+                     user={user}
+                     userStore={userStore}
+                     userStores={userStores}
+                     setUserStore={setUserStore}
+                     setUserStores={setUserStores}
                      webhookUrl={webhookUrl} 
                      copied={copied} 
                      onCopy={copyToClipboard} 
@@ -680,413 +770,26 @@ function JanAdmin() {
  * It listens for new WhatsApp messages and processes them via Gemini.
  */
 function AIProcessor({ user }: { user: FirebaseUser }) {
-  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
-  const processingRef = useRef<Set<string>>(new Set());
+  const [processingCount, setProcessingCount] = useState(0);
 
   useEffect(() => {
     if (!user) return;
 
-    // AUTO-SYNC: Si el inventario está vacío, lo poblamos desde el catalog.json automáticamente
-    const ensureInventory = async () => {
-       try {
-          const snap = await getDocs(collection(db, "products"));
-          if (snap.empty) {
-             console.log("[AI Agent] Inventory empty. Auto-syncing from catalog.json...");
-             const res = await fetch("/api/admin/catalog");
-             if (res.ok) {
-                const catalogData = await res.json();
-                const batch = writeBatch(db);
-                catalogData.products.forEach((p: any) => {
-                   batch.set(doc(db, "products", p.id), { 
-                      ...p, 
-                      stock: 20, 
-                      updatedAt: serverTimestamp() 
-                   });
-                });
-                await batch.commit();
-                console.log("[AI Agent] Auto-sync complete.");
-             }
-          }
-       } catch (err) {
-          console.warn("[AI Agent] Auto-sync error:", err);
-       }
-    };
-    ensureInventory();
-
-    console.log("[AI Agent] Starting listener for incoming messages (MONITOR ONLY)...");
+    console.log("[AI Agent] Monitoring processing status...");
     const q = query(
       collection(db, "activities"), 
-      where("status", "==", "recibido"),
-      orderBy("timestamp", "asc")
+      where("status", "==", "procesando"),
+      limit(20)
     );
     
-    const unsubscribe = onSnapshot(q, async (snapshot) => {
-       // SERVER IS NOW AUTONOMOUS - WE JUST LOG HERE
-       if (snapshot.docs.length > 0) {
-         console.log(`[AI Agent] ${snapshot.docs.length} messages pending (Server is processing them)`);
-       }
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+       setProcessingCount(snapshot.docs.length);
     });
 
     return () => unsubscribe();
   }, [user]);
 
-  async function processMessage(id: string, data: any, convData?: any) {
-    try {
-      await updateDoc(doc(db, "activities", id), { 
-        status: "procesando",
-        processingAt: serverTimestamp()
-      });
-
-      const GEMINI_API_KEY = (process as any).env?.GEMINI_API_KEY;
-      if (!GEMINI_API_KEY) throw new Error("No Gemini API Key");
-
-      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-      // Using 'gemini-3-flash-preview' for better capacity and performance
-      const model = "gemini-3-flash-preview"; 
-
-      const generateWithRetry = async (params: any, retries = 5) => {
-        for (let i = 0; i < retries; i++) {
-          try {
-            return await ai.models.generateContent(params);
-          } catch (err: any) {
-            const errStr = err.message || JSON.stringify(err) || String(err);
-            const isTransient = 
-              errStr.includes("503") || 
-              errStr.includes("429") || 
-              errStr.includes("UNAVAILABLE") || 
-              errStr.includes("exhausted") || 
-              errStr.includes("overloaded") ||
-              errStr.includes("high demand");
-              
-            if (isTransient && i < retries - 1) {
-              const delay = Math.pow(2, i) * 2000 + Math.random() * 1000;
-              console.warn(`[AI Agent] Retrying (${i + 1}/${retries}) after transient error...`, errStr);
-              await new Promise(r => setTimeout(r, delay));
-              continue;
-            }
-            throw err;
-          }
-        }
-      };
-
-      // Avoid processing very old messages
-      const msgTime = data.timestamp?.toMillis?.() || Date.now();
-      if (Date.now() - msgTime > 1800000) { // 30 minutes
-        console.warn("[AI Agent] Skipping outdated message");
-        await updateDoc(doc(db, "activities", id), { status: "expirado" });
-        return;
-      }
-
-      // 1. Fetch Context: Profile, History and Inventory
-      const phone = (data.from || "").replace("whatsapp:", "").trim();
-      let customerProfile = {};
-      
-      try {
-        // Try to get profile from 'customers' collection (where tool saves it)
-        const customerDoc = await getDoc(doc(db, "customers", phone));
-        if (customerDoc.exists()) {
-          customerProfile = customerDoc.data();
-        } else if (convData?.profile) {
-          customerProfile = convData.profile;
-        }
-      } catch (err) {
-        console.warn("[AI Agent] Profile fetch error:", err);
-      }
-
-      let historyContext: any[] = [];
-      let inventoryContextSnippet = "";
-      try {
-        const prodSnap = await getDocs(collection(db, "products"));
-        const availableProducts = prodSnap.docs.map(d => {
-           const pData = d.data();
-           return { id: d.id, name: pData.name, price: pData.price, imageUrl: pData.imageUrl, videoUrl: pData.videoUrl, stock: pData.stock };
-        });
-        inventoryContextSnippet = JSON.stringify(availableProducts);
-
-        // Fetch history - query for messages involving this phone
-        const dbRecipient = `whatsapp:${phone}`;
-        const qRecipient = query(
-          collection(db, "activities"), 
-          where("recipient", "==", dbRecipient),
-          orderBy("timestamp", "desc"), 
-          limit(20)
-        );
-        const qFrom = query(
-          collection(db, "activities"), 
-          where("from", "==", dbRecipient),
-          orderBy("timestamp", "desc"), 
-          limit(20)
-        );
-
-        const [snapRecip, snapFrom] = await Promise.all([getDocs(qRecipient), getDocs(qFrom)]);
-        
-        const historyItems = [...snapRecip.docs, ...snapFrom.docs]
-          .map(d => ({ id: d.id, ...d.data() }))
-          .filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
-          .sort((a: any, b: any) => (a.timestamp?.toMillis?.() || 0) - (b.timestamp?.toMillis?.() || 0))
-          .slice(-10); // Last 10 messages
-
-        historyContext = historyItems.map((h: any) => {
-          const isBot = h.status === "respondido" || !!h.manualAgent || h.from?.includes('14155238886') || h.senderType === 'bot' || !!h.response;
-          return {
-            role: isBot ? 'model' : 'user',
-            parts: [{ text: h.message || h.response || "" }]
-          };
-        }).filter(h => h.parts[0].text);
-      } catch (historyErr) {
-        console.warn("[AI Agent] Context fetch error:", historyErr);
-      }
-
-      const contents: any[] = [
-        ...historyContext,
-        { role: 'user', parts: [{ text: `[PERFIL: ${JSON.stringify(customerProfile)}]\n[TIENDA: JANSEL SHOP 💎]\n[INVENTARIO_ACTUAL: ${inventoryContextSnippet}]\n[CLIENTE_PHONE: ${phone}]\n\nMensaje: ${data.message}` }] }
-      ];
-
-      const genConfig = {
-        systemInstruction: JAN_SYSTEM_INSTRUCTION,
-        responseMimeType: "application/json",
-        responseSchema: JAN_RESPONSE_SCHEMA as any,
-        maxOutputTokens: 2048,
-        tools: [{ functionDeclarations: [captureOrderTool, updateCustomerProfileTool, checkInventoryTool] }]
-      };
-
-      let result = await generateWithRetry({ model, contents, config: genConfig });
-
-      let functionCalls = result.functionCalls;
-      let toolIterations = 0;
-      while (functionCalls && functionCalls.length > 0 && toolIterations < 2) {
-        toolIterations++;
-        const toolResults = [];
-        for (const call of functionCalls) {
-          if (call.name === "checkInventory") {
-            const snap = await getDocs(collection(db, "products"));
-            const products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-            toolResults.push({ functionResponse: { id: call.id, name: call.name, response: { products } } });
-          } else if (call.name === "captureOrder") {
-            const args = call.args as any;
-            const orderId = Math.random().toString(36).substring(7).toUpperCase();
-            
-            // Rehydrate product details from DB
-            let productName = "Producto Desconocido";
-            let totalPrice = 0;
-            try {
-              if (args.productId) {
-                 const productDoc = await getDoc(doc(db, "products", args.productId));
-                 if (productDoc.exists()) {
-                   const pData = productDoc.data();
-                   productName = pData.name;
-                   totalPrice = pData.price * (args.quantity || 1);
-                 }
-              }
-            } catch (err) {
-              console.error("[Orders] Error fetching product details", err);
-            }
-
-            await addDoc(collection(db, "orders"), { 
-              ...args, 
-              productName,
-              totalPrice,
-              id: orderId, 
-              status: 'pendiente', 
-              createdAt: serverTimestamp() 
-            });
-            toolResults.push({ functionResponse: { id: call.id, name: call.name, response: { success: true, orderId } } });
-          } else if (call.name === "updateCustomerProfile") {
-            const args = call.args as any;
-            const phone = (data.from || "").replace("whatsapp:", "");
-            await setDoc(doc(db, "customers", phone), { name: args.name, gender: args.gender || "neutral", phone, lastInteraction: serverTimestamp() }, { merge: true });
-            toolResults.push({ functionResponse: { id: call.id, name: call.name, response: { success: true } } });
-          }
-        }
-        const previousModelContent = result.candidates?.[0]?.content;
-        if (previousModelContent) {
-          contents.push({ role: 'model', parts: previousModelContent.parts });
-          contents.push({ role: 'user', parts: toolResults });
-        }
-        result = await generateWithRetry({ model, contents, config: genConfig });
-        functionCalls = result.functionCalls;
-      }
-
-      let jsonResponse: any = { type: "text", text: "" };
-      try {
-        if (!result.text) throw new Error("Empty model output");
-        // Clear common markdown artifacts that might break JSON.parse
-        let cleanText = result.text.trim();
-        if (cleanText.startsWith("```json")) cleanText = cleanText.replace(/```json|```/g, "").trim();
-        jsonResponse = JSON.parse(cleanText);
-      } catch (parseErr) {
-        console.warn("[AI Agent] JSON Parse Failed. Attempting raw recovery. Raw content:", result.text);
-        const raw = result.text || "";
-        
-        // Comprehensive fallback: Try to find 'text' value first
-        const textKeySearch = /"text"\s*:\s*"/i;
-        const match = raw.match(textKeySearch);
-        
-        if (match && match.index !== undefined) {
-           const startPos = match.index + match[0].length;
-           let extracted = raw.substring(startPos);
-           const endQuote = extracted.indexOf('"');
-           
-           if (endQuote !== -1) {
-              jsonResponse.text = extracted.substring(0, endQuote).trim();
-           } else {
-              // Truncated mid-text: take everything remaining and clean up
-              jsonResponse.text = extracted.replace(/[{}"]+$/, "").trim();
-           }
-        } else {
-           // Last resort: just clean the raw string and hope for the best
-           jsonResponse.text = raw.replace(/[{}"]/g, "")
-                                 .replace(/"type"\s*:\s*"[^"]*"/g, "")
-                                 .replace(/"imageUrl"\s*:\s*"[^"]*"/g, "")
-                                 .replace(/"videoUrl"\s*:\s*"[^"]*"/g, "")
-                                 .replace(/,/g, " ")
-                                 .trim();
-        }
-        }
-        
-        // Map new schema fields to existing code
-        if (jsonResponse.respuesta) jsonResponse.text = jsonResponse.respuesta;
-        
-        // Handle Escalation and Order Alerts
-        if (jsonResponse.escalar || jsonResponse.pedido_confirmado) {
-           const isAdminAlert = jsonResponse.pedido_confirmado;
-           const alertType = isAdminAlert ? "✅ *NUEVO PEDIDO CONFIRMADO*" : "⚠️ *CLIENTE REQUIERE ATENCIÓN HUMANA*";
-           const alertDetail = isAdminAlert ? (jsonResponse.alerta_admin || "Pedido registrado") : (jsonResponse.razon || "No especificada");
-           
-           console.log(`[AI Agent] Alerting admins for ${phone}: ${alertType}`);
-           
-           fetch("/api/admin/bulk-notify", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ 
-                message: `${alertType}\n\n*Cliente:* ${phone}\n*Detalle:* ${alertDetail}`
-              })
-           }).catch(console.error);
-           
-           if (jsonResponse.escalar) {
-              fetch("/api/whatsapp/toggle-ai", {
-                 method: "POST",
-                 headers: { "Content-Type": "application/json" },
-                 body: JSON.stringify({ phone, pause: true })
-              }).catch(console.error);
-           }
-        }
-
-        if (jsonResponse.text.length > 1000) jsonResponse.text = jsonResponse.text.substring(0, 1000);
-
-        // Replace placeholders or potentially hallucinated URLs with real production URL
-        const prodCatalogUrl = "https://jansel-shop-985283274281.us-west1.run.app/catalog";
-        jsonResponse.text = jsonResponse.text.replace(/\[CATALOG_URL\]/g, prodCatalogUrl);
-        // Failsafe for hallucinated brand domains
-        jsonResponse.text = jsonResponse.text.replace(/https?:\/\/(www\.)?janselshop\.(com|co|store|shop)\/catalog/gi, prodCatalogUrl);
-
-      if (!jsonResponse.text) {
-         jsonResponse.text = "¿Cómo podemos ayudarte hoy, patrón?";
-      }
-
-      
-      let mediaUrl = jsonResponse.imageUrl || "";
-      let finalMessage = jsonResponse.text;
-
-      // Ensure videoUrl is appended if searching was successful AND not already in text
-      if (jsonResponse.videoUrl && !finalMessage.includes(jsonResponse.videoUrl)) {
-         finalMessage += `\n\nMira cómo funciona aquí 👇\n${jsonResponse.videoUrl}`;
-      }
-
-      if (jsonResponse.imageUrl) {
-        mediaUrl = jsonResponse.imageUrl;
-      } else if (finalMessage.toLowerCase().includes("precio") || finalMessage.toLowerCase().includes("$")) {
-        // Generative Fallback
-        console.log("[AI Agent] Catalog photo missing. Generating AI visualization...");
-        const genPrompt = `Professional close-up product photography of ${finalMessage.substring(0, 60).replace(/[^\w\s]/g, "")}, high resolution, studio lighting, clean minimal background`;
-        const generatedBase64 = await generateImage(genPrompt, GEMINI_API_KEY);
-        if (generatedBase64) {
-           const cacheRes = await fetch("/api/admin/cache-media", {
-             method: "POST",
-             headers: { "Content-Type": "application/json" },
-             body: JSON.stringify({ data: generatedBase64, mimeType: "image/jpeg" })
-           });
-           const cacheData = await cacheRes.json();
-           mediaUrl = cacheData.url;
-        }
-      }
-
-      if (jsonResponse.type === "audio" && jsonResponse.audioText) {
-        console.log("[AI Agent] Generating audio for:", jsonResponse.audioText);
-        const base64 = await generateAudio(jsonResponse.audioText, GEMINI_API_KEY);
-        if (base64) {
-          const cacheRes = await fetch("/api/admin/cache-media", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ data: base64, mimeType: "audio/mpeg" })
-          });
-          const cacheData = await cacheRes.json();
-          mediaUrl = cacheData.url;
-        }
-      }
-
-      console.log(`[AI Agent] Attempting to send message to ${data.from}. Contenido: ${finalMessage.substring(0, 30)}...`);
-      
-      // Auto-pause AI if escalating
-      const shouldEscalate = jsonResponse.escalar === true || 
-                            jsonResponse.intencion === "humano" || 
-                            jsonResponse.intencion === "producto_no_disponible";
-      
-      if (shouldEscalate) {
-        console.log(`[AI Agent] Intention '${jsonResponse.intencion}' detected. Auto-pausing AI for ${phone}`);
-        try {
-          await fetch("/api/whatsapp/toggle-ai", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ phone: data.from, pause: true })
-          });
-        } catch (e) {
-          console.warn("[AI Agent] Failed to auto-pause AI:", e);
-        }
-      }
-
-      const res = await fetch("/api/admin/send-message", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          to: data.from, 
-          message: finalMessage, 
-          mediaUrl,
-          from: data.botNumber || null // Use the number that received the message
-        })
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json();
-        throw new Error(errorData.error || `Server returned ${res.status}`);
-      }
-
-      await updateDoc(doc(db, "activities", id), { 
-        status: "respondido", 
-        response: finalMessage, 
-        respondedAt: serverTimestamp(),
-        mediaUrl: mediaUrl || null
-      });
-    } catch (err: any) {
-      let finalErrMsg = err.message || "Error desconocido";
-      const isAIError = finalErrMsg.includes("503") || finalErrMsg.includes("UNAVAILABLE") || finalErrMsg.includes("high demand") || finalErrMsg.includes("429") || finalErrMsg.includes("overloaded");
-      
-      if (isAIError) {
-        finalErrMsg = "⚠️ IA saturada (Google AI saturado). El bot no pudo responder a tiempo por alta demanda global.";
-      }
-      
-      await updateDoc(doc(db, "activities", id), { 
-        status: "error", 
-        response: `Error: ${finalErrMsg}`, 
-        errorAt: serverTimestamp() 
-      });
-    } finally {
-      processingRef.current.delete(id);
-      setProcessingIds(new Set(processingRef.current));
-    }
-  }
-
-  if (processingIds.size === 0) return null;
+  if (processingCount === 0) return null;
   return (
     <div className="fixed bottom-6 right-6 z-[100] pointer-events-none">
       <div className="bg-neutral-900 border border-dark-accent/20 rounded-2xl p-4 shadow-2xl flex items-center gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -1095,12 +798,12 @@ function AIProcessor({ user }: { user: FirebaseUser }) {
             <Cpu className="w-5 h-5 text-dark-accent animate-pulse" />
           </div>
           <div className="absolute -top-1 -right-1 w-4 h-4 bg-dark-accent rounded-full flex items-center justify-center border-2 border-neutral-900">
-            <span className="text-[8px] font-black text-black">{processingIds.size}</span>
+            <span className="text-[8px] font-black text-black">{processingCount}</span>
           </div>
         </div>
         <div>
           <h4 className="text-white text-[10px] font-black uppercase tracking-widest">Jan Procesando...</h4>
-          <p className="text-[9px] text-neutral-500">Auto-respuesta activa.</p>
+          <p className="text-[9px] text-neutral-500">Auto-respuesta activa en el servidor.</p>
         </div>
       </div>
     </div>
@@ -1933,7 +1636,7 @@ function OrdersTab({ orders, onUpdateStatus }: { orders: Order[], onUpdateStatus
   );
 }
 
-function InventoryTab({ products, onUpdateStock, onReset, isResetting }: { products: Product[], onUpdateStock: (id: string, s: number) => void, onReset: () => void, isResetting: boolean, key?: string }) {
+function InventoryTab({ products, onUpdateStock, onReset, isResetting, userStore }: { products: Product[], onUpdateStock: (id: string, s: number) => void, onReset: (storeId?: string) => void, isResetting: boolean, userStore: any, key?: string }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [activeCategory, setActiveCategory] = useState<string>("todas");
   const [showManualLoad, setShowManualLoad] = useState(false);
@@ -1949,24 +1652,45 @@ function InventoryTab({ products, onUpdateStock, onReset, isResetting }: { produ
       const res = await fetch("/api/admin/seed", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ catalog })
+        body: JSON.stringify({ catalog, storeId: userStore?.id || "default" })
       });
       const data = await res.json();
       if (data.success) {
-        alert("✅ Catálogo actualizado con éxito.");
+        toast.success("✅ Catálogo actualizado con éxito.");
         setShowManualLoad(false);
         setManualJson("");
       } else {
-        alert("❌ Error: " + data.error);
+        toast.error("❌ Error: " + data.error);
       }
     } catch (e: any) {
-      alert("❌ JSON Inválido: " + e.message);
+      toast.error("❌ JSON Inválido: " + e.message);
     } finally {
       setLoadingManual(false);
     }
   };
 
-  const categories = ["todas", ...Array.from(new Set(products.map(p => p.category).filter(Boolean)))];
+  const handleManualLoadBulk = async (catalog: any[]) => {
+    setLoadingManual(true);
+    try {
+      const res = await fetch("/api/admin/seed", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ catalog: { products: catalog }, storeId: userStore?.id || "default" })
+      });
+      const data = await res.json();
+      if (data.success) {
+        toast.success("✅ Producto agregado con éxito.");
+      } else {
+        toast.error("❌ Error: " + data.error);
+      }
+    } catch (e: any) {
+      toast.error("❌ Error: " + e.message);
+    } finally {
+      setLoadingManual(false);
+    }
+  };
+
+  const categories = ["todas", ...Array.from(new Set(products.filter(p => !userStore?.id || p.storeId === userStore.id).map(p => p.category).filter(Boolean)))];
 
   const handleImageUpload = async (p: Product, file: File) => {
     if (!file || !p.docId) return;
@@ -2057,19 +1781,50 @@ function InventoryTab({ products, onUpdateStock, onReset, isResetting }: { produ
           </button>
 
           <button 
-            onClick={onReset}
+            onClick={() => onReset(userStore?.id || "default")}
             disabled={isResetting}
             className="flex items-center gap-2 px-4 py-2 bg-neutral-900 border border-neutral-800 text-neutral-400 text-[10px] font-black rounded-xl hover:bg-neutral-800 hover:text-white transition-all disabled:opacity-50 whitespace-nowrap"
           >
             <RefreshCw size={14} className={cn(isResetting && "animate-spin")} /> {isResetting ? "CARGANDO..." : "SINCRONIZAR"}
           </button>
 
-          <button className="flex items-center gap-2 px-4 py-2 bg-dark-accent text-black text-[10px] font-black rounded-xl hover:scale-105 transition-all shadow-[0_4px_15px_rgba(242,125,38,0.2)] whitespace-nowrap">
+          <button 
+            onClick={() => {
+              const confirmInfo = prompt("Nombre del nuevo producto:");
+              if (!confirmInfo) return;
+              const price = prompt("Precio del producto (solo números):", "50000");
+              if (!price) return;
+              
+              const newProd = {
+                name: confirmInfo,
+                price: parseInt(price),
+                category: "General",
+                description: "Producto agregado manualmente",
+                stock: 20,
+                storeId: userStore?.id || "default",
+                id: Math.random().toString(36).substring(7)
+              };
+
+              handleManualLoadBulk([newProd]);
+            }}
+            className="flex items-center gap-2 px-4 py-2 bg-dark-accent text-black text-[10px] font-black rounded-xl hover:scale-105 transition-all shadow-[0_4px_15px_rgba(242,125,38,0.2)] whitespace-nowrap"
+          >
             <Plus size={14} /> NUEVO
           </button>
         </div>
       </div>
       
+      {/* Active Store Indicator */}
+      <div className="bg-neutral-900/50 border border-neutral-800 p-3 rounded-xl flex items-center justify-between">
+         <div className="flex items-center gap-2">
+            <div className="w-2 h-2 rounded-full bg-dark-accent animate-pulse" />
+            <p className="text-[10px] text-neutral-400 font-bold uppercase tracking-widest">
+              Gestionando inventario de: <span className="text-white">{userStore?.name || "Global"}</span>
+            </p>
+         </div>
+         <p className="text-[10px] text-neutral-500 font-mono">{userStore?.id}</p>
+      </div>
+
       {/* Manual Load Modal */}
       <AnimatePresence>
         {showManualLoad && (
@@ -2596,9 +2351,185 @@ function CRMTab({ customers, selectedUser, onSelectUser }: { customers: any[], s
   );
 }
 
-function ConfigTab({ webhookUrl, copied, onCopy, onReset, isResetting, onClearTransactions, isClearing }: any) {
+function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, webhookUrl, copied, onCopy, onReset, isResetting, onClearTransactions, isClearing }: any) {
+  const [storeData, setStoreData] = useState({
+    name: userStore?.name || "",
+    slug: userStore?.slug || "",
+    botName: userStore?.botName || "",
+    botTone: userStore?.botTone || "",
+    botGoal: userStore?.botGoal || "",
+    themeColor: userStore?.themeColor || "#4F46E5"
+  });
+  const [isSaving, setIsSaving] = useState(false);
+  const [officialBotNumber, setOfficialBotNumber] = useState("");
+
+  useEffect(() => {
+    fetch("/api/public/config")
+      .then(res => res.json())
+      .then(data => {
+        if (data.whatsappNumber) setOfficialBotNumber(data.whatsappNumber);
+      })
+      .catch(err => console.error("Error fetching bot config", err));
+  }, []);
+
+  const publicUrl = `https://${window.location.host}/tienda/${storeData.slug}`;
+  const whatsappNumber = officialBotNumber || userStore?.phone?.replace(/\D/g, '') || "14155238886";
+  const recognitionMessage = `Hola, vengo de la tienda *${storeData.name}* ref: #${storeData.slug}`;
+  const whatsappLink = `https://wa.me/${whatsappNumber}?text=${encodeURIComponent(recognitionMessage)}`;
+
+  useEffect(() => {
+    setStoreData({
+      name: userStore?.name || "",
+      slug: userStore?.slug || "",
+      botName: userStore?.botName || "",
+      botTone: userStore?.botTone || "",
+      botGoal: userStore?.botGoal || "",
+      themeColor: userStore?.themeColor || "#4F46E5"
+    });
+  }, [userStore]);
+
+  const handleSaveStore = async () => {
+    if (!userStore?.id) return;
+    setIsSaving(true);
+    try {
+      await updateDoc(doc(db, "stores", userStore.id), storeData);
+      setUserStore({ ...userStore, ...storeData });
+      toast.success("Tienda actualizada correctamente.");
+    } catch (e: any) {
+      toast.error("Error: " + e.message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
     <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-8 max-w-4xl">
+       <div className="bg-[#111] border border-neutral-800 p-8 rounded-2xl ring-1 ring-white/5 space-y-8">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+             <div className="flex items-center gap-3 text-dark-accent mb-4 md:mb-0">
+               <Settings size={20} />
+               <h3 className="text-xs font-black uppercase tracking-[0.2em]">Configuración de Negocios (SaaS)</h3>
+             </div>
+             <div className="flex items-center gap-3">
+               <select 
+                 value={userStore?.id || ""} 
+                 onChange={(e) => {
+                   const s = userStores.find((x: any) => x.id === e.target.value);
+                   if (s) setUserStore(s);
+                 }}
+                 className="bg-black border border-neutral-800 py-2 px-6 text-xs rounded-xl focus:border-dark-accent text-white"
+               >
+                 {userStores.map((s: any) => (
+                   <option key={s.id} value={s.id}>{s.name} ({s.slug})</option>
+                 ))}
+               </select>
+               <button 
+                 onClick={async () => {
+                   const confirmInfo = prompt("Escribe el nombre de tu nuevo negocio para configurarlo:");
+                   if (!confirmInfo) return;
+                   
+                   const storeId = "store_" + Math.random().toString(36).substring(2, 9);
+                   const newStore = {
+                     ownerId: user.uid,
+                     name: confirmInfo,
+                     slug: confirmInfo.toLowerCase().replace(/[^a-z0-9-]/g, '-'),
+                     botName: "Asesor",
+                     botTone: "amigable y profesional",
+                     botGoal: "vender y guiar",
+                     themeColor: "#4F46E5"
+                   };
+                   await setDoc(doc(db, "stores", storeId), newStore);
+                   const finalStore = { id: storeId, ...newStore };
+                   setUserStores([...userStores, finalStore]);
+                   setUserStore(finalStore);
+                 }}
+                 className="bg-neutral-800 hover:bg-neutral-700 py-2 px-4 rounded-xl text-[10px] font-bold uppercase transition-colors whitespace-nowrap"
+               >
+                 + Crear Nuevo
+               </button>
+             </div>
+          </div>
+          
+          <hr className="border-neutral-800" />
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Nombre del Negocio</label>
+              <input value={storeData.name} onChange={e => setStoreData({...storeData, name: e.target.value})} className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">URL Pública (Slug)</label>
+              <input value={storeData.slug} onChange={e => setStoreData({...storeData, slug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '-')})} className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white" />
+              <p className="text-[9px] text-neutral-600">tudominio.com/tienda/{storeData.slug}</p>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Nombre del Bot IA</label>
+              <input value={storeData.botName} onChange={e => setStoreData({...storeData, botName: e.target.value})} placeholder="Ej: Jan, María, Asesor" className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Color de Marca</label>
+              <div className="flex gap-2">
+                <input type="color" value={storeData.themeColor} onChange={e => setStoreData({...storeData, themeColor: e.target.value})} className="h-10 w-12 rounded-lg cursor-pointer bg-black border border-neutral-800" />
+                <input value={storeData.themeColor} onChange={e => setStoreData({...storeData, themeColor: e.target.value})} className="flex-1 bg-black border border-neutral-800 rounded-xl p-2 text-xs text-white uppercase" />
+              </div>
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Tono del Bot</label>
+              <input value={storeData.botTone} onChange={e => setStoreData({...storeData, botTone: e.target.value})} placeholder="Ej: Amigable, Profesional, Paisa" className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white" />
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Objetivo Principal del Bot</label>
+              <textarea value={storeData.botGoal} onChange={e => setStoreData({...storeData, botGoal: e.target.value})} placeholder="Ej: Vender productos del catálogo..." className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white min-h-[60px]" />
+            </div>
+          </div>
+          <button onClick={handleSaveStore} disabled={isSaving} className="w-full bg-dark-accent text-black font-black uppercase text-[10px] tracking-widest py-3 rounded-xl disabled:opacity-50">
+            {isSaving ? "GUARDANDO..." : "GUARDAR CONFIGURACIÓN"}
+          </button>
+
+          <div className="bg-black/40 border border-neutral-800 p-6 rounded-2xl space-y-4">
+             <div className="flex items-center gap-2 text-dark-accent mb-2">
+                <ExternalLink size={16} />
+                <h4 className="text-[10px] font-black uppercase tracking-widest">Lanzamiento del Negocio</h4>
+             </div>
+
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                   <label className="text-[9px] text-neutral-500 uppercase font-black tracking-widest">Enlace del Catálogo Público</label>
+                   <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 p-3 rounded-xl">
+                      <span className="flex-1 text-[10px] text-neutral-300 font-mono truncate">{publicUrl}</span>
+                      <button 
+                         onClick={() => {
+                           navigator.clipboard.writeText(publicUrl);
+                           toast.success("URL de catálogo copiada");
+                         }}
+                         className="p-1.5 hover:bg-neutral-800 rounded-lg text-dark-accent transition-colors"
+                      >
+                         <Copy size={14} />
+                      </button>
+                   </div>
+                   <p className="text-[8px] text-neutral-600 italic">Comparte este link en tu bio de Instagram o TikTok.</p>
+                </div>
+
+                <div className="space-y-2">
+                   <label className="text-[9px] text-neutral-500 uppercase font-black tracking-widest">Enlace de Reconocimiento (WhatsApp)</label>
+                   <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 p-3 rounded-xl">
+                      <span className="flex-1 text-[10px] text-neutral-300 font-mono truncate">{whatsappLink}</span>
+                      <button 
+                         onClick={() => {
+                           navigator.clipboard.writeText(whatsappLink);
+                           toast.success("Enlace de WhatsApp copiado");
+                         }}
+                         className="p-1.5 hover:bg-neutral-800 rounded-lg text-dark-accent transition-colors"
+                      >
+                         <Copy size={14} />
+                      </button>
+                   </div>
+                   <p className="text-[8px] text-neutral-600 italic">Pega este link en tu publicidad para que Jan sepa de qué tienda vienen.</p>
+                </div>
+             </div>
+          </div>
+       </div>
+
        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="bg-[#111] border border-neutral-800 p-8 rounded-2xl space-y-6 ring-1 ring-white/5 h-fit">
              <div className="flex justify-between items-center mb-4">
@@ -2704,11 +2635,14 @@ function ConfigTab({ webhookUrl, copied, onCopy, onReset, isResetting, onClearTr
   );
 }
 
+import Storefront from "./components/Storefront";
+
 // Global App component with Routing
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/tienda/:slug" element={<Storefront />} />
         <Route path="/catalog" element={<Catalog />} />
         <Route path="/" element={<JanAdmin />} />
         {/* Fallback */}
