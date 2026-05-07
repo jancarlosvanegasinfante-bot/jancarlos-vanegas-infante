@@ -680,26 +680,422 @@ function JanAdmin() {
  * It listens for new WhatsApp messages and processes them via Gemini.
  */
 function AIProcessor({ user }: { user: FirebaseUser }) {
-  const [processingCount, setProcessingCount] = useState(0);
+  const [processingIds, setProcessingIds] = useState<Set<string>>(new Set());
+  const processingRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!user) return;
 
-    console.log("[AI Agent] Monitoring processing status...");
+    // AUTO-SYNC: Si el inventario está vacío, lo poblamos desde el catalog.json automáticamente
+    const ensureInventory = async () => {
+       try {
+          const snap = await getDocs(collection(db, "products"));
+          if (snap.empty) {
+             console.log("[AI Agent] Inventory empty. Auto-syncing from catalog.json...");
+             const res = await fetch("/api/admin/catalog");
+             if (res.ok) {
+                const catalogData = await res.json();
+                const batch = writeBatch(db);
+                catalogData.products.forEach((p: any) => {
+                   batch.set(doc(db, "products", p.id), { 
+                      ...p, 
+                      stock: 20, 
+                      updatedAt: serverTimestamp() 
+                   });
+                });
+                await batch.commit();
+                console.log("[AI Agent] Auto-sync complete.");
+             }
+          }
+       } catch (err) {
+          console.warn("[AI Agent] Auto-sync error:", err);
+       }
+    };
+    ensureInventory();
+
+    console.log("[AI Agent] Starting listener for incoming messages (MONITOR ONLY)...");
     const q = query(
       collection(db, "activities"), 
-      where("status", "==", "procesando"),
-      limit(20)
+      where("status", "==", "recibido"),
+      orderBy("timestamp", "asc")
     );
     
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-       setProcessingCount(snapshot.docs.length);
+    const unsubscribe = onSnapshot(q, async (snapshot) => {
+       // SERVER IS NOW AUTONOMOUS - WE JUST LOG HERE
+       if (snapshot.docs.length > 0) {
+         console.log(`[AI Agent] ${snapshot.docs.length} messages pending (Server is processing them)`);
+       }
     });
 
     return () => unsubscribe();
   }, [user]);
 
-  if (processingCount === 0) return null;
+  async function processMessage(id: string, data: any, convData?: any) {
+    try {
+      await updateDoc(doc(db, "activities", id), { 
+        status: "procesando",
+        processingAt: serverTimestamp()
+      });
+
+      const GEMINI_API_KEY = (process as any).env?.GEMINI_API_KEY;
+      if (!GEMINI_API_KEY) throw new Error("No Gemini API Key");
+
+      const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
+      // Using the exact requested models by user
+      const primaryModel = "gemini-2.5-flash"; 
+      const fallbackModel = "gemini-flash-latest";
+
+      const generateWithRetry = async (params: any, retries = 5) => {
+        for (let i = 0; i < retries; i++) {
+          try {
+            return await ai.models.generateContent({ ...params, model: primaryModel });
+          } catch (err: any) {
+            const errStr = err.message || JSON.stringify(err) || String(err);
+            console.warn(`[Client AI] Intent ${i+1} failed with ${primaryModel}:`, errStr);
+            try {
+               console.log(`[Client AI] Trying fallback model: ${fallbackModel}`);
+               return await ai.models.generateContent({ ...params, model: fallbackModel });
+            } catch (fallbackErr: any) {
+               console.warn(`[Client AI] Fallback failed:`, fallbackErr.message);
+               // fallthrough to the retry logic for transient errors
+            }
+            const isTransient = 
+              errStr.includes("503") || 
+              errStr.includes("429") || 
+              errStr.includes("UNAVAILABLE") || 
+              errStr.includes("exhausted") || 
+              errStr.includes("overloaded") ||
+              errStr.includes("high demand");
+              
+            if (isTransient && i < retries - 1) {
+              const delay = Math.pow(2, i) * 2000 + Math.random() * 1000;
+              console.warn(`[AI Agent] Retrying (${i + 1}/${retries}) after transient error...`, errStr);
+              await new Promise(r => setTimeout(r, delay));
+              continue;
+            }
+            throw err;
+          }
+        }
+      };
+
+      // Avoid processing very old messages
+      const msgTime = data.timestamp?.toMillis?.() || Date.now();
+      if (Date.now() - msgTime > 1800000) { // 30 minutes
+        console.warn("[AI Agent] Skipping outdated message");
+        await updateDoc(doc(db, "activities", id), { status: "expirado" });
+        return;
+      }
+
+      // 1. Fetch Context: Profile, History and Inventory
+      const phone = (data.from || "").replace("whatsapp:", "").trim();
+      let customerProfile = {};
+      
+      try {
+        // Try to get profile from 'customers' collection (where tool saves it)
+        const customerDoc = await getDoc(doc(db, "customers", phone));
+        if (customerDoc.exists()) {
+          customerProfile = customerDoc.data();
+        } else if (convData?.profile) {
+          customerProfile = convData.profile;
+        }
+      } catch (err) {
+        console.warn("[AI Agent] Profile fetch error:", err);
+      }
+
+      let historyContext: any[] = [];
+      let inventoryContextSnippet = "";
+      try {
+        const prodSnap = await getDocs(collection(db, "products"));
+        const availableProducts = prodSnap.docs.map(d => {
+           const pData = d.data();
+           return { id: d.id, name: pData.name, price: pData.price, imageUrl: pData.imageUrl, videoUrl: pData.videoUrl, stock: pData.stock };
+        });
+        inventoryContextSnippet = JSON.stringify(availableProducts);
+
+        // Fetch history - query for messages involving this phone
+        const dbRecipient = `whatsapp:${phone}`;
+        const qRecipient = query(
+          collection(db, "activities"), 
+          where("recipient", "==", dbRecipient),
+          orderBy("timestamp", "desc"), 
+          limit(20)
+        );
+        const qFrom = query(
+          collection(db, "activities"), 
+          where("from", "==", dbRecipient),
+          orderBy("timestamp", "desc"), 
+          limit(20)
+        );
+
+        const [snapRecip, snapFrom] = await Promise.all([getDocs(qRecipient), getDocs(qFrom)]);
+        
+        const historyItems = [...snapRecip.docs, ...snapFrom.docs]
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
+          .sort((a: any, b: any) => (a.timestamp?.toMillis?.() || 0) - (b.timestamp?.toMillis?.() || 0))
+          .slice(-10); // Last 10 messages
+
+        historyContext = historyItems.map((h: any) => {
+          const isBot = h.status === "respondido" || !!h.manualAgent || h.from?.includes('14155238886') || h.senderType === 'bot' || !!h.response;
+          return {
+            role: isBot ? 'model' : 'user',
+            parts: [{ text: h.message || h.response || "" }]
+          };
+        }).filter(h => h.parts[0].text);
+      } catch (historyErr) {
+        console.warn("[AI Agent] Context fetch error:", historyErr);
+      }
+
+      const contents: any[] = [
+        ...historyContext,
+        { role: 'user', parts: [{ text: `[PERFIL: ${JSON.stringify(customerProfile)}]\n[TIENDA: JANSEL SHOP 💎]\n[INVENTARIO_ACTUAL: ${inventoryContextSnippet}]\n[CLIENTE_PHONE: ${phone}]\n\nMensaje: ${data.message}` }] }
+      ];
+
+      const genConfig = {
+        systemInstruction: JAN_SYSTEM_INSTRUCTION,
+        responseMimeType: "application/json",
+        responseSchema: JAN_RESPONSE_SCHEMA as any,
+        maxOutputTokens: 2048,
+        tools: [{ functionDeclarations: [captureOrderTool, updateCustomerProfileTool, checkInventoryTool] }]
+      };
+
+      let result = await generateWithRetry({ model, contents, config: genConfig });
+
+      let functionCalls = result.functionCalls;
+      let toolIterations = 0;
+      while (functionCalls && functionCalls.length > 0 && toolIterations < 2) {
+        toolIterations++;
+        const toolResults = [];
+        for (const call of functionCalls) {
+          if (call.name === "checkInventory") {
+            const snap = await getDocs(collection(db, "products"));
+            const products = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+            toolResults.push({ functionResponse: { id: call.id, name: call.name, response: { products } } });
+          } else if (call.name === "captureOrder") {
+            const args = call.args as any;
+            const orderId = Math.random().toString(36).substring(7).toUpperCase();
+            
+            // Rehydrate product details from DB
+            let productName = "Producto Desconocido";
+            let totalPrice = 0;
+            try {
+              if (args.productId) {
+                 const productDoc = await getDoc(doc(db, "products", args.productId));
+                 if (productDoc.exists()) {
+                   const pData = productDoc.data();
+                   productName = pData.name;
+                   totalPrice = pData.price * (args.quantity || 1);
+                 }
+              }
+            } catch (err) {
+              console.error("[Orders] Error fetching product details", err);
+            }
+
+            await addDoc(collection(db, "orders"), { 
+              ...args, 
+              productName,
+              totalPrice,
+              id: orderId, 
+              status: 'pendiente', 
+              createdAt: serverTimestamp() 
+            });
+            toolResults.push({ functionResponse: { id: call.id, name: call.name, response: { success: true, orderId } } });
+          } else if (call.name === "updateCustomerProfile") {
+            const args = call.args as any;
+            const phone = (data.from || "").replace("whatsapp:", "");
+            await setDoc(doc(db, "customers", phone), { name: args.name, gender: args.gender || "neutral", phone, lastInteraction: serverTimestamp() }, { merge: true });
+            toolResults.push({ functionResponse: { id: call.id, name: call.name, response: { success: true } } });
+          }
+        }
+        const previousModelContent = result.candidates?.[0]?.content;
+        if (previousModelContent) {
+          contents.push({ role: 'model', parts: previousModelContent.parts });
+          contents.push({ role: 'user', parts: toolResults });
+        }
+        result = await generateWithRetry({ model, contents, config: genConfig });
+        functionCalls = result.functionCalls;
+      }
+
+      let jsonResponse: any = { type: "text", text: "" };
+      try {
+        if (!result.text) throw new Error("Empty model output");
+        // Clear common markdown artifacts that might break JSON.parse
+        let cleanText = result.text.trim();
+        if (cleanText.startsWith("```json")) cleanText = cleanText.replace(/```json|```/g, "").trim();
+        jsonResponse = JSON.parse(cleanText);
+      } catch (parseErr) {
+        console.warn("[AI Agent] JSON Parse Failed. Attempting raw recovery. Raw content:", result.text);
+        const raw = result.text || "";
+        
+        // Comprehensive fallback: Try to find 'text' value first
+        const textKeySearch = /"text"\s*:\s*"/i;
+        const match = raw.match(textKeySearch);
+        
+        if (match && match.index !== undefined) {
+           const startPos = match.index + match[0].length;
+           let extracted = raw.substring(startPos);
+           const endQuote = extracted.indexOf('"');
+           
+           if (endQuote !== -1) {
+              jsonResponse.text = extracted.substring(0, endQuote).trim();
+           } else {
+              // Truncated mid-text: take everything remaining and clean up
+              jsonResponse.text = extracted.replace(/[{}"]+$/, "").trim();
+           }
+        } else {
+           // Last resort: just clean the raw string and hope for the best
+           jsonResponse.text = raw.replace(/[{}"]/g, "")
+                                 .replace(/"type"\s*:\s*"[^"]*"/g, "")
+                                 .replace(/"imageUrl"\s*:\s*"[^"]*"/g, "")
+                                 .replace(/"videoUrl"\s*:\s*"[^"]*"/g, "")
+                                 .replace(/,/g, " ")
+                                 .trim();
+        }
+        }
+        
+        // Map new schema fields to existing code
+        if (jsonResponse.respuesta) jsonResponse.text = jsonResponse.respuesta;
+        
+        // Handle Escalation and Order Alerts
+        if (jsonResponse.escalar || jsonResponse.pedido_confirmado) {
+           const isAdminAlert = jsonResponse.pedido_confirmado;
+           const alertType = isAdminAlert ? "✅ *NUEVO PEDIDO CONFIRMADO*" : "⚠️ *CLIENTE REQUIERE ATENCIÓN HUMANA*";
+           const alertDetail = isAdminAlert ? (jsonResponse.alerta_admin || "Pedido registrado") : (jsonResponse.razon || "No especificada");
+           
+           console.log(`[AI Agent] Alerting admins for ${phone}: ${alertType}`);
+           
+           fetch("/api/admin/bulk-notify", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ 
+                message: `${alertType}\n\n*Cliente:* ${phone}\n*Detalle:* ${alertDetail}`
+              })
+           }).catch(console.error);
+           
+           if (jsonResponse.escalar) {
+              fetch("/api/whatsapp/toggle-ai", {
+                 method: "POST",
+                 headers: { "Content-Type": "application/json" },
+                 body: JSON.stringify({ phone, pause: true })
+              }).catch(console.error);
+           }
+        }
+
+        if (jsonResponse.text.length > 1000) jsonResponse.text = jsonResponse.text.substring(0, 1000);
+
+        // Replace placeholders or potentially hallucinated URLs with real production URL
+        const prodCatalogUrl = "https://jansel-shop-985283274281.us-west1.run.app/catalog";
+        jsonResponse.text = jsonResponse.text.replace(/\[CATALOG_URL\]/g, prodCatalogUrl);
+        // Failsafe for hallucinated brand domains
+        jsonResponse.text = jsonResponse.text.replace(/https?:\/\/(www\.)?janselshop\.(com|co|store|shop)\/catalog/gi, prodCatalogUrl);
+
+      if (!jsonResponse.text) {
+         jsonResponse.text = "¿Cómo podemos ayudarte hoy, patrón?";
+      }
+
+      
+      let mediaUrl = jsonResponse.imageUrl || "";
+      let finalMessage = jsonResponse.text;
+
+      // Ensure videoUrl is appended if searching was successful AND not already in text
+      if (jsonResponse.videoUrl && !finalMessage.includes(jsonResponse.videoUrl)) {
+         finalMessage += `\n\nMira cómo funciona aquí 👇\n${jsonResponse.videoUrl}`;
+      }
+
+      if (jsonResponse.imageUrl) {
+        mediaUrl = jsonResponse.imageUrl;
+      } else if (finalMessage.toLowerCase().includes("precio") || finalMessage.toLowerCase().includes("$")) {
+        // Generative Fallback
+        console.log("[AI Agent] Catalog photo missing. Generating AI visualization...");
+        const genPrompt = `Professional close-up product photography of ${finalMessage.substring(0, 60).replace(/[^\w\s]/g, "")}, high resolution, studio lighting, clean minimal background`;
+        const generatedBase64 = await generateImage(genPrompt, GEMINI_API_KEY);
+        if (generatedBase64) {
+           const cacheRes = await fetch("/api/admin/cache-media", {
+             method: "POST",
+             headers: { "Content-Type": "application/json" },
+             body: JSON.stringify({ data: generatedBase64, mimeType: "image/jpeg" })
+           });
+           const cacheData = await cacheRes.json();
+           mediaUrl = cacheData.url;
+        }
+      }
+
+      if (jsonResponse.type === "audio" && jsonResponse.audioText) {
+        console.log("[AI Agent] Generating audio for:", jsonResponse.audioText);
+        const base64 = await generateAudio(jsonResponse.audioText, GEMINI_API_KEY);
+        if (base64) {
+          const cacheRes = await fetch("/api/admin/cache-media", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ data: base64, mimeType: "audio/mpeg" })
+          });
+          const cacheData = await cacheRes.json();
+          mediaUrl = cacheData.url;
+        }
+      }
+
+      console.log(`[AI Agent] Attempting to send message to ${data.from}. Contenido: ${finalMessage.substring(0, 30)}...`);
+      
+      // Auto-pause AI if escalating
+      const shouldEscalate = jsonResponse.escalar === true || 
+                            jsonResponse.intencion === "humano" || 
+                            jsonResponse.intencion === "producto_no_disponible";
+      
+      if (shouldEscalate) {
+        console.log(`[AI Agent] Intention '${jsonResponse.intencion}' detected. Auto-pausing AI for ${phone}`);
+        try {
+          await fetch("/api/whatsapp/toggle-ai", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ phone: data.from, pause: true })
+          });
+        } catch (e) {
+          console.warn("[AI Agent] Failed to auto-pause AI:", e);
+        }
+      }
+
+      const res = await fetch("/api/admin/send-message", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ 
+          to: data.from, 
+          message: finalMessage, 
+          mediaUrl,
+          from: data.botNumber || null // Use the number that received the message
+        })
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json();
+        throw new Error(errorData.error || `Server returned ${res.status}`);
+      }
+
+      await updateDoc(doc(db, "activities", id), { 
+        status: "respondido", 
+        response: finalMessage, 
+        respondedAt: serverTimestamp(),
+        mediaUrl: mediaUrl || null
+      });
+    } catch (err: any) {
+      let finalErrMsg = err.message || "Error desconocido";
+      const isAIError = finalErrMsg.includes("503") || finalErrMsg.includes("UNAVAILABLE") || finalErrMsg.includes("high demand") || finalErrMsg.includes("429") || finalErrMsg.includes("overloaded");
+      
+      if (isAIError) {
+        finalErrMsg = "⚠️ IA saturada (Google AI saturado). El bot no pudo responder a tiempo por alta demanda global.";
+      }
+      
+      await updateDoc(doc(db, "activities", id), { 
+        status: "error", 
+        response: `Error: ${finalErrMsg}`, 
+        errorAt: serverTimestamp() 
+      });
+    } finally {
+      processingRef.current.delete(id);
+      setProcessingIds(new Set(processingRef.current));
+    }
+  }
+
+  if (processingIds.size === 0) return null;
   return (
     <div className="fixed bottom-6 right-6 z-[100] pointer-events-none">
       <div className="bg-neutral-900 border border-dark-accent/20 rounded-2xl p-4 shadow-2xl flex items-center gap-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -708,12 +1104,12 @@ function AIProcessor({ user }: { user: FirebaseUser }) {
             <Cpu className="w-5 h-5 text-dark-accent animate-pulse" />
           </div>
           <div className="absolute -top-1 -right-1 w-4 h-4 bg-dark-accent rounded-full flex items-center justify-center border-2 border-neutral-900">
-            <span className="text-[8px] font-black text-black">{processingCount}</span>
+            <span className="text-[8px] font-black text-black">{processingIds.size}</span>
           </div>
         </div>
         <div>
           <h4 className="text-white text-[10px] font-black uppercase tracking-widest">Jan Procesando...</h4>
-          <p className="text-[9px] text-neutral-500">Auto-respuesta activa en el servidor.</p>
+          <p className="text-[9px] text-neutral-500">Auto-respuesta activa.</p>
         </div>
       </div>
     </div>

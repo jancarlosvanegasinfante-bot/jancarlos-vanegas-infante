@@ -55,37 +55,6 @@ console.log(`[Firebase] Initializing with project: ${firebaseConfig.projectId}, 
 const firebaseApp = initializeApp(firebaseConfig);
 const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
 
-// ==============================================
-// 🚦 GLOBAL QUOTA BREAKER (ANTI-SPAM / QUOTA LOOP)
-// ==============================================
-let globalQuotaExceeded = false;
-let quotaExceededTime = 0;
-const QUOTA_COOLDOWN_MS = 60 * 60 * 1000; // 1 Hora
-
-function checkGlobalQuota(): boolean {
-  if (globalQuotaExceeded) {
-    if (Date.now() - quotaExceededTime > QUOTA_COOLDOWN_MS) {
-      globalQuotaExceeded = false;
-      console.log("[QUOTA BREAKER] Cooldown finished. Resuming Firestore writes.");
-      return false;
-    }
-    return true; // Still locked
-  }
-  return false;
-}
-
-function handleFirestoreError(e: any): never {
-  const errMsg = e?.message || String(e);
-  if (errMsg.includes("Quota") || errMsg.includes("RESOURCE_EXHAUSTED") || errMsg.includes("Quota limit exceeded")) {
-    if (!globalQuotaExceeded) {
-      console.error("🚨 [QUOTA BREAKER] FIRESTORE QUOTA EXCEEDED! Locking all writes for 1 hour to prevent loops.");
-      globalQuotaExceeded = true;
-      quotaExceededTime = Date.now();
-    }
-  }
-  throw e;
-}
-
 if (SENDGRID_API_KEY) {
   sgMail.setApiKey(SENDGRID_API_KEY);
 }
@@ -573,15 +542,12 @@ Jan respondió: "${jsonResponse.mensaje}"`;
     }
 
   } catch (err: any) {
-    handleFirestoreError(err);
     console.error(`[Server AI][Error] Falló procesamiento en Railway:`, err.message);
-    if (!checkGlobalQuota()) {
-      await updateDoc(doc(db, "activities", activityId), { 
-        status: "error", 
-        response: `Jan tuvo un mareo: ${err.message}`,
-        errorAt: serverTimestamp()
-      }).catch((e)=>console.error("Failed to write error due to quota", e));
-    }
+    await updateDoc(doc(db, "activities", activityId), { 
+      status: "error", 
+      response: `Jan tuvo un mareo: ${err.message}`,
+      errorAt: serverTimestamp()
+    });
   }
 }
 async function updateTwilioStatus(limitReached: boolean, error?: string) {
@@ -650,11 +616,6 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
   const finalTo = normalizePhone(to);
   const finalFrom = normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886");
   
-  if (finalTo === finalFrom) {
-    console.warn(`[WhatsApp Block] Attempted to send message to itself: ${finalTo}. Aborting to prevent infinite loop.`);
-    return;
-  }
-
   console.log(`[Twilio Debug] Final Numbers: FROM=${finalFrom} TO=${finalTo}`);
 
   // Check Twilio limits early
@@ -931,8 +892,13 @@ async function startServer() {
   });
 
   // Forced Sync on Boot (Self-Correction for Sincronizar button issues)
-  // SEED ONLY IF EMPTY to save quota
-  seedDatabase().catch(e => console.error("[Jan Sync] Error en arranque:", e));
+  console.log("[Jan Sync] Ejecutando sincronización forzada de arranque...");
+  seedDatabase(true).catch(e => console.error("[Jan Sync] Error en arranque:", e));
+
+  // Initialize DB
+  seedDatabase().catch(err => {
+    console.warn("[DB] No se pudo sembrar el catálogo (posiblemente por permisos):", err.message);
+  });
 
   // Admin Config Endpoints
   app.post("/api/admin/upload", express.raw({ type: "*/*", limit: "10mb" }), async (req, res) => {
@@ -977,10 +943,6 @@ async function startServer() {
 
     // Twilio Status Webhook (Sent, Delivered, Read)
     app.post("/api/webhook/whatsapp/status", async (req, res) => {
-      if (checkGlobalQuota()) {
-        return res.sendStatus(200);
-      }
-
       const { activityId } = req.query as { activityId: string };
       // Normalizing Twilio params (they can be in body or query depending on Twilio config)
       const status = req.body.MessageStatus || req.body.SmsStatus || req.query.MessageStatus;
@@ -1005,16 +967,11 @@ async function startServer() {
       }
 
       if (mappedStatus) {
-        const existingStatus = snap.data()?.whatsappStatus;
-        if (existingStatus !== mappedStatus) {
-          await updateDoc(doc(db, "activities", actId), { 
-            whatsappStatus: mappedStatus,
-            statusUpdateAt: serverTimestamp()
-          });
-          console.log(`[Twilio Status] Successfully updated Activity ${actId} to ${mappedStatus}`);
-        } else {
-          console.log(`[Twilio Status] Status for Activity ${actId} is already ${mappedStatus}. Skipping update.`);
-        }
+        await updateDoc(doc(db, "activities", actId), { 
+          whatsappStatus: mappedStatus,
+          statusUpdateAt: serverTimestamp()
+        });
+        console.log(`[Twilio Status] Successfully updated Activity ${actId} to ${mappedStatus}`);
       }
     } catch (e: any) {
         console.error("[Twilio Status][Error] Update failed:", e.message);
@@ -1025,10 +982,6 @@ async function startServer() {
 
   // Twilio Webhook
   app.post("/api/webhook/whatsapp", async (req, res) => {
-    if (checkGlobalQuota()) {
-      return res.status(200).send(""); // Early exit
-    }
-
     detectCurrentUrl(req);
     // Log incoming body for debugging
     console.log("[WhatsApp Webhook] Received call. Body keys:", Object.keys(req.body));
@@ -1045,18 +998,10 @@ async function startServer() {
     }
 
     // IGNORE MESSAGES FROM SELF (TWILIO ECHOES OR LOOPBACKS)
-    const normBot = normalizePhone(TWILIO_FROM_NUMBER || "+14155238886");
-    const normTo = normalizePhone(to);
-    const normFrom = normalizePhone(from);
-
-    if (normFrom === normBot || normFrom === normTo) {
-      console.log(`[WhatsApp Webhook] Ignoring loopback message from bot (${normFrom})`);
-      return res.status(200).send("");
-    }
-    
-    // ANTI SPAM
-    if (!canReply(normFrom)) {
-      console.warn(`[WhatsApp Webhook] Anti-spam: Ignorando mensajes múltiples de ${normFrom}`);
+    const normalizedFrom = from.toLowerCase();
+    const normalizedBot = (TWILIO_FROM_NUMBER || "").toLowerCase();
+    if (normalizedFrom === normalizedBot || normalizedFrom === `whatsapp:${normalizedBot}`) {
+      console.log("[WhatsApp Webhook] Ignoring message from bot's own number.");
       return res.status(200).send("");
     }
 
@@ -1268,10 +1213,6 @@ async function startServer() {
    * FOLLOW-UP ENGINE (individual per customer)
    */
   setInterval(async () => {
-    if (checkGlobalQuota()) {
-      return; // Skip execution if quota is broken
-    }
-
     try {
       const nowISO = new Date().toISOString();
       const q = query(
@@ -1287,20 +1228,8 @@ async function startServer() {
       console.log(`[Follow-up Engine] Processing ${snap.size} due follow-ups...`);
       
       for (const docSnap of snap.docs) {
-        if (checkGlobalQuota()) break;
-
         const fu = docSnap.data();
         const phone = fu.phone;
-        
-        // PRE-MARK as 'processing' to prevent infinite loops if Quota Exceeded later
-        try {
-          await updateDoc(docSnap.ref, { status: "processing", updatedAt: serverTimestamp() });
-        } catch (e: any) {
-          handleFirestoreError(e); // This will trigger global breaker
-          console.error(`[Follow-up] Failed to lock doc (Quota?). Skipping ${phone}`, e.message);
-          continue; 
-        }
-
         const cleanPhone = phone.replace('whatsapp:', '');
         const formattedPhone = phone.includes(':') ? phone : `whatsapp:${phone}`;
 

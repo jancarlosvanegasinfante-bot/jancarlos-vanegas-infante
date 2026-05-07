@@ -3,7 +3,7 @@ import "dotenv/config";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "AIzaSyBCafhfCtFMz_Hw1sg13goz8sMNOZH287U";
 const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-const model = "gemini-3-flash-preview";
+const model = "gemini-2.5-flash";
 
 const JAN_SYSTEM_INSTRUCTION = `Eres Jan Vanegas, el mejor vendedor paisa de Medellín. Tu objetivo es cerrar la venta YA.
 Usa carisma: "mi reina", "corazón", "patrón", "jefe", "caballero".
@@ -26,7 +26,7 @@ async function testJanAudioDecision() {
 
   try { model;
     const result = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash",
       contents: [{ role: 'user', parts: [{ text: "Jan, parce, cuénteme por qué ese combo de herramientas es tan bueno pues" }] }],
       config: {
         systemInstruction: JAN_SYSTEM_INSTRUCTION,
