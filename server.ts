@@ -480,7 +480,7 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
 
     let result: any;
     const primaryModel = "gemini-2.5-flash";
-    const fallbackModel = "gemini-2.0-flash";
+    const fallbackModel = "gemini-2.5-flash-lite";
 
     const contents = [
       { 
