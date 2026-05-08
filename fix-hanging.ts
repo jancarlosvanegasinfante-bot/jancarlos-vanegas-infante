@@ -6,21 +6,26 @@ import path from 'path';
 const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
 const firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
 const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
 async function fixHanging() {
-  const q = query(collection(db, "activities"), where("status", "==", "procesando"));
-  const snap = await getDocs(q);
-  console.log(`Found ${snap.docs.length} activities stuck in procesando.`);
+  console.log("Revisando actividades...");
+  const snap = await getDocs(collection(db, "activities"));
+  let count = 0;
   
   for (const d of snap.docs) {
-    await updateDoc(doc(db, "activities", d.id), {
-      status: "error",
-      response: "Interrumpido o timeout del servidor",
-      errorAt: new Date()
-    });
-    console.log("Fixed:", d.id);
+    const data = d.data();
+    if (data.status === "procesando") {
+      await updateDoc(doc(db, "activities", d.id), {
+        status: "error",
+        response: "Interrumpido por seguridad (exceso de carga)",
+        errorAt: new Date()
+      });
+      console.log("Liberado:", d.id);
+      count++;
+    }
   }
+  console.log(`Se liberaron ${count} actividades.`);
   process.exit(0);
 }
 

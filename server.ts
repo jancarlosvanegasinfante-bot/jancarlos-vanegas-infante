@@ -426,6 +426,14 @@ async function processInferenceOnServer(activityId: string, data: any) {
 
     const ai = new GoogleGenAI({ apiKey: API_KEY });
     const fromPhone = data.from.replace("whatsapp:", "").trim();
+    
+    // SAFETY: Truncate message if it's too long to prevent crashes
+    let safeMessage = data.message || "";
+    if (safeMessage.length > 10000) {
+      console.warn(`[Server AI] Mensaje recibido de ${fromPhone} es demasiado largo (${safeMessage.length} chars). Recortando...`);
+      safeMessage = safeMessage.substring(0, 10000) + "\n...[CONTENIDO RECORTADO POR EXCESO DE TAMAÑO]";
+    }
+
     // Unique customer profile per store to prevent mixing CRM states
     const customerProfileId = `${assignedStoreId}_${fromPhone}`;
     const cxSnap = await getDoc(doc(db, "customers", customerProfileId));
@@ -461,7 +469,7 @@ INTENCIÓN ANTERIOR: ${customerProfile?.intencion || "Ninguna"}
 HISTORIAL:
 ${history}
 
-MENSAJE ACTUAL: ${data.message || ""}${mediaParts.length > 0 ? " (El cliente envió archivos multimedia/audio que adjunto para tu análisis)" : ""}
+MENSAJE ACTUAL: ${safeMessage}${mediaParts.length > 0 ? " (El cliente envió archivos multimedia/audio que adjunto para tu análisis)" : ""}
 
 INVENTARIO ACTUAL:
 ${JSON.stringify(products)}
@@ -470,9 +478,9 @@ RECUERDA: Analiza al cliente como un experto en ventas. Devuelve JSON.
 IMPORTANTE: Sé extremadamente breve y directo. Evita explicaciones largas. El cliente quiere comprar rápido.
 ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urgencia, objeciones, nivel_interes y siguiente_mejor_accion, basado en si ha dado direccion, etc.`;
 
-    let result;
-    const primaryModel = "gemini-2.5-flash";
-    const fallbackModel = "gemini-flash-latest";
+    let result: any;
+    const primaryModel = "gemini-2.0-flash";
+    const fallbackModel = "gemini-1.5-flash";
 
     const contents = [
       { 
@@ -484,9 +492,18 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
       }
     ];
 
+    // Helper for timeout
+    const withTimeout = (promise: Promise<any>, ms: number) => {
+      let timeoutId: any;
+      const timeoutPromise = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error(`TIMEOUT_AI_${ms}`)), ms);
+      });
+      return Promise.race([promise, timeoutPromise]).finally(() => clearTimeout(timeoutId));
+    };
+
     try {
-      console.log(`[Server AI] Intentando con modelo principal: ${primaryModel}`);
-      result = await ai.models.generateContent({
+      console.log(`[Server AI] Generando para ${fromPhone} (Longitud prompt: ${promptText.length})...`);
+      result = await withTimeout(ai.models.generateContent({
         model: primaryModel,
         contents: contents,
         config: {
@@ -494,10 +511,13 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
           responseMimeType: "application/json",
           responseSchema: JAN_RESPONSE_SCHEMA
         }
-      });
+      }), 40000); // 40s total timeout
     } catch (primaryErr: any) {
+      if (primaryErr.message?.includes("TIMEOUT_AI")) {
+        throw new Error("La IA tardó demasiado en responder.");
+      }
       console.warn(`[Server AI] Error con ${primaryModel}: ${primaryErr.message}. Usando fallback...`);
-      result = await ai.models.generateContent({
+      result = await withTimeout(ai.models.generateContent({
         model: fallbackModel,
         contents: contents,
         config: {
@@ -505,7 +525,7 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
           responseMimeType: "application/json",
           responseSchema: JAN_RESPONSE_SCHEMA
         }
-      });
+      }), 40000);
     }
 
     if (!result.text) throw new Error("La IA no devolvió texto.");

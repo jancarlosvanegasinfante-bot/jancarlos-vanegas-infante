@@ -2079,7 +2079,7 @@ function MonitorTab({ activities }: { activities: Activity[], key?: string }) {
                     <div className="flex flex-col">
                       <span className="text-[10px] font-bold text-white uppercase tracking-tight mb-1">{(item.from || "unknown").replace("whatsapp:", "")}</span>
                       <p className="text-[11px] text-neutral-400 italic line-clamp-1 max-w-xs group-hover:text-neutral-200 transition-colors">
-                        "{item.message}"
+                        "{(item.message || "").substring(0, 500)}..."
                       </p>
                     </div>
                   </td>
@@ -2226,7 +2226,7 @@ function RecoveryTab({ activities, onSelectUser }: { activities: Activity[], onS
                   </div>
                   <div>
                      <p className="text-xs font-bold text-white uppercase">{(l.from || "unknown").replace('whatsapp:', '')}</p>
-                     <p className="text-[10px] text-neutral-500 line-clamp-1 italic">"{l.message}"</p>
+                     <p className="text-[10px] text-neutral-500 line-clamp-1 italic">"{(l.message || "").substring(0, 300)}..."</p>
                   </div>
                </div>
                <div className="flex items-center gap-3">
