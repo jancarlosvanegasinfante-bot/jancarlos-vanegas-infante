@@ -509,7 +509,23 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
     }
 
     if (!result.text) throw new Error("La IA no devolvió texto.");
-    const jsonResponse = JSON.parse(result.text);
+    let jsonResponse;
+    try {
+      jsonResponse = JSON.parse(result.text);
+    } catch (parseErr: any) {
+      console.error(`[Server AI] Error parseando JSON de Gemini. Longitud del texto: ${result.text.length}`);
+      if (result.text.length > 500) {
+         console.debug("[Server AI] Primeros 500 chars:", result.text.substring(0, 500));
+         console.debug("[Server AI] Últimos 500 chars:", result.text.substring(result.text.length - 500));
+      }
+      // Fallback response to avoid freezing the conversation
+      jsonResponse = {
+        accion: "respuesta",
+        mensaje: "Uy parce, me enredé un poquito procesando eso tan largo. ¿Me repites porfa en un mensaje más cortico?",
+        intencion: "error",
+        nivel_interes: "bajo"
+      };
+    }
     console.log(`[Server AI] Respuesta generada para ${fromPhone} (Acción: ${jsonResponse.accion}):`, jsonResponse.mensaje);
 
     // CRM / Scoring update
@@ -615,8 +631,8 @@ Jan respondió: "${jsonResponse.mensaje}"`;
     }
 
   } catch (err: any) {
-    handleFirestoreError(err);
     console.error(`[Server AI][Error] Falló procesamiento en Railway:`, err.message);
+    try { handleFirestoreError(err); } catch (e) {}
     if (!checkGlobalQuota()) {
       await updateDoc(doc(db, "activities", activityId), { 
         status: "error", 

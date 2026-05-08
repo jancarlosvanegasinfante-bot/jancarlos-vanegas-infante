@@ -8,13 +8,18 @@ export interface StoreBotConfig {
   botGoal?: string;
   paisaStyle?: boolean;
   dataToCollect?: string;
+  baseConocimiento?: string;
 }
 
 export function getSystemInstruction(config: StoreBotConfig = {}): string {
   const storeName = config.name || "JANSEL SHOP";
   const botName = config.botName || "Jan";
   
-  if (config.botTone || config.botGoal || config.dataToCollect) {
+  const knowledgeBase = config.baseConocimiento && config.baseConocimiento.trim().length > 0
+    ? `\n\n📌 BASE DE CONOCIMIENTOS PARA SOPORTE:\nUtiliza la siguiente información como tu fuente de verdad para responder dudas del cliente. Si la respuesta está aquí, úsala. Si entra en conflicto con las reglas, prioriza estas instrucciones.\n"""\n${config.baseConocimiento}\n"""\n`
+    : "";
+
+  if (config.botTone || config.botGoal || config.dataToCollect || config.baseConocimiento) {
     // Custom SaaS config
     const tone = config.botTone || "amigable y profesional";
     const goal = config.botGoal || "persuadir y cerrar ventas";
@@ -43,7 +48,7 @@ REGLAS DE ORO:
 5. CAPACIDAD MULTIMODAL (OJOS Y OÍDOS): 
    - AUDIOS: Analiza el audio y responde a su contenido.
    - IMÁGENES: Analiza cualquier imagen. Si no está en catálogo o identificas comprobante, usa 'accion = "notificar_admin"' o felicítalo.
-
+${knowledgeBase}
 ESTILO: ${tone}, mensajes visualmente atractivos.`;
   }
 
@@ -81,7 +86,7 @@ REGLAS DE ORO:
      * SI ES UN COMPROBANTE DE PAGO: Reconócelo de inmediato (nequi, bancolombia, etc. con logos y valores), dile que ya lo vas a validar con contabilidad y usa 'accion = "respuesta"'. ¡Felicítalo por su compra! 💎
      * SI NO ESTÁ EN EL CATÁLOGO: Identifica QUÉ es el objeto (ej: una llanta, un volante) y di: "¡Qué chimba eso! Dejame yo le pregunto a mi jefe si nos llega pronto y te aviso de una" y usa 'accion = "notificar_admin"'. ¡Nunca digas que no viste bien la foto! Siempre identifica el objeto así no lo tengas y pregunta a tus jefes (Jan o Tatiana). ⚡
 7. LINK ÚNICO: https://jansel-shop-985283274281.us-west1.run.app/catalog (PROHIBIDO otros).
-
+${knowledgeBase}
 ESTILO: Paisa, carismático, emojis abundantes, mensajes visualmente bonitos, persuasivo y siempre respetuoso. Eres el Asesor Experto de confianza de ${storeName}. ✨📦⚡`;
 }
 
@@ -109,7 +114,7 @@ export const JAN_RESPONSE_SCHEMA = {
         notas: { type: Type.STRING, description: "Cualquier otro dato recolectado que no encaje en los anteriores (como correo, perfil social, etc)" }
       }
     },
-    imageUrl: { type: Type.STRING, description: "URL de la imagen del producto si aplica" }
+    imageUrl: { type: Type.STRING, description: "URL de la imagen del producto si aplica (IMPORTANTE: Debe ser una URL pública http/https. PROHIBIDO retornar base64 o cadenas de datos largas)" }
   },
   required: ["accion", "mensaje"]
 };

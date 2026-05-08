@@ -1128,9 +1128,9 @@ function ReportsTab({
       const isBot = senderType === 'bot' || curr.status === "respondido" || !!curr.manualAgent || from.includes('14155238886');
 
       if (isBot) {
-        userId = (customerPhone || to).replace('whatsapp:', '');
+        userId = (customerPhone || to || "unknown").replace('whatsapp:', '');
       } else {
-        userId = (curr.recipient || from).replace('whatsapp:', '');
+        userId = (curr.recipient || from || "unknown").replace('whatsapp:', '');
       }
       
       if (userId === "unknown" || !userId) return acc;
@@ -1373,8 +1373,8 @@ function ReportsTab({
                     </div>
                     <div>
                       <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl rounded-tl-none text-white text-[13px] leading-relaxed shadow-lg">
-                        {msg.message.split(" [Media:")[0]}
-                        {renderMedia(msg.message)}
+                        {(msg.message || "").split(" [Media:")[0]}
+                        {renderMedia(msg.message || "")}
                       </div>
                       <p className="text-[9px] text-neutral-600 mt-2 font-mono uppercase">
                         {safeFormat(msg.timestamp, 'HH:mm:ss')}
@@ -1401,12 +1401,12 @@ function ReportsTab({
                           )}
                           onClick={() => setShowStatusId(showStatusId === msg.id ? null : msg.id)}
                         >
-                          <div className="flex items-center justify-between mb-1 opacity-50 text-[8px] font-black uppercase tracking-widest">
+                          {msg.response && <div className="flex items-center justify-between mb-1 opacity-50 text-[8px] font-black uppercase tracking-widest">
                             <span>{msg.manualAgent || "Jan AI"}</span>
                             {msg.manualAgent && <span className="flex items-center gap-1"><User size={8}/> Manual</span>}
-                          </div>
-                          {msg.response.split(" [Media:")[0]}
-                          {renderMedia(msg.response)}
+                          </div>}
+                          {(msg.response || "").split(" [Media:")[0]}
+                          {renderMedia(msg.response || "")}
                         </div>
                         <div className="flex flex-col items-end gap-1 mt-2">
                            {showStatusId === msg.id && (
@@ -2365,7 +2365,8 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
     botTone: userStore?.botTone || "",
     botGoal: userStore?.botGoal || "",
     themeColor: userStore?.themeColor || "#4F46E5",
-    dataToCollect: userStore?.dataToCollect || ""
+    dataToCollect: userStore?.dataToCollect || "",
+    baseConocimiento: userStore?.baseConocimiento || ""
   });
   const [isSaving, setIsSaving] = useState(false);
   const [officialBotNumber, setOfficialBotNumber] = useState("");
@@ -2392,7 +2393,8 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
       botTone: userStore?.botTone || "",
       botGoal: userStore?.botGoal || "",
       themeColor: userStore?.themeColor || "#4F46E5",
-      dataToCollect: userStore?.dataToCollect || ""
+      dataToCollect: userStore?.dataToCollect || "",
+      baseConocimiento: userStore?.baseConocimiento || ""
     });
   }, [userStore]);
 
@@ -2493,6 +2495,10 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
               <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Datos a Recolectar (Opcional, separados por asterisco *)</label>
               <textarea value={storeData.dataToCollect} onChange={e => setStoreData({...storeData, dataToCollect: e.target.value})} placeholder="Ej: * Nombre completo&#10;* Correo electrónico&#10;* Perfil de Facebook" className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white min-h-[80px]" />
               <p className="text-[9px] text-neutral-500">Si se deja vacío, Jan pedirá los datos por defecto para vender (Nombre, Teléfono, Ciudad, Dirección, Referencia).</p>
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Base de Conocimientos / Soporte Adicional</label>
+              <textarea value={storeData.baseConocimiento} onChange={e => setStoreData({...storeData, baseConocimiento: e.target.value})} placeholder="Ej: Políticas de envío, garantías, preguntas frecuentes. Si el cliente pregunta algo de acá, el bot lo responderá. (Si pegabas mucha info por WhatsApp, pégala aquí)" className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white min-h-[120px]" />
             </div>
           </div>
           <button onClick={handleSaveStore} disabled={isSaving} className="w-full bg-dark-accent text-black font-black uppercase text-[10px] tracking-widest py-3 rounded-xl disabled:opacity-50">
