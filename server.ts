@@ -479,8 +479,8 @@ IMPORTANTE: Sé extremadamente breve y directo. Evita explicaciones largas. El c
 ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urgencia, objeciones, nivel_interes y siguiente_mejor_accion, basado en si ha dado direccion, etc.`;
 
     let result: any;
-    const primaryModel = "gemini-2.0-flash";
-    const fallbackModel = "gemini-1.5-flash";
+    const primaryModel = "gemini-2.5-flash";
+    const fallbackModel = "gemini-2.0-flash";
 
     const contents = [
       { 
