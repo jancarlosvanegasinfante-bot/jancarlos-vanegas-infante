@@ -97,6 +97,7 @@ type Order = {
   totalPrice: number;
   status: 'pendiente' | 'despachado' | 'entregado';
   createdAt: any;
+  notes?: string;
 };
 
 type Product = {
@@ -1594,7 +1595,7 @@ function OrdersTab({ orders, onUpdateStatus }: { orders: Order[], onUpdateStatus
                     <td className="p-4">{o.productName} (x{o.quantity})</td>
                     <td className="p-4 font-mono text-dark-green font-bold">${o.totalPrice?.toLocaleString()}</td>
                     <td className="p-4 text-neutral-400">
-                      <div className="flex flex-col">
+                      <div className="flex flex-col gap-1">
                         <div className="flex items-start gap-1 capitalize">
                           <MapPin size={10} className="mt-0.5 shrink-0" />
                           <span className="truncate max-w-[150px]">{o.address}, {o.city}</span>
@@ -1602,6 +1603,11 @@ function OrdersTab({ orders, onUpdateStatus }: { orders: Order[], onUpdateStatus
                         {o.addressIndicator && (
                           <span className="text-[9px] text-dark-accent/60 lowercase italic ml-4 leading-tight">
                             Ref: {o.addressIndicator}
+                          </span>
+                        )}
+                        {(o as any).notes && (
+                          <span className="text-[9px] text-yellow-500/80 italic ml-4 mt-1 leading-tight whitespace-pre-wrap">
+                            Datos extra: {(o as any).notes}
                           </span>
                         )}
                       </div>
@@ -2358,7 +2364,8 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
     botName: userStore?.botName || "",
     botTone: userStore?.botTone || "",
     botGoal: userStore?.botGoal || "",
-    themeColor: userStore?.themeColor || "#4F46E5"
+    themeColor: userStore?.themeColor || "#4F46E5",
+    dataToCollect: userStore?.dataToCollect || ""
   });
   const [isSaving, setIsSaving] = useState(false);
   const [officialBotNumber, setOfficialBotNumber] = useState("");
@@ -2384,7 +2391,8 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
       botName: userStore?.botName || "",
       botTone: userStore?.botTone || "",
       botGoal: userStore?.botGoal || "",
-      themeColor: userStore?.themeColor || "#4F46E5"
+      themeColor: userStore?.themeColor || "#4F46E5",
+      dataToCollect: userStore?.dataToCollect || ""
     });
   }, [userStore]);
 
@@ -2480,6 +2488,11 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
             <div className="space-y-1 md:col-span-2">
               <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Objetivo Principal del Bot</label>
               <textarea value={storeData.botGoal} onChange={e => setStoreData({...storeData, botGoal: e.target.value})} placeholder="Ej: Vender productos del catálogo..." className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white min-h-[60px]" />
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Datos a Recolectar (Opcional, separados por asterisco *)</label>
+              <textarea value={storeData.dataToCollect} onChange={e => setStoreData({...storeData, dataToCollect: e.target.value})} placeholder="Ej: * Nombre completo&#10;* Correo electrónico&#10;* Perfil de Facebook" className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white min-h-[80px]" />
+              <p className="text-[9px] text-neutral-500">Si se deja vacío, Jan pedirá los datos por defecto para vender (Nombre, Teléfono, Ciudad, Dirección, Referencia).</p>
             </div>
           </div>
           <button onClick={handleSaveStore} disabled={isSaving} className="w-full bg-dark-accent text-black font-black uppercase text-[10px] tracking-widest py-3 rounded-xl disabled:opacity-50">

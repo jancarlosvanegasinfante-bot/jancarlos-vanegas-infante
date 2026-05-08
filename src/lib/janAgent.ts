@@ -7,17 +7,23 @@ export interface StoreBotConfig {
   botTone?: string;
   botGoal?: string;
   paisaStyle?: boolean;
+  dataToCollect?: string;
 }
 
 export function getSystemInstruction(config: StoreBotConfig = {}): string {
   const storeName = config.name || "JANSEL SHOP";
   const botName = config.botName || "Jan";
   
-  if (config.botTone || config.botGoal) {
+  if (config.botTone || config.botGoal || config.dataToCollect) {
     // Custom SaaS config
     const tone = config.botTone || "amigable y profesional";
     const goal = config.botGoal || "persuadir y cerrar ventas";
     
+    // Si el usuario especificó datos que quiere recolectar, los usamos. Si no, default.
+    const expectedData = config.dataToCollect && config.dataToCollect.trim().length > 0 
+      ? config.dataToCollect
+      : `* NOMBRE COMPLETO\n     * NÚMERO DE TELÉFONO\n     * CIUDAD\n     * DIRECCIÓN EXACTA\n     * REFERENCIA DE LA DIRECCIÓN`;
+
     return `Eres ${botName}, el asesor experto de ${storeName}.
 TU MISIÓN: ${goal}.
 
@@ -30,13 +36,9 @@ REGLAS DE ORO:
    - Si aplica, menciona envío y usa gatillos de descuento tachando precios si es oportuno.
 4. FILTRO DE ACCIÓN Y CAPTURA DE DATOS:
    - SI EL PRODUCTO NO ESTÁ EN EL CATÁLOGO O NO SABES QUÉ ES: NO digas "no lo tengo" usando 'accion = "respuesta"'. OBLIGATORIAMENTE usa 'accion = "notificar_admin"'.
-   - Confirmando compra: Si el cliente quiere comprar, debes pedirle OBLIGATORIAMENTE:
-     * NOMBRE COMPLETO
-     * NÚMERO DE TELÉFONO
-     * CIUDAD
-     * DIRECCIÓN EXACTA
-     * REFERENCIA DE LA DIRECCIÓN.
-     Una vez tengas TODO, usa accion = "confirmar_pedido". 
+   - El objetivo principal requiere capturar los siguientes datos del usuario:
+     ${expectedData}
+     Una vez el usuario te haya proporcionado TODOS estos datos solicitados, usa accion = "confirmar_pedido" (y añádelos todos a la clave "notas" dentro de "datos_pedido", además de rellenar los datos de nombre, etc si aplican). 
    - Conversación normal -> accion = "respuesta"
 5. CAPACIDAD MULTIMODAL (OJOS Y OÍDOS): 
    - AUDIOS: Analiza el audio y responde a su contenido.
@@ -103,7 +105,8 @@ export const JAN_RESPONSE_SCHEMA = {
         telefono: { type: Type.STRING, description: "Teléfono de contacto" },
         ciudad: { type: Type.STRING, description: "Ciudad de destino" },
         referencia: { type: Type.STRING, description: "Punto de referencia o descripción del lugar" },
-        valor: { type: Type.NUMBER, description: "Valor total del pedido o precio acordado" }
+        valor: { type: Type.NUMBER, description: "Valor total del pedido o precio acordado" },
+        notas: { type: Type.STRING, description: "Cualquier otro dato recolectado que no encaje en los anteriores (como correo, perfil social, etc)" }
       }
     },
     imageUrl: { type: Type.STRING, description: "URL de la imagen del producto si aplica" }

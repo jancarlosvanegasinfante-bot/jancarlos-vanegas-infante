@@ -571,6 +571,7 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
           address: jsonResponse.datos_pedido?.direccion || "No especificada",
           city: jsonResponse.datos_pedido?.ciudad || "No especificada",
           addressIndicator: jsonResponse.datos_pedido?.referencia || "N/A",
+          notes: jsonResponse.datos_pedido?.notas || "",
           status: 'pendiente',
           createdAt: serverTimestamp()
         };
