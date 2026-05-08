@@ -14,7 +14,7 @@ async function check() {
   const productsColl = collection(db, "products");
   const snap = await getDocs(productsColl);
   
-  const products = snap.docs.map(d => ({ docId: d.id, ...d.data() }));
+  const products = snap.docs.map(d => ({ docId: d.id, ...d.data() } as any));
   console.log(`Found ${products.length} total products in DB.`);
   for (const p of products) {
     console.log(p.docId, p.id, p.name);

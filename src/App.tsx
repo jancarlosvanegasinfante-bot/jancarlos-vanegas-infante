@@ -1373,7 +1373,7 @@ function ReportsTab({
                     </div>
                     <div>
                       <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl rounded-tl-none text-white text-[13px] leading-relaxed shadow-lg">
-                        {(msg.message || "").split(" [Media:")[0]}
+                        <span>{(msg.message || "").split(" [Media:")[0]}</span>
                         {renderMedia(msg.message || "")}
                       </div>
                       <p className="text-[9px] text-neutral-600 mt-2 font-mono uppercase">
@@ -1405,7 +1405,7 @@ function ReportsTab({
                             <span>{msg.manualAgent || "Jan AI"}</span>
                             {msg.manualAgent && <span className="flex items-center gap-1"><User size={8}/> Manual</span>}
                           </div>}
-                          {(msg.response || "").split(" [Media:")[0]}
+                          <span>{(msg.response || "").split(" [Media:")[0]}</span>
                           {renderMedia(msg.response || "")}
                         </div>
                         <div className="flex flex-col items-end gap-1 mt-2">
@@ -1791,7 +1791,7 @@ function InventoryTab({ products, onUpdateStock, onReset, isResetting, userStore
             disabled={isResetting}
             className="flex items-center gap-2 px-4 py-2 bg-neutral-900 border border-neutral-800 text-neutral-400 text-[10px] font-black rounded-xl hover:bg-neutral-800 hover:text-white transition-all disabled:opacity-50 whitespace-nowrap"
           >
-            <RefreshCw size={14} className={cn(isResetting && "animate-spin")} /> {isResetting ? "CARGANDO..." : "SINCRONIZAR"}
+            <RefreshCw size={14} className={cn(isResetting && "animate-spin")} /> <span>{isResetting ? "CARGANDO..." : "SINCRONIZAR"}</span>
           </button>
 
           <button 
