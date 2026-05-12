@@ -46,6 +46,7 @@ const TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.Clave_API;
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const SENDGRID_FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL;
+const FB_PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN;
 
 const firebaseConfigPath = path.join(__dirname, "firebase-applet-config.json");
 const firebaseConfig = JSON.parse(readFileSync(firebaseConfigPath, "utf-8"));
@@ -140,6 +141,65 @@ async function getStoreByPhone(phone: string): Promise<StoreConfig> {
     paisaStyle: true,
     recoveryEnabled: true
   };
+}
+
+/**
+ * Determines the associated store based on a WhatsApp/Meta message
+ */
+async function determineStoreId(cleanPhone: string, message: string, toBotPhone?: string): Promise<string> {
+  let assignedStoreId: string | null = null;
+  
+  // 1. Check for predefined trigger message (e.g. "Hola, vengo de la tienda XYZ ref: #odontologia-feliz")
+  const refMatch = message?.match(/ref:\s*#([a-zA-Z0-9_\-]+)/i);
+  
+  if (refMatch && refMatch[1]) {
+    const storeSlug = refMatch[1].toLowerCase();
+    const qStore = query(collection(db, "stores"), where("slug", "==", storeSlug), limit(1));
+    const snapStore = await getDocs(qStore);
+    if (!snapStore.empty) {
+      assignedStoreId = snapStore.docs[0].id;
+    }
+  }
+
+  // 2. Fallback: Search for store names mentioned in "vengo de la tienda [Name]"
+  if (!assignedStoreId && message) {
+    const storeNameMatch = message.match(/vengo de (?:la tienda\s*)?([^*|\n|\r]+)/i);
+    if (storeNameMatch && storeNameMatch[1]) {
+      const potentialName = storeNameMatch[1].trim();
+      const qStoreName = query(collection(db, "stores"), where("name", "==", potentialName), limit(1));
+      const snapStoreName = await getDocs(qStoreName);
+      if (!snapStoreName.empty) {
+        assignedStoreId = snapStoreName.docs[0].id;
+      }
+    }
+  }
+
+  // 3. Fallback: Lookup existing session by phone
+  if (!assignedStoreId) {
+    const convoSnap = await getDoc(doc(db, "conversations", cleanPhone));
+    if (convoSnap.exists() && convoSnap.data().storeId) {
+      assignedStoreId = convoSnap.data().storeId;
+    }
+  }
+
+  // 4. Ultimate Fallback: Legacy phone mapping or "default"
+  if (!assignedStoreId && toBotPhone) {
+    const legacyStore = await getStoreByPhone(toBotPhone);
+    assignedStoreId = legacyStore.id || "default";
+  } else if (!assignedStoreId) {
+    assignedStoreId = "default";
+  }
+  
+  // Update session if we found a store
+  if (assignedStoreId !== "default") {
+    await setDoc(doc(db, "conversations", cleanPhone), {
+      phone: cleanPhone,
+      storeId: assignedStoreId,
+      updatedAt: serverTimestamp()
+    }, { merge: true });
+  }
+  
+  return assignedStoreId || "default";
 }
 
 /**
@@ -572,9 +632,13 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
     // Save enriched CRM Data per store
     await setDoc(doc(db, "customers", customerProfileId), profile, { merge: true });
 
-    // 3. Enviar respuesta por WhatsApp
-    let mediaUrl = jsonResponse.imageUrl || undefined;
-    await sendWhatsApp(data.from, jsonResponse.mensaje, mediaUrl, activityId, data.to);
+    // 3. Enviar respuesta por la plataforma correcta
+    if (data.from.startsWith("whatsapp:")) {
+      let mediaUrl = jsonResponse.imageUrl || undefined;
+      await sendWhatsApp(data.from, jsonResponse.mensaje, mediaUrl, activityId, data.to);
+    } else if (data.platform === "instagram" || data.platform === "messenger") {
+      await sendMetaMessage(data.from, jsonResponse.mensaje, data.platform);
+    }
 
     // 4. Actualizar actividad
     await updateDoc(doc(db, "activities", activityId), {
@@ -807,6 +871,32 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
     if (err.message.includes("limit") || err.message.includes("50")) {
       await updateTwilioStatus(true, err.message);
     }
+    throw err;
+  }
+}
+
+/**
+ * Sends a message via Meta Graph API (Instagram or Messenger)
+ */
+async function sendMetaMessage(recipientId: string, text: string, platform: 'instagram' | 'messenger') {
+  if (!FB_PAGE_ACCESS_TOKEN) {
+    console.warn(`[Meta Send] No access token configured. Cannot reply to ${recipientId} on ${platform}`);
+    return;
+  }
+
+  const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${FB_PAGE_ACCESS_TOKEN}`;
+  
+  try {
+    console.log(`[Meta Send] Sending to ${recipientId} on ${platform}...`);
+    const response = await axios.post(url, {
+      recipient: { id: recipientId },
+      message: { text: text },
+      // platform: platform // Automatically inferred by Meta based on the Page/Account linked to the token
+    });
+    console.log(`[Meta Success] Message sent to ${recipientId}. MID: ${response.data.message_id}`);
+    return response.data;
+  } catch (err: any) {
+    console.error(`[Meta Error] Failed to send to ${recipientId}:`, err.response?.data || err.message);
     throw err;
   }
 }
@@ -1167,13 +1257,81 @@ async function startServer() {
   // Meta Webhook Receivers (POST)
   app.post("/api/webhook/instagram", async (req, res) => {
     console.log("[Instagram Webhook] Received notification:", JSON.stringify(req.body));
-    // Implementation for handling messages will go here
+    
+    const entry = req.body.entry?.[0];
+    const messaging = entry?.messaging?.[0];
+    
+    if (messaging && messaging.message && !messaging.message.is_echo) {
+      const senderId = messaging.sender.id;
+      const messageText = messaging.message.text;
+      
+      console.log(`[Instagram Webhook] Message from ${senderId}: ${messageText}`);
+      
+      const assignedStoreId = await determineStoreId(senderId, messageText);
+      const activityData = {
+        from: senderId,
+        to: entry.id, // Page ID
+        recipient: senderId,
+        customerPhone: senderId,
+        storeId: assignedStoreId,
+        message: messageText,
+        platform: "instagram",
+        status: "recibido",
+        senderType: 'customer',
+        receivedAt: serverTimestamp(),
+        timestamp: serverTimestamp()
+      };
+
+      try {
+        const activityRef = await addDoc(collection(db, "activities"), activityData);
+        processInferenceOnServer(activityRef.id, activityData).catch(e => {
+          console.error(`[Meta AI] Error processing Instagram message:`, e.message);
+        });
+      } catch (e: any) {
+        console.error("[Meta Webhook] Error registering activity:", e.message);
+      }
+    }
+    
     res.sendStatus(200);
   });
 
   app.post("/api/webhook/messenger", async (req, res) => {
     console.log("[Messenger Webhook] Received notification:", JSON.stringify(req.body));
-    // Implementation for handling messages will go here
+    
+    const entry = req.body.entry?.[0];
+    const messaging = entry?.messaging?.[0];
+    
+    if (messaging && messaging.message && !messaging.message.is_echo) {
+      const senderId = messaging.sender.id;
+      const messageText = messaging.message.text;
+      
+      console.log(`[Messenger Webhook] Message from ${senderId}: ${messageText}`);
+      
+      const assignedStoreId = await determineStoreId(senderId, messageText);
+      const activityData = {
+        from: senderId,
+        to: entry.id, // Page ID
+        recipient: senderId,
+        customerPhone: senderId,
+        storeId: assignedStoreId,
+        message: messageText,
+        platform: "messenger",
+        status: "recibido",
+        senderType: 'customer',
+        receivedAt: serverTimestamp(),
+        timestamp: serverTimestamp()
+      };
+
+      try {
+        const activityRef = await addDoc(collection(db, "activities"), activityData);
+        processInferenceOnServer(activityRef.id, activityData).catch(e => {
+          console.error(`[Meta AI] Error processing Messenger message:`, e.message);
+        });
+      } catch (e: any) {
+        console.error("[Meta Webhook] Error registering activity:", e.message);
+      }
+    }
+    
     res.sendStatus(200);
   });
 
@@ -1265,60 +1423,8 @@ async function startServer() {
     // LOG IMMEDIATELY
     try {
       const cleanFrom = from.replace('whatsapp:', '').trim();
-      
-      // -- MULTI-TENANT ROUTING LOGIC --
-      let assignedStoreId: string | null = null;
-      
-      // 1. Check for predefined trigger message (e.g. "Hola, vengo de la tienda XYZ ref: #odontologia-feliz")
-      const refMatch = finalMessage.match(/ref:\s*#([a-zA-Z0-9_\-]+)/i);
-      
-      if (refMatch && refMatch[1]) {
-        const storeSlug = refMatch[1].toLowerCase();
-        const qStore = query(collection(db, "stores"), where("slug", "==", storeSlug), limit(1));
-        const snapStore = await getDocs(qStore);
-        if (!snapStore.empty) {
-          assignedStoreId = snapStore.docs[0].id;
-        }
-      }
+      let assignedStoreId = await determineStoreId(cleanFrom, finalMessage, to);
 
-      // 2. Fallback: Search for store names mentioned in "vengo de la tienda [Name]"
-      if (!assignedStoreId) {
-        const storeNameMatch = finalMessage.match(/vengo de (?:la tienda\s*)?([^*|\n|\r]+)/i);
-        if (storeNameMatch && storeNameMatch[1]) {
-          const potentialName = storeNameMatch[1].trim();
-          const qStoreName = query(collection(db, "stores"), where("name", "==", potentialName), limit(1));
-          const snapStoreName = await getDocs(qStoreName);
-          if (!snapStoreName.empty) {
-            assignedStoreId = snapStoreName.docs[0].id;
-          }
-        }
-      }
-
-      // 3. Fallback: Lookup existing session by phone
-      if (!assignedStoreId) {
-        const convoSnap = await getDoc(doc(db, "conversations", cleanFrom));
-        if (convoSnap.exists() && convoSnap.data().storeId) {
-          assignedStoreId = convoSnap.data().storeId;
-        }
-      }
-
-      // 4. Ultimate Fallback: Legacy phone mapping or "default"
-      if (!assignedStoreId) {
-        const legacyStore = await getStoreByPhone(to);
-        assignedStoreId = legacyStore.id;
-      }
-      
-      // Update session if we found a store
-      if (assignedStoreId) {
-        await setDoc(doc(db, "conversations", cleanFrom), {
-          phone: cleanFrom,
-          storeId: assignedStoreId,
-          updatedAt: serverTimestamp()
-        }, { merge: true });
-      } else {
-        assignedStoreId = "default";
-      }
-      
       // CANCEL ANY PENDING FOLLOW-UP BECAUSE CLIENT RESPONDED
       await cancelPendingFollowUps(from, assignedStoreId);
 
