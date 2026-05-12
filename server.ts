@@ -1126,7 +1126,56 @@ async function startServer() {
       }
       
       res.sendStatus(200);
-    });
+  });
+
+  // Meta (Instagram & Messenger) Webhook Verification (GET)
+  app.get("/api/webhook/instagram", (req, res) => {
+    console.log("[Instagram Webhook] Verification request received");
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
+
+    // The user provided "JAN_SEL_SECRET"
+    const VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN || "JAN_SEL_SECRET";
+
+    if (mode === "subscribe" && token === VERIFY_TOKEN) {
+      console.log("[Instagram Webhook] Verified successfully!");
+      res.status(200).header("Content-Type", "text/plain").send(challenge);
+    } else {
+      console.error("[Instagram Webhook] Verification failed. Expected:", VERIFY_TOKEN, "Got:", token);
+      res.sendStatus(403);
+    }
+  });
+
+  app.get("/api/webhook/messenger", (req, res) => {
+    console.log("[Messenger Webhook] Verification request received");
+    const mode = req.query["hub.mode"];
+    const token = req.query["hub.verify_token"];
+    const challenge = req.query["hub.challenge"];
+
+    const VERIFY_TOKEN = process.env.FB_VERIFY_TOKEN || "JAN_SEL_SECRET";
+
+    if (mode === "subscribe" && token === VERIFY_TOKEN) {
+      console.log("[Messenger Webhook] Verified successfully!");
+      res.status(200).header("Content-Type", "text/plain").send(challenge);
+    } else {
+      console.error("[Messenger Webhook] Verification failed. Expected:", VERIFY_TOKEN, "Got:", token);
+      res.sendStatus(403);
+    }
+  });
+
+  // Meta Webhook Receivers (POST)
+  app.post("/api/webhook/instagram", async (req, res) => {
+    console.log("[Instagram Webhook] Received notification:", JSON.stringify(req.body));
+    // Implementation for handling messages will go here
+    res.sendStatus(200);
+  });
+
+  app.post("/api/webhook/messenger", async (req, res) => {
+    console.log("[Messenger Webhook] Received notification:", JSON.stringify(req.body));
+    // Implementation for handling messages will go here
+    res.sendStatus(200);
+  });
 
   // Twilio Webhook
   app.post("/api/webhook/whatsapp", async (req, res) => {
