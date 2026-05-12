@@ -63,11 +63,11 @@ export default function Storefront() {
   }
 
   const handleWhatsAppContact = (productName?: string) => {
-    let msg = `Hola, vengo de la tienda ref: #${store.slug} `;
+    let msg = `¡Hola! 👋 Vengo de la tienda *${store.name}* ref: #${store.slug}. `;
     if (productName) {
-      msg += `Estoy interesado en el producto: ${productName}.`;
+      msg += `Estoy interesado en el producto: ${productName}. ¿Está disponible?`;
     } else {
-      msg += `Quisiera más información sobre los servicios.`;
+      msg += `Quisiera más información sobre lo que ofrecen.`;
     }
     const phone = officialBotNumber || store.phone || "14155238886";
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");

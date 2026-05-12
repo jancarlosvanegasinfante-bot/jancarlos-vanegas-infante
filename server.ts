@@ -462,7 +462,8 @@ async function processInferenceOnServer(activityId: string, data: any) {
       }
     }
 
-    const promptText = `CLIENTE: ${fromPhone}
+    const promptText = `ESTÁS ATENDIENDO EN LA TIENDA: ${storeConfig.name || "Jan Sel Shop"} (Slug: ${assignedStoreId})
+CLIENTE: ${fromPhone}
 NOMBRE: ${customerProfile?.name || "Desconocido"}
 ETAPA CRM: ${customerProfile?.etapa || "nuevo"} (Probabilidad de compra: ${customerProfile?.score || 0}%)
 INTENCIÓN ANTERIOR: ${customerProfile?.intencion || "Ninguna"}
@@ -617,7 +618,7 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
         console.log("[Server AI] Pedido guardado en base de datos.");
 
         // 5.2 Notificar Admin
-        await notifyAdmins(orderInfo, "Jan Vanegas");
+        await notifyAdmins(orderInfo, storeConfig?.name || "Jan Vanegas", storeConfig);
       } catch (e) {
         console.error("[Server AI] Error persistiendo o notificando pedido:", e);
       }
@@ -813,16 +814,30 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
 /**
  * Notifies administrators (Jan and Tatiana) about new orders via WhatsApp
  */
-async function notifyAdmins(orderData: any, storeName: string) {
+async function notifyAdmins(orderData: any, storeName: string, storeConfig?: any) {
   const adminNumbersRaw = process.env.ADMIN_WHATSAPP_NUMBERS || "";
-  const adminNumbers = adminNumbersRaw.split(",").filter(n => n.trim().length > 0);
+  let adminNumbers = adminNumbersRaw.split(",").filter(n => n.trim().length > 0);
   
+  if (storeConfig?.notificationPhone) {
+    adminNumbers = [storeConfig.notificationPhone];
+  }
+
   if (adminNumbers.length === 0) {
-    console.log("[Admin Notify] No admin numbers configured in ADMIN_WHATSAPP_NUMBERS.");
+    console.log("[Admin Notify] No admin numbers configured.");
     return;
   }
 
-  const message = `🚀 *¡NUEVO PEDIDO, JEFE!*
+  let message = "";
+  if (storeConfig?.msgNewOrderTemplate) {
+    message = storeConfig.msgNewOrderTemplate
+      .replace(/{nombre}/g, orderData.customerName || "No especificado")
+      .replace(/{telefono}/g, orderData.customerPhone || "No especificado")
+      .replace(/{ciudad}/g, orderData.city || "No especificada")
+      .replace(/{direccion}/g, orderData.address || "No especificada")
+      .replace(/{producto}/g, orderData.productName || "No especificado")
+      .replace(/{total}/g, `$${(orderData.totalPrice || 0).toLocaleString()}`);
+  } else {
+    message = `🚀 *¡NUEVO PEDIDO, JEFE!*
 Jan acaba de cerrar un negocio de una vez.
 
 👤 *Cliente:* ${orderData.customerName}
@@ -830,9 +845,10 @@ Jan acaba de cerrar un negocio de una vez.
 🔢 *Cant:* ${orderData.quantity}
 📍 *Envío:* ${orderData.address}, ${orderData.city}
 🏠 *Ref:* ${orderData.addressIndicator || 'N/A'}
-💰 *Total:* $${orderData.totalPrice.toLocaleString()}
+💰 *Total:* $${(orderData.totalPrice || 0).toLocaleString()}
 
 _El inventario ya fue descontado automáticamente._`;
+  }
 
   console.log(`[Admin Notify] Notifying ${adminNumbers.length} admins...`);
   
@@ -1202,33 +1218,56 @@ async function startServer() {
       const cleanFrom = from.replace('whatsapp:', '').trim();
       
       // -- MULTI-TENANT ROUTING LOGIC --
-      let assignedStoreId = "default";
+      let assignedStoreId: string | null = null;
       
-      // Check for predefined trigger message (e.g. "Hola, vengo de la tienda XYZ ref: #odontologia-feliz")
+      // 1. Check for predefined trigger message (e.g. "Hola, vengo de la tienda XYZ ref: #odontologia-feliz")
       const refMatch = finalMessage.match(/ref:\s*#([a-zA-Z0-9_\-]+)/i);
       
       if (refMatch && refMatch[1]) {
-        const storeSlug = refMatch[1];
+        const storeSlug = refMatch[1].toLowerCase();
         const qStore = query(collection(db, "stores"), where("slug", "==", storeSlug), limit(1));
         const snapStore = await getDocs(qStore);
         if (!snapStore.empty) {
           assignedStoreId = snapStore.docs[0].id;
-          await setDoc(doc(db, "conversations", cleanFrom), {
-            phone: cleanFrom,
-            storeId: assignedStoreId,
-            updatedAt: serverTimestamp()
-          }, { merge: true });
         }
-      } else {
-        // Look up existing session
+      }
+
+      // 2. Fallback: Search for store names mentioned in "vengo de la tienda [Name]"
+      if (!assignedStoreId) {
+        const storeNameMatch = finalMessage.match(/vengo de (?:la tienda\s*)?([^*|\n|\r]+)/i);
+        if (storeNameMatch && storeNameMatch[1]) {
+          const potentialName = storeNameMatch[1].trim();
+          const qStoreName = query(collection(db, "stores"), where("name", "==", potentialName), limit(1));
+          const snapStoreName = await getDocs(qStoreName);
+          if (!snapStoreName.empty) {
+            assignedStoreId = snapStoreName.docs[0].id;
+          }
+        }
+      }
+
+      // 3. Fallback: Lookup existing session by phone
+      if (!assignedStoreId) {
         const convoSnap = await getDoc(doc(db, "conversations", cleanFrom));
         if (convoSnap.exists() && convoSnap.data().storeId) {
           assignedStoreId = convoSnap.data().storeId;
-        } else {
-          // Fallback to legacy default
-          const legacyStore = await getStoreByPhone(to);
-          assignedStoreId = legacyStore.id;
         }
+      }
+
+      // 4. Ultimate Fallback: Legacy phone mapping or "default"
+      if (!assignedStoreId) {
+        const legacyStore = await getStoreByPhone(to);
+        assignedStoreId = legacyStore.id;
+      }
+      
+      // Update session if we found a store
+      if (assignedStoreId) {
+        await setDoc(doc(db, "conversations", cleanFrom), {
+          phone: cleanFrom,
+          storeId: assignedStoreId,
+          updatedAt: serverTimestamp()
+        }, { merge: true });
+      } else {
+        assignedStoreId = "default";
       }
       
       // CANCEL ANY PENDING FOLLOW-UP BECAUSE CLIENT RESPONDED
@@ -1264,17 +1303,24 @@ async function startServer() {
     res.status(200).send("");
   });
 
-  app.post("/api/admin/test-notify", async (req, res) => {
+  app.post("/api/admin/test-notify", express.json(), async (req, res) => {
     try {
+      const { storeId } = req.body;
+      let storeConfig = null;
+      if (storeId) {
+        const snap = await getDoc(doc(db, "stores", storeId));
+        if (snap.exists()) storeConfig = snap.data();
+      }
+
       const mockOrder = {
         customerName: "Cliente de Prueba",
-        productName: "Sneakers Medellín Premium",
+        productName: "Producto Demo Premium",
         quantity: 1,
-        address: "Calle 10 #12-34",
-        city: "Medellín",
-        totalPrice: 245000
+        address: "Calle de las Rosas #123",
+        city: "Bogotá",
+        totalPrice: 159900
       };
-      await notifyAdmins(mockOrder, "Test Store");
+      await notifyAdmins(mockOrder, storeConfig?.name || "Test Store", storeConfig);
       res.json({ success: true, message: "Prueba enviada a los jefes." });
     } catch (e: any) {
       res.status(500).json({ success: false, error: e.message });
@@ -1490,6 +1536,8 @@ async function startServer() {
           const profile = cxSnap.exists() ? cxSnap.data() : null;
           const history = await getCrmContext(formattedPhone, storeId);
           
+          const isSupport = botGoal.toLowerCase().includes("soporte") || botGoal.toLowerCase().includes("support") || storeConfig.name?.toLowerCase().includes("soporte");
+
           const prompt = `CLIENTE: ${phone}
 ESTADO: ${profile?.etapa || "interesado"}
 SCORE: ${profile?.score || 0}
@@ -1498,7 +1546,9 @@ HISTORIAL RECIENTE:
 ${history}
 
 TAREA: Actúa como ${botName}. El cliente dejó de responder hace unos minutos. Escribe un mensaje MUY CORTO con tono ${tone} para ${botGoal}.
-Integra gatillos mentales de ESCASEZ (pocas unidades disponibles) o BENEFICIO (recordando el envío gratis y el pago contra entrega hoy). 
+${isSupport 
+  ? "Ayúdalo a completar su proceso técnico o resolver su duda pendiente. No intentes vender nada físico si es soporte." 
+  : "Integra gatillos mentales de ESCASEZ (pocas unidades disponibles) o BENEFICIO (recordando el envío gratis y el pago contra entrega hoy)."}
 Mantenlo respetuoso. Si es mujer, usa un trato amable sin ser informal de más. 
 Máximo 18 palabras.
 NO RESPONDAS EN JSON, RESPONDE SOLO EL TEXTO DEL MENSAJE.`;

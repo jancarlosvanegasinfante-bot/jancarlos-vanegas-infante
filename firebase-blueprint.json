@@ -71,9 +71,18 @@
         "botGoal": { "type": "string", "description": "Objetivo de la IA (ej: Agendar citas)" },
         "themeColor": { "type": "string", "description": "Color hexadecimal principal" },
         "phone": { "type": "string", "description": "Teléfono propio o dejar vacío si usa el global" },
+        "notificationPhone": { "type": "string", "description": "Número de WhatsApp para recibir notificaciones de pedidos (ej: +57310...)" },
         "dropiApiKey": { "type": "string" },
         "emailEnabled": { "type": "boolean" },
         "recoveryFrequency": { "type": "number", "description": "Minutos de inactividad para marcar como abandono" },
+        "btnNotificationLabel": { "type": "string", "description": "Texto del botón de notificación (ej: NOTIFICAR PRUEBA)" },
+        "btnQuick1Label": { "type": "string", "description": "Atajo rápido 1 (ej: BENEFICIO)" },
+        "btnQuick1Message": { "type": "string", "description": "Mensaje para el atajo rápido 1" },
+        "btnQuick2Label": { "type": "string", "description": "Atajo rápido 2 (ej: CIERRE)" },
+        "btnQuick2Message": { "type": "string", "description": "Mensaje para el atajo rápido 2" },
+        "btnQuick3Label": { "type": "string", "description": "Atajo rápido 3 (ej: PRIORIDAD)" },
+        "btnQuick3Message": { "type": "string", "description": "Mensaje para el atajo rápido 3" },
+        "msgNewOrderTemplate": { "type": "string", "description": "Plantilla de mensaje para nuevos pedidos" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["name", "ownerId", "slug"]

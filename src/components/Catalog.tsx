@@ -1,7 +1,7 @@
 import * as React from "react";
 import { useState, useEffect } from "react";
 import { db } from "../firebase";
-import { collection, onSnapshot, query, orderBy } from "firebase/firestore";
+import { collection, onSnapshot, query, orderBy, getDocs } from "firebase/firestore";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   ShoppingBag, 
@@ -27,10 +27,12 @@ interface Product {
   videoUrl?: string;
   category?: string;
   stock?: number;
+  storeId?: string;
 }
 
 export default function Catalog() {
   const [products, setProducts] = useState<Product[]>([]);
+  const [storesMap, setStoresMap] = useState<Record<string, {name: string, slug: string}>>({});
   const [loading, setLoading] = useState(true);
   const [selectedCategory, setSelectedCategory] = useState<string>("Todos");
   const [officialBotNumber, setOfficialBotNumber] = useState("");
@@ -45,6 +47,17 @@ export default function Catalog() {
   }, []);
 
   useEffect(() => {
+    // Fetch stores to map IDs to slugs
+    const fetchStores = async () => {
+      const snap = await getDocs(collection(db, "stores"));
+      const map: Record<string, {name: string, slug: string}> = {};
+      snap.docs.forEach(d => {
+        map[d.id] = { name: d.data().name, slug: d.data().slug };
+      });
+      setStoresMap(map);
+    };
+    fetchStores();
+
     const q = query(collection(db, "products"), orderBy("name", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const prods = snapshot.docs.map(doc => ({
@@ -72,6 +85,14 @@ export default function Catalog() {
   };
 
   const currentWhatsApp = officialBotNumber || "15072233213"; // Jan Bot Phone
+
+  const getWhatsAppLink = (product: Product) => {
+    const storeInfo = product.storeId ? storesMap[product.storeId] : null;
+    const storeSlug = storeInfo?.slug || "jansel-shop";
+    const storeName = storeInfo?.name || "Jan Sel Shop";
+    const msg = `¡Hola Jan! 👋 Vengo de la tienda *${storeName}* ref: #${storeSlug}. Me interesó mucho el ${product.name}, vi que está en promo. ¿Todavía te quedan disponibles?`;
+    return `https://wa.me/${currentWhatsApp}?text=${encodeURIComponent(msg)}`;
+  };
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white font-sans selection:bg-dark-accent selection:text-white">
@@ -214,7 +235,7 @@ export default function Catalog() {
 
                       <div className="grid grid-cols-2 gap-2">
                         <a 
-                          href={`https://wa.me/${currentWhatsApp}?text=${encodeURIComponent(`¡Hola Jan! 👋 Me interesó mucho el ${product.name}, vi que está en promo. ¿Todavía te quedan disponibles?`)}`}
+                          href={getWhatsAppLink(product)}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center justify-center gap-2 bg-dark-green text-black font-black text-[10px] uppercase tracking-widest py-3 rounded-2xl hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-dark-green/10"

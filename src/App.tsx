@@ -35,7 +35,8 @@ import {
   Pause,
   Bell,
   Calendar,
-  Trash2
+  Trash2,
+  Layout
 } from "lucide-react";
 import * as React from "react";
 import { useState, useEffect, useRef, useMemo } from "react";
@@ -303,7 +304,10 @@ function JanAdmin() {
         const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Order));
         setOrders(docs);
       },
-      (err) => console.error("[Firestore] Orders error:", err)
+      (err) => {
+        if (err.code === 'cancelled' || err.message?.includes('CANCELLED')) return;
+        console.error("[Firestore] Orders error:", err);
+      }
     );
 
     const unsubProducts = onSnapshot(qProducts, 
@@ -311,7 +315,10 @@ function JanAdmin() {
         const docs = snapshot.docs.map(d => ({ docId: d.id, ...d.data() } as Product));
         setProducts(docs);
       },
-      (err) => console.error("[Firestore] Products error:", err)
+      (err) => {
+        if (err.code === 'cancelled' || err.message?.includes('CANCELLED')) return;
+        console.error("[Firestore] Products error:", err);
+      }
     );
 
     const unsubActivity = onSnapshot(qActivity, 
@@ -319,7 +326,10 @@ function JanAdmin() {
         const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Activity));
         setActivities(docs);
       },
-      (err) => console.error("[Firestore] Activity error:", err)
+      (err) => {
+        if (err.code === 'cancelled' || err.message?.includes('CANCELLED')) return;
+        console.error("[Firestore] Activity error:", err);
+      }
     );
     
     // CRM
@@ -330,16 +340,28 @@ function JanAdmin() {
         docs.sort((a: any, b: any) => (b.ultima_interaccion?.toMillis?.() || 0) - (a.ultima_interaccion?.toMillis?.() || 0));
         setCustomers(docs);
       },
-      (err) => console.error("[Firestore] Customers error:", err)
+      (err) => {
+        if (err.code === 'cancelled' || err.message?.includes('CANCELLED')) return;
+        console.error("[Firestore] Customers error:", err);
+      }
     );
 
-    const unsubConversations = onSnapshot(qConversations, (snapshot) => {
-      const convs: Record<string, any> = {};
-      snapshot.docs.forEach(d => {
-        convs[d.id] = d.data();
-      });
-      setConversations(convs);
-    });
+    const unsubConversations = onSnapshot(qConversations, 
+      (snapshot) => {
+        const convs: Record<string, any> = {};
+        snapshot.docs.forEach(d => {
+          convs[d.id] = d.data();
+        });
+        setConversations(convs);
+      },
+      (err) => {
+        if (err.code === 'cancelled' || err.message?.includes('CANCELLED')) {
+          console.debug("[Firestore] Conversations stream cancelled (expected on unmount)");
+        } else {
+          console.error("[Firestore] Conversations error:", err);
+        }
+      }
+    );
 
     return () => {
       unsubOrders();
@@ -352,11 +374,20 @@ function JanAdmin() {
 
   useEffect(() => {
     if (!user) return;
-    const unsubStatus = onSnapshot(doc(db, "config", "system"), (snap) => {
-      if (snap.exists()) {
-        setSystemStatus(snap.data());
+    const unsubStatus = onSnapshot(doc(db, "config", "system"), 
+      (snap) => {
+        if (snap.exists()) {
+          setSystemStatus(snap.data());
+        }
+      },
+      (err) => {
+        if (err.code === 'cancelled' || err.message?.includes('CANCELLED')) {
+          console.debug("[Firestore] System status stream cancelled");
+        } else {
+          console.error("[Firestore] System status error:", err);
+        }
       }
-    });
+    );
     return () => unsubStatus();
   }, [user]);
 
@@ -669,7 +700,7 @@ function JanAdmin() {
                className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 hover:border-dark-accent text-[9px] font-black uppercase text-neutral-400 hover:text-white px-4 py-2 rounded-xl transition-all"
              >
                <Bell size={12} />
-               Notificar Prueba
+               {userStore?.btnNotificationLabel || "Notificar Prueba"}
              </button>
              <div className="flex items-center gap-2 bg-dark-green/10 text-dark-green text-[9px] font-bold px-2 lg:px-3 py-1 rounded-full border border-dark-green/20 animate-pulse">
                <Zap size={10} /> <span className="hidden sm:inline">BOT ACTIVO</span>
@@ -708,6 +739,7 @@ function JanAdmin() {
                     humanMessage={humanMessage}
                     setHumanMessage={setHumanMessage}
                     systemStatus={systemStatus}
+                    userStore={userStore}
                   />}
                   {activeTab === 'monitor' && <MonitorTab key="monitor" activities={filteredActivities} />}
                  {activeTab === 'recovery' && <RecoveryTab 
@@ -783,9 +815,18 @@ function AIProcessor({ user }: { user: FirebaseUser }) {
       limit(20)
     );
     
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-       setProcessingCount(snapshot.docs.length);
-    });
+    const unsubscribe = onSnapshot(q, 
+      (snapshot) => {
+        setProcessingCount(snapshot.docs.length);
+      },
+      (err) => {
+        if (err.code === 'cancelled' || err.message?.includes('CANCELLED')) {
+          console.debug("[AI Agent] Monitor stream cancelled");
+        } else {
+          console.error("[AI Agent] Monitor error:", err);
+        }
+      }
+    );
 
     return () => unsubscribe();
   }, [user]);
@@ -1049,7 +1090,8 @@ function ReportsTab({
   setSelectedUser, 
   humanMessage, 
   setHumanMessage,
-  systemStatus
+  systemStatus,
+  userStore
 }: { 
   activities: Activity[], 
   conversations: Record<string, any>,
@@ -1058,6 +1100,7 @@ function ReportsTab({
   humanMessage: string,
   setHumanMessage: (msg: string) => void,
   systemStatus: any,
+  userStore: any,
   key?: string
 }) {
   const [isSending, setIsSending] = useState(false);
@@ -1357,9 +1400,24 @@ function ReportsTab({
 
                 <div className="px-4 py-2 border-b border-neutral-800 bg-black/40 flex items-center gap-4 overflow-x-auto no-scrollbar">
                   <span className="text-[7px] font-black text-neutral-500 uppercase tracking-widest shrink-0">Atajos Rápidos:</span>
-                  <button onClick={() => sendManualMessage("¡Patrón! Si paga ya por transferencia se libera de los $25.000 de seguro que cobra la transportadora por el contra-entrega. ¡No pierda esa plata y sea cliente VIP con despacho hoy mismo!")} className="whitespace-nowrap text-[7px] font-black uppercase tracking-tighter bg-neutral-900 border border-neutral-800 px-3 py-1 rounded-md hover:border-dark-accent transition-all flex items-center gap-1.5 grow-0 shrink-0"><DollarSign size={8} className="text-green-500" /> Beneficio</button>
-                  <button onClick={() => sendManualMessage("¡Rey! Se me acabaron de llevar el penúltimo. Solo me queda UNO con su nombre. ¿Se lo separo ya mismo o se lo paso al siguiente?")} className="whitespace-nowrap text-[7px] font-black uppercase tracking-tighter bg-neutral-900 border border-neutral-800 px-3 py-1 rounded-md hover:border-dark-accent transition-all flex items-center gap-1.5 grow-0 shrink-0"><AlertTriangle size={8} className="text-orange-500" /> Cierre</button>
-                  <button onClick={() => sendManualMessage("¡Buenas! El repartidor ya está cargando el camión VIP. Si transfiere ahorita, su pedido sale de primero. ¿Hacemos el negocio ya para que le llegue mañana?")} className="whitespace-nowrap text-[7px] font-black uppercase tracking-tighter bg-neutral-900 border border-neutral-800 px-3 py-1 rounded-md hover:border-dark-accent transition-all flex items-center gap-1.5 grow-0 shrink-0"><Truck size={8} className="text-blue-500" /> Prioridad</button>
+                  <button 
+                    onClick={() => sendManualMessage(userStore?.btnQuick1Message || "¡Patrón! Si paga ya por transferencia se libera de los $25.000 de seguro que cobra la transportadora por el contra-entrega. ¡No pierda esa plata y sea cliente VIP con despacho hoy mismo!")} 
+                    className="whitespace-nowrap text-[7px] font-black uppercase tracking-tighter bg-neutral-900 border border-neutral-800 px-3 py-1 rounded-md hover:border-dark-accent transition-all flex items-center gap-1.5 grow-0 shrink-0"
+                  >
+                    <DollarSign size={8} className="text-green-500" /> {userStore?.btnQuick1Label || "Beneficio"}
+                  </button>
+                  <button 
+                    onClick={() => sendManualMessage(userStore?.btnQuick2Message || "¡Rey! Se me acabaron de llevar el penúltimo. Solo me queda UNO con su nombre. ¿Se lo separo ya mismo o se lo paso al siguiente?")} 
+                    className="whitespace-nowrap text-[7px] font-black uppercase tracking-tighter bg-neutral-900 border border-neutral-800 px-3 py-1 rounded-md hover:border-dark-accent transition-all flex items-center gap-1.5 grow-0 shrink-0"
+                  >
+                    <AlertTriangle size={8} className="text-orange-500" /> {userStore?.btnQuick2Label || "Cierre"}
+                  </button>
+                  <button 
+                    onClick={() => sendManualMessage(userStore?.btnQuick3Message || "¡Buenas! El repartidor ya está cargando el camión VIP. Si transfiere ahorita, su pedido sale de primero. ¿Hacemos el negocio ya para que le llegue mañana?")} 
+                    className="whitespace-nowrap text-[7px] font-black uppercase tracking-tighter bg-neutral-900 border border-neutral-800 px-3 py-1 rounded-md hover:border-dark-accent transition-all flex items-center gap-1.5 grow-0 shrink-0"
+                  >
+                    <Truck size={8} className="text-blue-500" /> {userStore?.btnQuick3Label || "Prioridad"}
+                  </button>
                 </div>
 
             {/* Messages Area */}
@@ -2366,7 +2424,16 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
     botGoal: userStore?.botGoal || "",
     themeColor: userStore?.themeColor || "#4F46E5",
     dataToCollect: userStore?.dataToCollect || "",
-    baseConocimiento: userStore?.baseConocimiento || ""
+    baseConocimiento: userStore?.baseConocimiento || "",
+    btnNotificationLabel: userStore?.btnNotificationLabel || "Notificar Prueba",
+    btnQuick1Label: userStore?.btnQuick1Label || "Beneficio",
+    btnQuick1Message: userStore?.btnQuick1Message || "¡Patrón! Si paga ya por transferencia se libera de los $25.000 de seguro que cobra la transportadora por el contra-entrega. ¡No pierda esa plata y sea cliente VIP con despacho hoy mismo!",
+    btnQuick2Label: userStore?.btnQuick2Label || "Cierre",
+    btnQuick2Message: userStore?.btnQuick2Message || "¡Rey! Se me acabaron de llevar el penúltimo. Solo me queda UNO con su nombre. ¿Se lo separo ya mismo o se lo paso al siguiente?",
+    btnQuick3Label: userStore?.btnQuick3Label || "Prioridad",
+    btnQuick3Message: userStore?.btnQuick3Message || "¡Buenas! El repartidor ya está cargando el camión VIP. Si transfiere ahorita, su pedido sale de primero. ¿Hacemos el negocio ya para que le llegue mañana?",
+    msgNewOrderTemplate: userStore?.msgNewOrderTemplate || "🔥 *NUEVO PEDIDO RECIBIDO* 🔥\n\n👤 Cliente: {nombre}\n📞 Tel: {telefono}\n📍 Ciudad: {ciudad}\n🏠 Dir: {direccion}\n📦 Producto: {producto}\n💰 Total: {total}",
+    notificationPhone: userStore?.notificationPhone || ""
   });
   const [isSaving, setIsSaving] = useState(false);
   const [officialBotNumber, setOfficialBotNumber] = useState("");
@@ -2394,7 +2461,16 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
       botGoal: userStore?.botGoal || "",
       themeColor: userStore?.themeColor || "#4F46E5",
       dataToCollect: userStore?.dataToCollect || "",
-      baseConocimiento: userStore?.baseConocimiento || ""
+      baseConocimiento: userStore?.baseConocimiento || "",
+      btnNotificationLabel: userStore?.btnNotificationLabel || "Notificar Prueba",
+      btnQuick1Label: userStore?.btnQuick1Label || "Beneficio",
+      btnQuick1Message: userStore?.btnQuick1Message || "¡Patrón! Si paga ya por transferencia se libera de los $25.000 de seguro que cobra la transportadora por el contra-entrega. ¡No pierda esa plata y sea cliente VIP con despacho hoy mismo!",
+      btnQuick2Label: userStore?.btnQuick2Label || "Cierre",
+      btnQuick2Message: userStore?.btnQuick2Message || "¡Rey! Se me acabaron de llevar el penúltimo. Solo me queda UNO con su nombre. ¿Se lo separo ya mismo o se lo paso al siguiente?",
+      btnQuick3Label: userStore?.btnQuick3Label || "Prioridad",
+      btnQuick3Message: userStore?.btnQuick3Message || "¡Buenas! El repartidor ya está cargando el camión VIP. Si transfiere ahorita, su pedido sale de primero. ¿Hacemos el negocio ya para que le llegue mañana?",
+      msgNewOrderTemplate: userStore?.msgNewOrderTemplate || "🔥 *NUEVO PEDIDO RECIBIDO* 🔥\n\n👤 Cliente: {nombre}\n📞 Tel: {telefono}\n📍 Ciudad: {ciudad}\n🏠 Dir: {direccion}\n📦 Producto: {producto}\n💰 Total: {total}",
+      notificationPhone: userStore?.notificationPhone || ""
     });
   }, [userStore]);
 
@@ -2499,6 +2575,47 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
             <div className="space-y-1 md:col-span-2">
               <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Base de Conocimientos / Soporte Adicional</label>
               <textarea value={storeData.baseConocimiento} onChange={e => setStoreData({...storeData, baseConocimiento: e.target.value})} placeholder="Ej: Políticas de envío, garantías, preguntas frecuentes. Si el cliente pregunta algo de acá, el bot lo responderá. (Si pegabas mucha info por WhatsApp, pégala aquí)" className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white min-h-[120px]" />
+            </div>
+
+            <div className="md:col-span-2 py-4">
+              <div className="flex items-center gap-2 text-dark-accent mb-4">
+                <Layout size={16} />
+                <h4 className="text-[10px] font-black uppercase tracking-widest">Interfaz y Mensajes Personalizados</h4>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div className="space-y-1">
+                  <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">WhatsApp Notificaciones</label>
+                  <input value={storeData.notificationPhone} onChange={e => setStoreData({...storeData, notificationPhone: e.target.value})} placeholder="Ej: +57310..." className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white" />
+                  <p className="text-[8px] text-neutral-500 italic">Número donde recibirás avisos de nuevos pedidos.</p>
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Botón de Notificación</label>
+                  <input value={storeData.btnNotificationLabel} onChange={e => setStoreData({...storeData, btnNotificationLabel: e.target.value})} className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-xs text-white" />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Plantilla Nuevo Pedido</label>
+                  <textarea value={storeData.msgNewOrderTemplate} onChange={e => setStoreData({...storeData, msgNewOrderTemplate: e.target.value})} className="w-full bg-black border border-neutral-800 rounded-xl p-3 text-[10px] font-mono text-white min-h-[100px]" />
+                  <p className="text-[8px] text-neutral-500 italic">Usa {'{nombre}'}, {'{telefono}'}, {'{ciudad}'}, {'{direccion}'}, {'{producto}'}, {'{total}'}.</p>
+                </div>
+
+                <div className="space-y-4 md:col-span-2 border-t border-neutral-800 pt-4">
+                  <label className="text-[10px] text-neutral-400 uppercase tracking-widest font-bold">Atajos de Chat (Botones Rápidos)</label>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                       <input value={storeData.btnQuick1Label} onChange={e => setStoreData({...storeData, btnQuick1Label: e.target.value})} placeholder="Etiqueta 1" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2 text-[10px] text-white font-bold" />
+                       <textarea value={storeData.btnQuick1Message} onChange={e => setStoreData({...storeData, btnQuick1Message: e.target.value})} placeholder="Mensaje 1" className="w-full bg-black border border-neutral-800 rounded-lg p-2 text-[10px] text-white min-h-[60px]" />
+                    </div>
+                    <div className="space-y-2">
+                       <input value={storeData.btnQuick2Label} onChange={e => setStoreData({...storeData, btnQuick2Label: e.target.value})} placeholder="Etiqueta 2" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2 text-[10px] text-white font-bold" />
+                       <textarea value={storeData.btnQuick2Message} onChange={e => setStoreData({...storeData, btnQuick2Message: e.target.value})} placeholder="Mensaje 2" className="w-full bg-black border border-neutral-800 rounded-lg p-2 text-[10px] text-white min-h-[60px]" />
+                    </div>
+                    <div className="space-y-2">
+                       <input value={storeData.btnQuick3Label} onChange={e => setStoreData({...storeData, btnQuick3Label: e.target.value})} placeholder="Etiqueta 3" className="w-full bg-neutral-900 border border-neutral-800 rounded-lg p-2 text-[10px] text-white font-bold" />
+                       <textarea value={storeData.btnQuick3Message} onChange={e => setStoreData({...storeData, btnQuick3Message: e.target.value})} placeholder="Mensaje 3" className="w-full bg-black border border-neutral-800 rounded-lg p-2 text-[10px] text-white min-h-[60px]" />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
           <button onClick={handleSaveStore} disabled={isSaving} className="w-full bg-dark-accent text-black font-black uppercase text-[10px] tracking-widest py-3 rounded-xl disabled:opacity-50">
