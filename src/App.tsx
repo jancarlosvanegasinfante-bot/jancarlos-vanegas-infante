@@ -36,7 +36,9 @@ import {
   Bell,
   Calendar,
   Trash2,
-  Layout
+  Layout,
+  Instagram,
+  MessageCircle
 } from "lucide-react";
 import * as React from "react";
 import { useState, useEffect, useRef, useMemo } from "react";
@@ -1037,7 +1039,7 @@ function Dashboard({ orders, products, activities, onShowReports, onShowRecovery
         </div>
 
         <div className="bg-[#111] border border-neutral-800 p-8 rounded-2xl flex flex-col ring-1 ring-white/5">
-          <h3 className="text-dark-accent text-xs font-bold uppercase tracking-widest mb-6">Monitor de WhatsApp (Vivo)</h3>
+          <h3 className="text-dark-accent text-xs font-bold uppercase tracking-widest mb-6">Monitor Omnicanal (Vivo)</h3>
           <div className="space-y-4 flex-1">
              {activities.slice(0, 5).map((a) => (
                <div key={a.id} className="border-l-2 border-neutral-800 pl-4 py-1 space-y-1 group">
@@ -1046,6 +1048,13 @@ function Dashboard({ orders, products, activities, onShowReports, onShowRecovery
                       <span className="text-[9px] text-neutral-500 font-mono">
                         {safeFormat(a.timestamp, 'HH:mm:ss')}
                       </span>
+                      {a.platform === 'instagram' ? (
+                        <Instagram size={10} className="text-pink-500" />
+                      ) : a.platform === 'messenger' ? (
+                        <MessageCircle size={10} className="text-blue-500" />
+                      ) : (
+                        <MessageSquare size={10} className="text-green-500" />
+                      )}
                       <span className="text-[8px] text-dark-accent font-black uppercase tracking-tighter bg-dark-accent/10 px-1 rounded">
                         {(a.from || "unknown").slice(-4)}
                       </span>
@@ -1107,6 +1116,7 @@ function ReportsTab({
   const [isUploading, setIsUploading] = useState(false);
   const [isIntervening, setIsIntervening] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [platformFilter, setPlatformFilter] = useState<'all'|'whatsapp'|'instagram'|'messenger'>('all');
 
   const selectedConversation = useMemo(() => {
     if (!selectedUser) return null;
@@ -1186,6 +1196,7 @@ function ReportsTab({
         acc[userId] = {
           lastMessage: curr.message,
           timestamp: curr.timestamp,
+          platform: curr.platform || 'whatsapp',
           messages: []
         };
       }
@@ -1200,18 +1211,27 @@ function ReportsTab({
       const lastMsg = acc[userId].messages[acc[userId].messages.length - 1];
       acc[userId].lastMessage = lastMsg.message || lastMsg.response || "";
       acc[userId].timestamp = lastMsg.timestamp;
+      acc[userId].platform = lastMsg.platform || 'whatsapp';
+      
+      // Capture the page ID or Twilio number
+      const incomingMsg = acc[userId].messages.find(m => m.senderType !== 'bot');
+      if (incomingMsg) {
+         acc[userId].pageId = incomingMsg.to;
+      }
       
       return acc;
-    }, {} as Record<string, { lastMessage: string, timestamp: any, messages: Activity[] }>);
+    }, {} as Record<string, { lastMessage: string, timestamp: any, platform: string, pageId?: string, messages: Activity[] }>);
   }, [activities]);
 
   const userIds = useMemo(() => {
-    return Object.keys(userConversations).sort((a, b) => {
+    return Object.keys(userConversations)
+      .filter(uid => platformFilter === 'all' || userConversations[uid].platform === platformFilter)
+      .sort((a, b) => {
       const timeA = (userConversations[a].timestamp?.toMillis ? userConversations[a].timestamp.toMillis() : (userConversations[a].timestamp instanceof Date ? userConversations[a].timestamp.getTime() : new Date(userConversations[a].timestamp).getTime())) || 0;
       const timeB = (userConversations[b].timestamp?.toMillis ? userConversations[b].timestamp.toMillis() : (userConversations[b].timestamp instanceof Date ? userConversations[b].timestamp.getTime() : new Date(userConversations[b].timestamp).getTime())) || 0;
       return timeB - timeA;
     });
-  }, [userConversations]);
+  }, [userConversations, platformFilter]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -1257,7 +1277,13 @@ function ReportsTab({
       const res = await fetch("/api/admin/send-message", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: selectedUser, message: messageToSend, mediaUrl })
+        body: JSON.stringify({ 
+           to: selectedUser, 
+           message: messageToSend, 
+           mediaUrl,
+           platform: selectedConversation?.platform,
+           pageId: selectedConversation?.pageId || undefined
+        })
       });
       
       if (res.ok) {
@@ -1307,8 +1333,46 @@ function ReportsTab({
         "w-full md:w-80 border-r border-neutral-800 flex flex-col bg-[#0d0d0d] absolute inset-0 md:relative z-10 transition-transform duration-300 md:translate-x-0",
         selectedUser ? "-translate-x-full md:translate-x-0" : "translate-x-0"
       )}>
-        <div className="p-6 border-b border-neutral-800">
+        <div className="p-4 border-b border-neutral-800 flex flex-col gap-4">
           <h3 className="text-dark-accent text-[10px] font-black uppercase tracking-[0.2em]">Clientes Activos</h3>
+          <div className="flex bg-neutral-900 rounded-lg p-1">
+            <button
+              onClick={() => setPlatformFilter('all')}
+              className={cn(
+                "flex-1 py-1.5 text-[10px] font-bold uppercase tracking-widest rounded-md transition-all",
+                platformFilter === 'all' ? "bg-neutral-800 text-white shadow-sm" : "text-neutral-500 hover:text-white"
+              )}
+            >
+              Todos
+            </button>
+            <button
+              onClick={() => setPlatformFilter('whatsapp')}
+              className={cn(
+                "flex-1 py-1.5 flex justify-center items-center rounded-md transition-all",
+                platformFilter === 'whatsapp' ? "bg-[#25D366]/20 text-[#25D366] shadow-sm" : "text-neutral-500 hover:text-[#25D366]"
+              )}
+            >
+              <MessageSquare size={14} />
+            </button>
+            <button
+              onClick={() => setPlatformFilter('instagram')}
+              className={cn(
+                "flex-1 py-1.5 flex justify-center items-center rounded-md transition-all",
+                platformFilter === 'instagram' ? "bg-[#E1306C]/20 text-[#E1306C] shadow-sm" : "text-neutral-500 hover:text-[#E1306C]"
+              )}
+            >
+              <Instagram size={14} />
+            </button>
+            <button
+              onClick={() => setPlatformFilter('messenger')}
+              className={cn(
+                "flex-1 py-1.5 flex justify-center items-center rounded-md transition-all",
+                platformFilter === 'messenger' ? "bg-[#0084FF]/20 text-[#0084FF] shadow-sm" : "text-neutral-500 hover:text-[#0084FF]"
+              )}
+            >
+              <MessageCircle size={14} />
+            </button>
+          </div>
         </div>
         <div className="flex-1 overflow-y-auto custom-scrollbar">
           {userIds.map(uid => (
@@ -1321,7 +1385,13 @@ function ReportsTab({
               )}
             >
               <div className="w-12 h-12 rounded-2xl bg-neutral-900 flex items-center justify-center border border-neutral-800 shrink-0 group-hover:border-dark-accent/30 transition-colors">
-                <User size={20} className={cn(selectedUser === uid ? "text-dark-accent" : "text-neutral-600")} />
+                {userConversations[uid].platform === 'instagram' ? (
+                  <Instagram size={20} className={cn(selectedUser === uid ? "text-pink-500" : "text-neutral-600")} />
+                ) : userConversations[uid].platform === 'messenger' ? (
+                  <MessageCircle size={20} className={cn(selectedUser === uid ? "text-blue-500" : "text-neutral-600")} />
+                ) : (
+                  <MessageSquare size={20} className={cn(selectedUser === uid ? "text-green-500" : "text-neutral-600")} />
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex justify-between items-center mb-1">
@@ -1364,7 +1434,13 @@ function ReportsTab({
                       <ChevronRight size={20} className="rotate-180" />
                     </button>
                     <div className="w-10 h-10 rounded-xl bg-dark-accent/10 flex items-center justify-center border border-dark-accent/20">
-                      <Phone size={16} className="text-dark-accent" />
+                      {userConversations[selectedUser]?.platform === 'instagram' ? (
+                        <Instagram size={16} className="text-pink-500" />
+                      ) : userConversations[selectedUser]?.platform === 'messenger' ? (
+                        <MessageCircle size={16} className="text-blue-500" />
+                      ) : (
+                        <MessageSquare size={16} className="text-green-500" />
+                      )}
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
@@ -1378,7 +1454,7 @@ function ReportsTab({
                         )}
                       </div>
                       <p className="text-[9px] text-dark-green uppercase font-bold tracking-widest flex items-center gap-1">
-                        <span className="w-1.5 h-1.5 bg-dark-green rounded-full animate-pulse" /> <span className="hidden xs:inline">WhatsApp</span> Activo
+                        <span className="w-1.5 h-1.5 bg-dark-green rounded-full animate-pulse" /> <span className="hidden xs:inline">{userConversations[selectedUser]?.platform || 'WhatsApp'}</span> Activo
                       </p>
                     </div>
                   </div>
@@ -1422,20 +1498,38 @@ function ReportsTab({
 
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 lg:p-8 flex flex-col-reverse gap-6 custom-scrollbar">
-              {selectedUser && userConversations[selectedUser] && [...userConversations[selectedUser].messages].sort((a,b) => (b.timestamp?.toMillis ? b.timestamp.toMillis() : 0) - (a.timestamp?.toMillis ? a.timestamp.toMillis() : 0)).map((msg) => (
+              {selectedUser && userConversations[selectedUser] && [...userConversations[selectedUser].messages].sort((a,b) => (b.timestamp?.toMillis ? b.timestamp.toMillis() : 0) - (a.timestamp?.toMillis ? a.timestamp.toMillis() : 0)).map((msg) => {
+                const currentPlatform = userConversations[selectedUser]?.platform || 'whatsapp';
+                const isInstagram = currentPlatform === 'instagram';
+                const isMessenger = currentPlatform === 'messenger';
+                const isWhatsapp = currentPlatform === 'whatsapp';
+
+                return (
                 <div key={msg.id} className="space-y-4">
                   {/* Incoming: User */}
                   <div className="flex items-start gap-4 max-w-[85%]">
-                    <div className="w-8 h-8 rounded-lg bg-neutral-900 border border-neutral-800 flex items-center justify-center shrink-0">
-                      <User size={14} className="text-neutral-600" />
+                    <div className={cn(
+                      "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border",
+                      isInstagram ? "bg-gradient-to-tr from-[#fd5949] to-[#d6249f] border-pink-500/20" :
+                      isMessenger ? "bg-gradient-to-tr from-[#00c6ff] to-[#0072ff] border-blue-500/20" :
+                      "bg-neutral-900 border-neutral-800"
+                    )}>
+                      {isInstagram ? <Instagram size={14} className="text-white" /> :
+                       isMessenger ? <MessageCircle size={14} className="text-white" /> :
+                       <User size={14} className="text-neutral-600" />}
                     </div>
                     <div>
-                      <div className="bg-neutral-900 border border-neutral-800 p-4 rounded-2xl rounded-tl-none text-white text-[13px] leading-relaxed shadow-lg">
+                      <div className={cn(
+                        "p-4 rounded-2xl rounded-tl-none text-white text-[13px] leading-relaxed shadow-lg border",
+                        isInstagram ? "bg-black border-pink-900/30" :
+                        isMessenger ? "bg-black border-blue-900/30" :
+                        "bg-neutral-900 border-neutral-800"
+                      )}>
                         <span>{(msg.message || "").split(" [Media:")[0]}</span>
                         {renderMedia(msg.message || "")}
                       </div>
                       <p className="text-[9px] text-neutral-600 mt-2 font-mono uppercase">
-                        {safeFormat(msg.timestamp, 'HH:mm:ss')}
+                        {safeFormat(msg.timestamp, 'HH:mm:ss')} • {currentPlatform}
                       </p>
                     </div>
                   </div>
@@ -1445,9 +1539,12 @@ function ReportsTab({
                     <div className="flex items-start gap-4 max-w-[85%] ml-auto flex-row-reverse">
                       <div className={cn(
                         "w-8 h-8 rounded-lg border flex items-center justify-center shrink-0",
-                        msg.message === "[Asesor Humano]" ? "bg-dark-accent/20 border-dark-accent/30" : "bg-dark-green/10 border-dark-green/20"
+                        msg.message === "[Asesor Humano]" ? "bg-dark-accent/20 border-dark-accent/30" : 
+                        isInstagram ? "bg-pink-600/20 border-pink-500/30" :
+                        isMessenger ? "bg-blue-600/20 border-blue-500/30" :
+                        "bg-dark-green/10 border-dark-green/20"
                       )}>
-                        {msg.message === "[Asesor Humano]" ? <User size={14} className="text-dark-accent" /> : <Cpu size={14} className="text-dark-green" />}
+                        {msg.message === "[Asesor Humano]" ? <User size={14} className="text-dark-accent" /> : <Cpu size={14} className={cn(isInstagram ? "text-pink-500" : isMessenger ? "text-blue-500" : "text-dark-green")} />}
                       </div>
                       <div className="text-right">
                         <div 
@@ -1455,6 +1552,8 @@ function ReportsTab({
                             "p-4 rounded-2xl rounded-tr-none text-[13px] leading-relaxed shadow-xl border cursor-pointer select-none",
                             msg.message === "[Asesor Humano]" 
                               ? "bg-dark-accent text-white border-dark-accent" 
+                              : isInstagram ? "bg-gradient-to-r from-[#d6249f]/10 to-[#fd5949]/10 border-pink-500/30 text-white font-medium italic"
+                              : isMessenger ? "bg-gradient-to-r from-[#0072ff]/10 to-[#00c6ff]/10 border-blue-500/30 text-white font-medium italic"
                               : "bg-neutral-800 text-neutral-200 border-neutral-700 font-medium italic"
                           )}
                           onClick={() => setShowStatusId(showStatusId === msg.id ? null : msg.id)}
@@ -1525,7 +1624,8 @@ function ReportsTab({
                     </div>
                   )}
                 </div>
-              ))}
+              );
+            })}
             </div>
 
             {/* Input Area */}

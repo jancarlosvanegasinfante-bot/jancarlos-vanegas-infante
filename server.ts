@@ -637,7 +637,7 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
       let mediaUrl = jsonResponse.imageUrl || undefined;
       await sendWhatsApp(data.from, jsonResponse.mensaje, mediaUrl, activityId, data.to);
     } else if (data.platform === "instagram" || data.platform === "messenger") {
-      await sendMetaMessage(data.from, jsonResponse.mensaje, data.platform);
+      await sendMetaMessage(data.from, jsonResponse.mensaje, data.platform, data.to);
     }
 
     // 4. Actualizar actividad
@@ -878,13 +878,14 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
 /**
  * Sends a message via Meta Graph API (Instagram or Messenger)
  */
-async function sendMetaMessage(recipientId: string, text: string, platform: 'instagram' | 'messenger') {
+async function sendMetaMessage(recipientId: string, text: string, platform: 'instagram' | 'messenger', pageId?: string) {
   if (!FB_PAGE_ACCESS_TOKEN) {
     console.warn(`[Meta Send] No access token configured. Cannot reply to ${recipientId} on ${platform}`);
     return;
   }
 
-  const url = `https://graph.facebook.com/v19.0/me/messages?access_token=${FB_PAGE_ACCESS_TOKEN}`;
+  const endpoint = pageId ? `${pageId}/messages` : `me/messages`;
+  const url = `https://graph.facebook.com/v19.0/${endpoint}?access_token=${FB_PAGE_ACCESS_TOKEN}`;
   
   try {
     console.log(`[Meta Send] Sending to ${recipientId} on ${platform}...`);
@@ -1522,22 +1523,26 @@ async function startServer() {
 
   app.post("/api/admin/send-message", async (req, res) => {
     detectCurrentUrl(req);
-    const { to, message, mediaUrl, from: requestedFrom } = req.body;
+    const { to, message, mediaUrl, from: requestedFrom, platform, pageId } = req.body;
 
-    if (!to || (!message && !mediaUrl) || !twilioClient) {
-      console.warn("[Admin Send] Validation failed:", { to: !!to, hasMsg: !!message, hasMedia: !!mediaUrl, hasTwilio: !!twilioClient });
-      return res.status(400).json({ success: false, error: "Missing data or client" });
+    if (!to || (!message && !mediaUrl)) {
+      console.warn("[Admin Send] Validation failed");
+      return res.status(400).json({ success: false, error: "Missing data" });
     }
 
     try {
-      const cleanTo = to.startsWith("whatsapp:") ? to : `whatsapp:${to}`;
-      const customerPhone = cleanTo.replace("whatsapp:", "").trim();
-      const finalFrom = requestedFrom || TWILIO_FROM_NUMBER || "whatsapp:+14155238886";
-
-      console.log(`[Admin] Sending FROM ${finalFrom} TO ${to}. Message: ${message?.substring(0, 20)}...`);
+      const isMeta = platform === 'instagram' || platform === 'messenger';
       
-      // CRITICAL: Ensure Jan never talks to himself
-      if (cleanTo === (finalFrom.startsWith("whatsapp:") ? finalFrom : `whatsapp:${finalFrom}`)) {
+      const cleanTo = (!isMeta && to.startsWith("whatsapp:")) ? to : (!isMeta ? `whatsapp:${to}` : to);
+      const customerPhone = cleanTo.replace("whatsapp:", "").trim();
+      
+      // We set from to the page id or twilio number based on platform
+      const finalFrom = isMeta ? (pageId || "meta-page") : (requestedFrom || TWILIO_FROM_NUMBER || "whatsapp:+14155238886");
+
+      console.log(`[Admin] Sending FROM ${finalFrom} TO ${to} (Platform: ${platform || 'whatsapp'}).`);
+      
+      // CRITICAL: Ensure Jan never talks to himself (only for WA)
+      if (!isMeta && cleanTo === (finalFrom.startsWith("whatsapp:") ? finalFrom : `whatsapp:${finalFrom}`)) {
         console.warn("[Admin] Bot attempted to send message to itself. Blocked.");
         return res.status(400).json({ success: false, error: "Cannot send to self" });
       }
@@ -1549,17 +1554,25 @@ async function startServer() {
         recipient: cleanTo,
         message: message || "[Media enviado]",
         status: "respondido",
-        whatsappStatus: "sending",
+        platform: platform || 'whatsapp',
+        whatsappStatus: isMeta ? "sent" : "sending",
         senderType: 'bot',
         timestamp: serverTimestamp(),
         customerPhone: customerPhone
       });
 
       try {
-        const twilioRes = await sendWhatsApp(to, message || "", mediaUrl, activityRef.id, requestedFrom);
-        res.json({ success: true, SID: twilioRes?.sid, activityId: activityRef.id });
+        if (isMeta) {
+          const metaRes = await sendMetaMessage(to, message || "", platform, pageId);
+          res.json({ success: true, activityId: activityRef.id, metaRes });
+        } else {
+          // Fallback to whatsapp
+          if (!twilioClient) throw new Error("WhatsApp no configurado. Faltan claves.");
+          const twilioRes = await sendWhatsApp(to, message || "", mediaUrl, activityRef.id, requestedFrom);
+          res.json({ success: true, SID: twilioRes?.sid, activityId: activityRef.id });
+        }
       } catch (sendErr: any) {
-        console.error("[Twilio] Send failed:", sendErr.message);
+        console.error("[Send] Failed:", sendErr.message);
         await updateDoc(activityRef, { 
           status: "error", 
           whatsappStatus: "failed", 
