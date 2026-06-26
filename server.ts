@@ -43,7 +43,7 @@ const __dirname = path.dirname(__filename);
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || process.env.SID_DE_CUENTA_TWILIO;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || process.env.TOKEN_DE_AUTORIZACION_DE_TWILIO;
 const TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_DESDE_NÚMERO || process.env.TWILIO_NUMBER;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.Clave_API;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const SENDGRID_FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL;
 const FB_PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN;
@@ -1723,7 +1723,7 @@ NO RESPONDAS EN JSON, RESPONDE SOLO EL TEXTO DEL MENSAJE.`;
 
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const result = await ai.models.generateContent({
-            model: "gemini-flash-latest",
+            model: "gemini-2.5-flash",
             contents: prompt
           });
           const nudgeMsg = result.text.trim();
