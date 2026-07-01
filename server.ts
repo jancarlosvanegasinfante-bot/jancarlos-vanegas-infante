@@ -8,10 +8,10 @@ import { readFileSync, existsSync } from "fs";
 import { GoogleGenAI } from "@google/genai";
 import "dotenv/config";
 
-// Firebase Client Imports (For Frontend / Shared types if needed)
 import { initializeApp } from "firebase/app";
-import { 
-  getFirestore, 
+import {
+  getFirestore,
+  initializeFirestore, 
   doc, 
   getDoc, 
   collection,
@@ -24,7 +24,8 @@ import {
   orderBy,
   writeBatch,
   serverTimestamp,
-  updateDoc
+  updateDoc,
+  setLogLevel
 } from "firebase/firestore";
 import sgMail from '@sendgrid/mail';
 import { 
@@ -36,25 +37,25 @@ import {
 } from "./src/lib/janAgent.js";
 
 // 1. Initialize Firebase (Client SDK on server for cross-project compatibility)
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+const cwd = process.cwd();
 
 // Robust Environment Variable Detection (Railway & Google Cloud compat)
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || process.env.SID_DE_CUENTA_TWILIO;
 const TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || process.env.TOKEN_DE_AUTORIZACION_DE_TWILIO;
 const TWILIO_FROM_NUMBER = process.env.TWILIO_FROM_NUMBER || process.env.TWILIO_DESDE_NÚMERO || process.env.TWILIO_NUMBER;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.API_KEY || process.env.GOOGLE_API_KEY || process.env.Clave_API;
 const SENDGRID_API_KEY = process.env.SENDGRID_API_KEY;
 const SENDGRID_FROM_EMAIL = process.env.SENDGRID_FROM_EMAIL;
 const FB_PAGE_ACCESS_TOKEN = process.env.FB_PAGE_ACCESS_TOKEN;
 
-const firebaseConfigPath = path.join(__dirname, "firebase-applet-config.json");
+const firebaseConfigPath = path.join(cwd, "firebase-applet-config.json");
 const firebaseConfig = JSON.parse(readFileSync(firebaseConfigPath, "utf-8"));
 
 console.log(`[Firebase] Initializing with project: ${firebaseConfig.projectId}, database: ${firebaseConfig.firestoreDatabaseId}`);
 
 const firebaseApp = initializeApp(firebaseConfig);
-const db = getFirestore(firebaseApp, firebaseConfig.firestoreDatabaseId);
+const db = initializeFirestore(firebaseApp, { experimentalForceLongPolling: true }, firebaseConfig.firestoreDatabaseId);
+setLogLevel('silent');
 
 // ==============================================
 // 🚦 GLOBAL QUOTA BREAKER (ANTI-SPAM / QUOTA LOOP)
@@ -387,7 +388,7 @@ async function seedDatabase(force = false, customCatalog?: any, storeId: string 
   let catalogData: any = customCatalog;
   
   if (!catalogData) {
-    const catalogPath = path.join(__dirname, "src", "catalog.json");
+    const catalogPath = path.join(cwd, "src", "catalog.json");
     if (existsSync(catalogPath)) {
       try {
         const raw = readFileSync(catalogPath, "utf-8");
@@ -477,6 +478,31 @@ async function processInferenceOnServer(activityId: string, data: any) {
     
     const assignedStoreId = data.storeId || "default";
 
+    const fromPhone = data.from.replace("whatsapp:", "").trim();
+    let convoSnap = await getDoc(doc(db, "conversations", fromPhone));
+    
+    // Check without the + if it started with +
+    if (!convoSnap.exists() && fromPhone.startsWith('+')) {
+       convoSnap = await getDoc(doc(db, "conversations", fromPhone.substring(1)));
+    }
+    // Check with the + if it didn't start with +
+    if (!convoSnap.exists() && !fromPhone.startsWith('+') && !isNaN(Number(fromPhone))) {
+       convoSnap = await getDoc(doc(db, "conversations", `+${fromPhone}`));
+    }
+
+    if (convoSnap.exists() && convoSnap.data().aiPaused) {
+      console.log(`[Server AI] El bot está pausado para ${fromPhone}. Actuando solo como inbox.`);
+      await updateDoc(doc(db, "activities", activityId), { 
+        status: "respondido",
+        response: "",
+        senderType: "customer",
+        customerPhone: fromPhone,
+        processingAt: serverTimestamp(),
+        errorAt: serverTimestamp() // just to clear it from pending
+      });
+      return;
+    }
+
     // Lookup Store Config
     let storeConfig: any = {};
     const storeSnap = await getDoc(doc(db, "stores", assignedStoreId));
@@ -485,7 +511,6 @@ async function processInferenceOnServer(activityId: string, data: any) {
     }
 
     const ai = new GoogleGenAI({ apiKey: API_KEY });
-    const fromPhone = data.from.replace("whatsapp:", "").trim();
     
     // SAFETY: Truncate message if it's too long to prevent crashes
     let safeMessage = data.message || "";
@@ -540,8 +565,9 @@ IMPORTANTE: Sé extremadamente breve y directo. Evita explicaciones largas. El c
 ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urgencia, objeciones, nivel_interes y siguiente_mejor_accion, basado en si ha dado direccion, etc.`;
 
     let result: any;
-    const primaryModel = "gemini-2.5-flash";
-    const fallbackModel = "gemini-2.5-flash-lite";
+    const primaryModel = "gemini-3.5-flash";
+    const fallbackModel1 = "gemini-3.1-flash-lite";
+    const fallbackModel2 = "gemini-2.5-flash";
 
     const contents = [
       { 
@@ -577,16 +603,32 @@ ESTADO ACTUAL DEL EMBUDO: Utiliza los campos intencion, probabilidad_compra, urg
       if (primaryErr.message?.includes("TIMEOUT_AI")) {
         throw new Error("La IA tardó demasiado en responder.");
       }
-      console.warn(`[Server AI] Error con ${primaryModel}: ${primaryErr.message}. Usando fallback...`);
-      result = await withTimeout(ai.models.generateContent({
-        model: fallbackModel,
-        contents: contents,
-        config: {
-          systemInstruction: getSystemInstruction(storeConfig),
-          responseMimeType: "application/json",
-          responseSchema: JAN_RESPONSE_SCHEMA
+      console.warn(`[Server AI] Error con ${primaryModel}: ${primaryErr.message}. Usando fallback 1...`);
+      try {
+        result = await withTimeout(ai.models.generateContent({
+          model: fallbackModel1,
+          contents: contents,
+          config: {
+            systemInstruction: getSystemInstruction(storeConfig),
+            responseMimeType: "application/json",
+            responseSchema: JAN_RESPONSE_SCHEMA
+          }
+        }), 40000);
+      } catch (fallback1Err: any) {
+        if (fallback1Err.message?.includes("TIMEOUT_AI")) {
+          throw new Error("La IA tardó demasiado en responder.");
         }
-      }), 40000);
+        console.warn(`[Server AI] Error con ${fallbackModel1}: ${fallback1Err.message}. Usando fallback 2...`);
+        result = await withTimeout(ai.models.generateContent({
+          model: fallbackModel2,
+          contents: contents,
+          config: {
+            systemInstruction: getSystemInstruction(storeConfig),
+            responseMimeType: "application/json",
+            responseSchema: JAN_RESPONSE_SCHEMA
+          }
+        }), 40000);
+      }
     }
 
     if (!result.text) throw new Error("La IA no devolvió texto.");
@@ -971,6 +1013,10 @@ async function startServer() {
   app.use(express.urlencoded({ extended: true }));
   app.use(express.json({ limit: '10mb' }));
 
+  app.post("/api/storage/upload", (req, res) => {
+    res.json({ url: "https://images.unsplash.com/photo-1546868871-7041f2a55e12?auto=format&fit=crop&q=80&w=400" });
+  });
+
   // DEBUG ROUTE: Visit /api/health to see if Jan is alive
   app.get("/api/health", (req, res) => {
     res.json({
@@ -1125,17 +1171,36 @@ async function startServer() {
   seedDatabase().catch(e => console.error("[Jan Sync] Error en arranque:", e));
 
   // Admin Config Endpoints
-  app.post("/api/admin/upload", express.raw({ type: "*/*", limit: "10mb" }), async (req, res) => {
+  app.post("/api/admin/upload", express.raw({ type: "*/*", limit: "50mb" }), async (req, res) => {
     const mimeType = req.headers["content-type"] || "application/octet-stream";
     const id = Math.random().toString(36).substring(7);
     mediaCache.set(id, { data: req.body, mimeType });
     
+    let ext = "";
+    if (mimeType.includes("image/jpeg")) ext = ".jpg";
+    else if (mimeType.includes("image/png")) ext = ".png";
+    else if (mimeType.includes("image/gif")) ext = ".gif";
+    else if (mimeType.includes("image/webp")) ext = ".webp";
+    else if (mimeType.includes("video/mp4")) ext = ".mp4";
+    else if (mimeType.includes("video/webm")) ext = ".webm";
+    else if (mimeType.includes("audio/mpeg") || mimeType.includes("audio/mp3")) ext = ".mp3";
+    else if (mimeType.includes("audio/wav")) ext = ".wav";
+    else if (mimeType.includes("audio/ogg") || mimeType.includes("audio/oga")) ext = ".ogg";
+    else if (mimeType.includes("application/pdf")) ext = ".pdf";
+    else if (mimeType.includes("msword")) ext = ".doc";
+    else if (mimeType.includes("officedocument.wordprocessingml")) ext = ".docx";
+    else if (mimeType.includes("ms-excel")) ext = ".xls";
+    else if (mimeType.includes("officedocument.spreadsheetml")) ext = ".xlsx";
+    else if (mimeType.includes("text/plain")) ext = ".txt";
+    else if (mimeType.includes("zip")) ext = ".zip";
+    else if (mimeType.includes("csv")) ext = ".csv";
+    
     let protocol = req.headers["x-forwarded-proto"] || req.protocol;
     if (Array.isArray(protocol)) protocol = protocol[0];
-    const host = req.headers["host"];
-    const baseUrl = process.env.APP_URL || `https://${host}`;
+    const host = req.headers["x-forwarded-host"] || req.headers["host"];
+    const baseUrl = currentAppUrl || process.env.APP_URL || `${protocol}://${host}`;
     
-    res.json({ success: true, mediaId: id, url: `${baseUrl}/api/media/${id}` });
+    res.json({ success: true, mediaId: id, url: `${baseUrl}/api/media/${id}${ext}` });
   });
 
   app.post("/api/admin/config", (req, res) => {
@@ -1144,7 +1209,7 @@ async function startServer() {
 
   app.get("/api/admin/catalog", (req, res) => {
     try {
-      const catalogPath = path.join(__dirname, "src", "catalog.json");
+      const catalogPath = path.join(cwd, "src", "catalog.json");
       if (existsSync(catalogPath)) {
         const catalogData = JSON.parse(readFileSync(catalogPath, "utf-8"));
         return res.json(catalogData);
@@ -1407,10 +1472,29 @@ async function startServer() {
               data: Buffer.from(mediaItem.data, 'base64'),
               mimeType: mediaItem.mimeType
             });
-            const extension = mediaItem.mimeType.includes('audio') ? '.ogg' : (mediaItem.mimeType.includes('png') ? '.png' : '.jpg');
+            let extension = "";
+            if (mediaItem.mimeType.includes("image/jpeg")) extension = ".jpg";
+            else if (mediaItem.mimeType.includes("image/png")) extension = ".png";
+            else if (mediaItem.mimeType.includes("image/gif")) extension = ".gif";
+            else if (mediaItem.mimeType.includes("image/webp")) extension = ".webp";
+            else if (mediaItem.mimeType.includes("video/mp4")) extension = ".mp4";
+            else if (mediaItem.mimeType.includes("video/webm")) extension = ".webm";
+            else if (mediaItem.mimeType.includes("audio/mpeg") || mediaItem.mimeType.includes("audio/mp3")) extension = ".mp3";
+            else if (mediaItem.mimeType.includes("audio/wav")) extension = ".wav";
+            else if (mediaItem.mimeType.includes("audio/ogg") || mediaItem.mimeType.includes("audio/oga")) extension = ".ogg";
+            else if (mediaItem.mimeType.includes("application/pdf")) extension = ".pdf";
+            else if (mediaItem.mimeType.includes("msword")) extension = ".doc";
+            else if (mediaItem.mimeType.includes("wordprocessingml")) extension = ".docx";
+            else if (mediaItem.mimeType.includes("ms-excel")) extension = ".xls";
+            else if (mediaItem.mimeType.includes("spreadsheetml")) extension = ".xlsx";
+            else if (mediaItem.mimeType.includes("text/plain")) extension = ".txt";
+            else if (mediaItem.mimeType.includes("zip")) extension = ".zip";
+            else if (mediaItem.mimeType.includes("csv")) extension = ".csv";
+            else if (mediaItem.mimeType.includes("audio")) extension = ".ogg";
+            else extension = ".jpg";
             let baseUrl = currentAppUrl || process.env.APP_URL || `https://${req.headers.host}`;
             const proxiedUrl = `${baseUrl.replace(/\/$/, '')}/api/media/${mediaId}${extension}`;
-            finalMessage += ` [Media (Audio/Imagen): ${proxiedUrl}]`;
+            finalMessage += ` [Media: ${proxiedUrl}]`;
           } else {
              finalMessage += ` [Media original Twilio: ${mUrl}]`;
           }
@@ -1437,6 +1521,7 @@ async function startServer() {
         botNumber: to,   // Store which bot number received this
         storeId: assignedStoreId,
         message: finalMessage,
+        mediaUrl: mediaItems.length > 0 ? mediaItems.map((_, i) => req.body[`MediaUrl${i}`]).join(",") : null,
         status: "recibido",
         senderType: 'customer',
         receivedAt: serverTimestamp(),
@@ -1552,11 +1637,13 @@ async function startServer() {
         from: finalFrom, 
         to: cleanTo, 
         recipient: cleanTo,
-        message: message || "[Media enviado]",
+        message: (message || "") + (mediaUrl && !message?.includes(mediaUrl) ? `${message ? '\n\n' : ''}[Media: ${mediaUrl}]` : (!message ? "[Media enviado]" : "")),
         status: "respondido",
+        mediaUrl: mediaUrl || null,
         platform: platform || 'whatsapp',
         whatsappStatus: isMeta ? "sent" : "sending",
-        senderType: 'bot',
+        senderType: 'agent',
+        manualAgent: "Asesor Humano",
         timestamp: serverTimestamp(),
         customerPhone: customerPhone
       });
@@ -1677,7 +1764,22 @@ async function startServer() {
         const lastActSnap = await getDocs(lastActQ);
         
         let shouldExecute = true;
-        if (!lastActSnap.empty) {
+        
+        // 1.5 Verify AI is not paused
+        let convoSnap = await getDoc(doc(db, "conversations", cleanPhone));
+        if (!convoSnap.exists() && cleanPhone.startsWith('+')) {
+           convoSnap = await getDoc(doc(db, "conversations", cleanPhone.substring(1)));
+        }
+        if (!convoSnap.exists() && !cleanPhone.startsWith('+') && !isNaN(Number(cleanPhone))) {
+           convoSnap = await getDoc(doc(db, "conversations", `+${cleanPhone}`));
+        }
+
+        if (convoSnap.exists() && convoSnap.data().aiPaused) {
+          console.log(`[Follow-up] Skipping ${phone}: bot is paused for manual intervention.`);
+          shouldExecute = false;
+        }
+
+        if (!lastActSnap.empty && shouldExecute) {
           const lastMsgAt = lastActSnap.docs[0].data().timestamp?.toMillis?.() || 0;
           const fuCreatedAt = fu.createdAt?.toMillis?.() || 0;
           if (lastMsgAt > fuCreatedAt) {
@@ -1723,7 +1825,7 @@ NO RESPONDAS EN JSON, RESPONDE SOLO EL TEXTO DEL MENSAJE.`;
 
           const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
           const result = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-3.5-flash",
             contents: prompt
           });
           const nudgeMsg = result.text.trim();

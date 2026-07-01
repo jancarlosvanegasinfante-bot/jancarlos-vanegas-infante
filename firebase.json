@@ -1,0 +1,6 @@
+{
+  "firestore": {
+    "database": "ai-studio-janselshop-a215aaf4-d4ce-4ed2-a5a8-1c3b80f1ee3c",
+    "rules": "firestore.rules"
+  }
+}
