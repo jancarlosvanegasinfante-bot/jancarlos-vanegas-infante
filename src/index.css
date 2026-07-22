@@ -1,0 +1,280 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Georgia", serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+
+  --color-dark-bg: #050505;
+  --color-dark-card: #0F0F0F;
+  --color-dark-accent: #F27D26; /* Warm Orange */
+  --color-dark-text: #F5F5F5;
+  --color-dark-muted: #666666;
+  --color-dark-green: #00A86B; /* Emerald Green */
+}
+
+@layer base {
+  body {
+    @apply bg-dark-bg text-dark-text antialiased;
+  }
+  * {
+    scroll-behavior: smooth;
+  }
+}
+
+/* ============================================
+   ANIMACIONES PREMIUM
+   ============================================ */
+
+/* Aurora / Glow background animation */
+@keyframes aurora {
+  0%, 100% { transform: translate(0%, 0%) scale(1); opacity: 0.4; }
+  25% { transform: translate(3%, -2%) scale(1.05); opacity: 0.6; }
+  50% { transform: translate(-2%, 3%) scale(0.95); opacity: 0.3; }
+  75% { transform: translate(-3%, -1%) scale(1.08); opacity: 0.5; }
+}
+
+/* Float up and down */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+}
+
+/* Shimmer sweep for skeleton/highlight */
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+/* Typewriter cursor blink */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+/* Pulse glow */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 20px rgba(251, 191, 36, 0.3), 0 0 40px rgba(251, 191, 36, 0.1); }
+  50% { box-shadow: 0 0 40px rgba(251, 191, 36, 0.6), 0 0 80px rgba(251, 191, 36, 0.2); }
+}
+
+/* Slide in from left */
+@keyframes slide-in-left {
+  0% { transform: translateX(-60px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+/* Slide in from right */
+@keyframes slide-in-right {
+  0% { transform: translateX(60px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 1; }
+}
+
+/* Bounce dots for loading */
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: scale(0.8); opacity: 0.5; }
+  40% { transform: scale(1.2); opacity: 1; }
+}
+
+/* Spin slow */
+@keyframes spin-slow {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Gradient shift */
+@keyframes gradient-shift {
+  0% { background-position: 0% 50%; }
+  50% { background-position: 100% 50%; }
+  100% { background-position: 0% 50%; }
+}
+
+/* Ping large */
+@keyframes ping-large {
+  0% { transform: scale(1); opacity: 0.8; }
+  75%, 100% { transform: scale(1.8); opacity: 0; }
+}
+
+/* Marquee horizontal scroll */
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+/* ============================================
+   UTILITY CLASSES PREMIUM
+   ============================================ */
+
+.animate-aurora { animation: aurora 8s ease-in-out infinite; }
+.animate-float { animation: float 4s ease-in-out infinite; }
+.animate-shimmer { 
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.05) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite; 
+}
+.animate-glow-pulse { animation: glow-pulse 2.5s ease-in-out infinite; }
+.animate-spin-slow { animation: spin-slow 8s linear infinite; }
+.animate-gradient-shift { 
+  background-size: 200% 200%;
+  animation: gradient-shift 4s ease infinite; 
+}
+.animate-ping-large { animation: ping-large 2s cubic-bezier(0, 0, 0.2, 1) infinite; }
+.animate-marquee { animation: marquee 25s linear infinite; }
+
+/* Glassmorphism card */
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.glass-card-amber {
+  background: rgba(251, 191, 36, 0.05);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(251, 191, 36, 0.15);
+}
+
+/* Premium gradient text */
+.text-gradient-gold {
+  background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 40%, #fde68a 70%, #f59e0b 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.text-gradient-fire {
+  background: linear-gradient(135deg, #ff6b35 0%, #f7c59f 50%, #ff6b35 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Neon border glow */
+@keyframes border-glow-anim {
+  0%, 100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+.neon-glow-card {
+  position: relative;
+  background: linear-gradient(#0d0f1a, #0d0f1a) padding-box,
+              linear-gradient(135deg, #fbbf24, #f97316, #ef4444, #fbbf24) border-box;
+  border: 1.5px solid transparent;
+  background-size: 200% 200%;
+  animation: border-glow-anim 4s linear infinite;
+  box-shadow: 0 0 15px rgba(251, 191, 36, 0.05);
+  transition: all 0.3s ease-in-out;
+}
+
+.neon-glow-card:hover {
+  box-shadow: 0 0 25px rgba(251, 191, 36, 0.35), 0 0 50px rgba(249, 115, 22, 0.15);
+  transform: translateY(-4px);
+}
+
+.border-glow-amber {
+  box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.3), 0 0 20px rgba(251, 191, 36, 0.1);
+}
+
+.border-glow-green {
+  box-shadow: 0 0 0 1px rgba(52, 211, 153, 0.3), 0 0 20px rgba(52, 211, 153, 0.1);
+}
+
+/* CTA button premium */
+.btn-cta-primary {
+  background: linear-gradient(135deg, #fbbf24, #f59e0b, #d97706);
+  background-size: 200% 200%;
+  animation: gradient-shift 3s ease infinite;
+  box-shadow: 0 8px 32px rgba(251, 191, 36, 0.35), 0 2px 8px rgba(0,0,0,0.3);
+  transition: all 0.3s ease;
+}
+.btn-cta-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(251, 191, 36, 0.5), 0 4px 12px rgba(0,0,0,0.4);
+}
+.btn-cta-primary:active {
+  transform: translateY(0px);
+}
+
+.btn-cta-whatsapp {
+  background: linear-gradient(135deg, #25d366, #128c7e);
+  box-shadow: 0 8px 32px rgba(37, 211, 102, 0.35), 0 2px 8px rgba(0,0,0,0.3);
+  transition: all 0.3s ease;
+}
+.btn-cta-whatsapp:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(37, 211, 102, 0.5);
+}
+
+/* Section divider glow */
+.section-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(251, 191, 36, 0.3), transparent);
+}
+
+/* Marquee container */
+.marquee-container {
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Stock progress bar */
+.stock-bar {
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+}
+.stock-bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ef4444, #f97316);
+  transition: width 0.5s ease;
+}
+
+/* Phone input */
+.PhoneInput-custom {
+  display: flex;
+  align-items: center;
+}
+.PhoneInput-custom .PhoneInputCountry {
+  margin-right: 0.75rem;
+}
+.PhoneInput-custom .PhoneInputInput {
+  flex: 1;
+  background: transparent;
+  outline: none;
+  border: none;
+  color: white;
+  min-width: 0;
+}
+.PhoneInput-custom .PhoneInputCountrySelectArrow {
+  opacity: 0.5;
+}
+
+/* Scroll reveal utility */
+.reveal-on-scroll {
+  opacity: 0;
+  transform: translateY(30px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.reveal-on-scroll.revealed {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* FAQ accordion */
+.faq-answer {
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.4s ease, padding 0.3s ease;
+}
+.faq-answer.open {
+  max-height: 200px;
+}
