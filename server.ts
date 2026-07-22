@@ -3035,6 +3035,8 @@ async function sendTrendingProducts(to: string, from: string, assignedStoreId: s
 
     await sendWhatsApp(to, responseText, undefined, undefined, from);
 
+    await sendLandingPageButton(to, from, landingUrl);
+
     if (matched.length === 0) return;
 
     const cleanClientPhone = to.replace('whatsapp:', '').trim();
@@ -3096,6 +3098,8 @@ async function sendCategoryFeaturedProducts(to: string, from: string, category: 
 
     // Enviar la lista de productos en texto
     await sendWhatsApp(to, responseText, undefined, undefined, from);
+
+    await sendLandingPageButton(to, from, landingUrl);
 
     if (matched.length === 0) return;
 
