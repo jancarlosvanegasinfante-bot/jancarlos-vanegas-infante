@@ -3026,8 +3026,6 @@ async function sendTrendingProducts(to: string, from: string, assignedStoreId: s
 
     let responseText = `🔥 *PRODUCTOS EN TENDENCIA — JAN SEL SHOP* 🔥\n\nEstos son nuestros productos más vendidos y recomendados de hoy:\n`;
     
-    responseText += `\n🌐 *VER PRODUCTOS EN LA PÁGINA:* Puedes ver todos nuestros productos en nuestra página oficial aquí:\n👉 ${landingUrl}\n`;
-    
     responseText += `\n⚠️ *RECUERDA:* Vendemos cualquier tipo de producto que imagines. Si buscas algo específico que no ves en esta lista, ¡solo pregúntame por él aquí mismo! 📲\n`;
 
     const TWILIO_BODY_LIMIT = 1550;
@@ -3086,8 +3084,6 @@ async function sendCategoryFeaturedProducts(to: string, from: string, category: 
 
     const baseUrl = (currentAppUrl || process.env.APP_URL || "https://chatbotjanadsia.up.railway.app").replace(/\/$/, "");
     const landingUrl = `${baseUrl}/landing`;
-
-    responseText += `🌐 *VER PRODUCTOS EN LA PÁGINA:* Puedes ver todos nuestros productos en nuestra página oficial aquí:\n👉 ${landingUrl}\n\n`;
 
     responseText += `⚠️ *RECUERDA:* Vendemos cualquier tipo de producto que imagines. Si buscas algo específico (marca, modelo, tipo de artículo) que no ves aquí, ¡solo pregúntame por él por este chat para confirmar disponibilidad y precio de inmediato! 📲\n`;
 
@@ -3254,15 +3250,6 @@ async function ensureLandingPageCallToActionTemplate(landingUrl: string): Promis
               url: landingUrl
             }
           ]
-        },
-        "twilio/quick-reply": {
-          body: "🌐 *Catálogo completo en la página oficial:* Toca el botón de abajo para entrar:",
-          actions: [
-            { title: "🌐 Ver en Página Web", id: "GO_TO_WEBSITE" }
-          ]
-        },
-        "twilio/text": {
-          body: `🌐 Ingresa a nuestra página web oficial aquí:\n👉 ${landingUrl}`
         }
       }
     });
