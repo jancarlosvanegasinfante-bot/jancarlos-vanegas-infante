@@ -1671,10 +1671,17 @@ function ReportsTab({
       const incomingMsg = sortedMessages.find(m => m.senderType !== 'bot' && m.senderType !== 'admin' && m.senderType !== 'agent');
 
       const resolvedName = conv.customerName || customerNameMap[userId] || customerNameMap[userId.replace("+", "")] || null;
+      
+      const custDoc = customers.find(c => {
+        const p = c.phone || c.id || "";
+        return p.includes(userId.replace("+", "")) || userId.includes(p.replace(/\D/g, ""));
+      });
 
       result[userId] = {
         ...conv,
         customerName: resolvedName,
+        customerEtapa: custDoc?.etapa || 'interesado',
+        aiPaused: custDoc?.aiPaused || false,
         messages: sortedMessages,
         lastMessage: lastText,
         timestamp: lastMsg?.timestamp || conv.timestamp,
@@ -1684,7 +1691,7 @@ function ReportsTab({
     });
 
     return result;
-  }, [userConversations, customerNameMap]);
+  }, [userConversations, customerNameMap, customers]);
 
   const userIds = useMemo(() => {
     return Object.keys(processedUserConversations)
@@ -1922,9 +1929,28 @@ function ReportsTab({
                       {safeFormat(conv.timestamp, 'HH:mm')}
                     </span>
                   </div>
-                  <p className="text-[10px] text-neutral-500 truncate italic">
-                    "{conv.lastMessage}"
-                  </p>
+                  <div className="flex items-center justify-between gap-2 mt-1">
+                    <p className="text-[10px] text-neutral-500 truncate italic flex-1">
+                      "{conv.lastMessage}"
+                    </p>
+                    {((conv as any).customerEtapa === 'comprado' || (conv as any).customerEtapa === 'finalizado') ? (
+                      <span className="text-[7.5px] font-black uppercase px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 shrink-0">
+                        ✓ Compró
+                      </span>
+                    ) : ((conv as any).customerEtapa === 'asesoria_solicitada' || (conv as any).aiPaused) ? (
+                      <span className="text-[7.5px] font-black uppercase px-1.5 py-0.5 rounded-full bg-blue-500/20 text-blue-400 border border-blue-500/30 shrink-0">
+                        ⏸ Humano
+                      </span>
+                    ) : (conv as any).customerEtapa === 'checkout' ? (
+                      <span className="text-[7.5px] font-black uppercase px-1.5 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30 shrink-0">
+                        🛒 Checkout
+                      </span>
+                    ) : (
+                      <span className="text-[7.5px] font-black uppercase px-1.5 py-0.5 rounded-full bg-neutral-900 text-neutral-500 border border-neutral-800 shrink-0">
+                        Explorando
+                      </span>
+                    )}
+                  </div>
                 </div>
               </button>
             );
@@ -2030,148 +2056,158 @@ function ReportsTab({
 
             {/* Messages Area */}
             <div className="flex-1 overflow-y-auto p-4 lg:p-8 flex flex-col gap-6 custom-scrollbar">
-              {activeUserConv && activeUserConv.messages.map((msg) => {
+              {(() => {
+                if (!activeUserConv || !activeUserConv.messages) return null;
                 const currentPlatform = activeUserConv.platform || 'whatsapp';
                 const isInstagram = currentPlatform === 'instagram';
                 const isMessenger = currentPlatform === 'messenger';
 
-                const isBotOrAdmin = msg.senderType === 'bot' || msg.senderType === 'admin' || msg.senderType === 'agent' || !!msg.manualAgent || msg.from?.includes('14155238886') || msg.from?.includes('15072233213');
+                // Deduplicate and process messages into clean visual bubbles
+                const bubbles: Array<{
+                  id: string;
+                  type: 'user' | 'bot';
+                  text: string;
+                  timestamp: any;
+                  whatsappStatus?: string;
+                  manualAgent?: string;
+                }> = [];
 
-                const hasUserMessage = !isBotOrAdmin && msg.message && !msg.message.startsWith('[') && !msg.message.startsWith('📱 Notificación');
-                
-                let outgoingText = "";
-                if (msg.response) {
-                  outgoingText = msg.response;
-                } else if (isBotOrAdmin && msg.message) {
-                  outgoingText = msg.message;
-                } else if (msg.text && (isBotOrAdmin || msg.type === 'status_notification')) {
-                  outgoingText = msg.text;
-                }
+                activeUserConv.messages.forEach((msg, idx) => {
+                  const isBotOrAdmin = msg.senderType === 'bot' || msg.senderType === 'admin' || msg.senderType === 'agent' || !!msg.manualAgent || msg.from?.includes('14155238886') || msg.from?.includes('15072233213');
+                  const hasUserMsg = !isBotOrAdmin && msg.message && !msg.message.startsWith('📱 Notificación');
 
-                return (
-                <div key={msg.id || Math.random()} className="space-y-4">
-                  {/* Incoming: User */}
-                  {hasUserMessage && (
-                    <div className="flex items-start gap-4 max-w-[85%]">
-                    <div className={cn(
-                      "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border",
-                      isInstagram ? "bg-gradient-to-tr from-[#fd5949] to-[#d6249f] border-pink-500/20" :
-                      isMessenger ? "bg-gradient-to-tr from-[#00c6ff] to-[#0072ff] border-blue-500/20" :
-                      "bg-neutral-900 border-neutral-800"
-                    )}>
-                      {isInstagram ? <Instagram size={14} className="text-white" /> :
-                       isMessenger ? <MessageCircle size={14} className="text-white" /> :
-                       <User size={14} className="text-neutral-600" />}
-                    </div>
-                    <div>
-                      <div className={cn(
-                        "p-4 rounded-2xl rounded-tl-none text-white text-[13px] leading-relaxed shadow-lg border",
-                        isInstagram ? "bg-black border-pink-900/30" :
-                        isMessenger ? "bg-black border-blue-900/30" :
-                        "bg-neutral-900 border-neutral-800"
-                      )}>
-                        <span>{(msg.message || "").split(" [Media:")[0]}</span>
-                        {renderMedia(msg.message || "")}
-                      </div>
-                      <p className="text-[9px] text-neutral-600 mt-2 font-mono uppercase">
-                        {safeFormat(msg.timestamp || msg.createdAt, 'HH:mm:ss')} • {currentPlatform}
-                      </p>
-                    </div>
-                  </div>
-                  )}
+                  if (hasUserMsg) {
+                    const uText = (msg.message || "").trim();
+                    const isDup = bubbles.slice(-5).some(b => b.type === 'user' && b.text.toLowerCase() === uText.toLowerCase());
+                    if (!isDup && uText) {
+                      bubbles.push({
+                        id: `u_${msg.id || idx}`,
+                        type: 'user',
+                        text: uText,
+                        timestamp: msg.timestamp || msg.createdAt
+                      });
+                    }
+                  }
 
-                  {/* Outgoing: Jan (IA) or Asesor */}
-                  {outgoingText && (
-                    <div className="flex items-start gap-4 max-w-[85%] ml-auto flex-row-reverse">
-                      <div className={cn(
-                        "w-8 h-8 rounded-lg border flex items-center justify-center shrink-0",
-                        msg.message === "[Asesor Humano]" ? "bg-dark-accent/20 border-dark-accent/30" : 
-                        isInstagram ? "bg-pink-600/20 border-pink-500/30" :
-                        isMessenger ? "bg-blue-600/20 border-blue-500/30" :
-                        "bg-dark-green/10 border-dark-green/20"
-                      )}>
-                        {msg.message === "[Asesor Humano]" ? <User size={14} className="text-dark-accent" /> : <Cpu size={14} className={cn(isInstagram ? "text-pink-500" : isMessenger ? "text-blue-500" : "text-dark-green")} />}
-                      </div>
-                      <div className="text-right">
-                        <div 
-                          className={cn(
-                            "p-4 rounded-2xl rounded-tr-none text-[13px] leading-relaxed shadow-xl border cursor-pointer select-none",
-                            msg.message === "[Asesor Humano]" 
-                              ? "bg-dark-accent text-white border-dark-accent" 
-                              : isInstagram ? "bg-gradient-to-r from-[#d6249f]/10 to-[#fd5949]/10 border-pink-500/30 text-white font-medium italic"
-                              : isMessenger ? "bg-gradient-to-r from-[#0072ff]/10 to-[#00c6ff]/10 border-blue-500/30 text-white font-medium italic"
-                              : "bg-neutral-800 text-neutral-200 border-neutral-700 font-medium italic"
-                          )}
-                          onClick={() => setShowStatusId(showStatusId === msg.id ? null : msg.id)}
-                        >
-                          <div className="flex items-center justify-between mb-1 opacity-50 text-[8px] font-black uppercase tracking-widest gap-2">
-                            <span>{msg.manualAgent || (msg.message === '[Notificación Estado]' ? "Notificación Estado" : "Jan AI")}</span>
-                            {msg.manualAgent && <span className="flex items-center gap-1"><User size={8}/> Manual</span>}
-                          </div>
-                          <span>{(outgoingText || "").split(" [Media:")[0]}</span>
-                          {renderMedia(outgoingText || "")}
+                  let botText = "";
+                  if (msg.response) {
+                    botText = msg.response;
+                  } else if (isBotOrAdmin && msg.message) {
+                    botText = msg.message;
+                  } else if (msg.text && (isBotOrAdmin || msg.type === 'status_notification')) {
+                    botText = msg.text;
+                  }
+
+                  if (botText) {
+                    const bText = botText.trim();
+                    const isDup = bubbles.slice(-5).some(b => b.type === 'bot' && b.text.toLowerCase() === bText.toLowerCase());
+                    if (!isDup && bText) {
+                      bubbles.push({
+                        id: `b_${msg.id || idx}`,
+                        type: 'bot',
+                        text: bText,
+                        timestamp: msg.respondedAt || msg.timestamp || msg.createdAt,
+                        whatsappStatus: msg.whatsappStatus,
+                        manualAgent: msg.manualAgent || (msg.message === '[Asesor Humano]' ? 'Asesor Humano' : undefined)
+                      });
+                    }
+                  }
+                });
+
+                return bubbles.map((b) => (
+                  <div key={b.id} className="space-y-4">
+                    {/* User Bubble */}
+                    {b.type === 'user' && (
+                      <div className="flex items-start gap-4 max-w-[85%]">
+                        <div className={cn(
+                          "w-8 h-8 rounded-lg flex items-center justify-center shrink-0 border",
+                          isInstagram ? "bg-gradient-to-tr from-[#fd5949] to-[#d6249f] border-pink-500/20" :
+                          isMessenger ? "bg-gradient-to-tr from-[#00c6ff] to-[#0072ff] border-blue-500/20" :
+                          "bg-neutral-900 border-neutral-800"
+                        )}>
+                          {isInstagram ? <Instagram size={14} className="text-white" /> :
+                           isMessenger ? <MessageCircle size={14} className="text-white" /> :
+                           <User size={14} className="text-neutral-600" />}
                         </div>
-                        <div className="flex flex-col items-end gap-1 mt-2">
-                           {showStatusId === msg.id && (
-                             <motion.div 
-                               initial={{ opacity: 0, height: 0 }} 
-                               animate={{ opacity: 1, height: 'auto' }}
-                               className="bg-black/40 border border-white/5 px-2 py-1 rounded text-[8px] uppercase font-bold tracking-widest text-neutral-400 mb-1"
-                             >
-                                <div className="flex items-center gap-2">
-                                  <span>Estado:</span>
-                                  <span className={cn(
-                                    msg.whatsappStatus === 'read' ? 'text-blue-400' : 
-                                    msg.whatsappStatus === 'delivered' ? 'text-white' : 'text-neutral-500'
-                                  )}>
-                                    {msg.whatsappStatus === 'read' ? 'Visto' : 
-                                     msg.whatsappStatus === 'delivered' ? 'Entregado' : 
-                                     msg.whatsappStatus === 'sent' ? 'Enviado' : 'Pendiente'}
-                                  </span>
-                                </div>
-                                {msg.statusUpdateAt && (
-                                  <div className="flex items-center gap-2 mt-0.5">
-                                    <span>Recibido:</span>
-                                    <span className="text-white">{safeFormat(msg.statusUpdateAt, 'dd MMM, HH:mm:ss')}</span>
-                                  </div>
-                                )}
-                             </motion.div>
-                           )}
-                           <div className="flex items-center justify-end gap-2">
+                        <div>
+                          <div className={cn(
+                            "p-4 rounded-2xl rounded-tl-none text-white text-[13px] leading-relaxed shadow-lg border",
+                            isInstagram ? "bg-black border-pink-900/30" :
+                            isMessenger ? "bg-black border-blue-900/30" :
+                            "bg-neutral-900 border-neutral-800"
+                          )}>
+                            <span>{b.text.split(" [Media:")[0]}</span>
+                            {renderMedia(b.text)}
+                          </div>
+                          <p className="text-[9px] text-neutral-600 mt-2 font-mono uppercase">
+                            {safeFormat(b.timestamp, 'HH:mm:ss')} • {currentPlatform}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Bot Bubble */}
+                    {b.type === 'bot' && (
+                      <div className="flex items-start gap-4 max-w-[85%] ml-auto flex-row-reverse">
+                        <div className={cn(
+                          "w-8 h-8 rounded-lg border flex items-center justify-center shrink-0",
+                          b.manualAgent ? "bg-dark-accent/20 border-dark-accent/30" : 
+                          isInstagram ? "bg-pink-600/20 border-pink-500/30" :
+                          isMessenger ? "bg-blue-600/20 border-blue-500/30" :
+                          "bg-dark-green/10 border-dark-green/20"
+                        )}>
+                          {b.manualAgent ? <User size={14} className="text-dark-accent" /> : <Cpu size={14} className={cn(isInstagram ? "text-pink-500" : isMessenger ? "text-blue-500" : "text-dark-green")} />}
+                        </div>
+                        <div className="text-right">
+                          <div 
+                            className={cn(
+                              "p-4 rounded-2xl rounded-tr-none text-[13px] leading-relaxed shadow-xl border cursor-pointer select-none",
+                              b.manualAgent 
+                                ? "bg-dark-accent text-white border-dark-accent" 
+                                : isInstagram ? "bg-gradient-to-r from-[#d6249f]/10 to-[#fd5949]/10 border-pink-500/30 text-white font-medium italic"
+                                : isMessenger ? "bg-gradient-to-r from-[#0072ff]/10 to-[#00c6ff]/10 border-blue-500/30 text-white font-medium italic"
+                                : "bg-neutral-800 text-neutral-200 border-neutral-700 font-medium italic"
+                            )}
+                            onClick={() => setShowStatusId(showStatusId === b.id ? null : b.id)}
+                          >
+                            <div className="flex items-center justify-between mb-1 opacity-50 text-[8px] font-black uppercase tracking-widest gap-2">
+                              <span>{b.manualAgent || "Jan AI"}</span>
+                              {b.manualAgent && <span className="flex items-center gap-1"><User size={8}/> Manual</span>}
+                            </div>
+                            <span>{b.text.split(" [Media:")[0]}</span>
+                            {renderMedia(b.text)}
+                          </div>
+                          <div className="flex flex-col items-end gap-1 mt-2">
+                            <div className="flex items-center justify-end gap-2">
                               <div className="flex items-center gap-1 bg-black/20 px-2 py-0.5 rounded-full border border-white/5">
-                                 {msg.whatsappStatus === 'read' ? (
-                                   <>
-                                     <span className="text-[7px] font-black text-blue-400 uppercase tracking-tighter">Visto</span>
-                                     <CheckCheck size={10} className="text-blue-500" />
-                                   </>
-                                 ) : msg.whatsappStatus === 'delivered' ? (
-                                   <>
-                                     <span className="text-[7px] font-black text-neutral-400 uppercase tracking-tighter">Entregado</span>
-                                     <CheckCheck size={10} className="text-neutral-500" />
-                                   </>
-                                 ) : msg.whatsappStatus === 'failed' ? (
-                                   <>
-                                     <span className="text-[7px] font-black text-red-500 uppercase tracking-tighter">Falló</span>
-                                     <AlertTriangle size={10} className="text-red-500" />
-                                   </>
-                                 ) : (
-                                   <>
-                                     <span className="text-[7px] font-black text-neutral-500 uppercase tracking-tighter">Enviado</span>
-                                     <Check size={10} className="text-neutral-500" />
-                                   </>
-                                 )}
+                                {b.whatsappStatus === 'read' ? (
+                                  <>
+                                    <span className="text-[7px] font-black text-blue-400 uppercase tracking-tighter">Visto</span>
+                                    <CheckCheck size={10} className="text-blue-500" />
+                                  </>
+                                ) : b.whatsappStatus === 'delivered' ? (
+                                  <>
+                                    <span className="text-[7px] font-black text-neutral-400 uppercase tracking-tighter">Entregado</span>
+                                    <CheckCheck size={10} className="text-neutral-500" />
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="text-[7px] font-black text-neutral-500 uppercase tracking-tighter">Enviado</span>
+                                    <Check size={10} className="text-neutral-500" />
+                                  </>
+                                )}
                               </div>
                               <p className="text-[9px] text-neutral-600 font-mono uppercase">
-                                {msg.message === "[Asesor Humano]" ? "Intervención Manual" : "Jan AI Response"}
+                                {b.manualAgent ? "Intervención Manual" : "Jan AI Response"}
                               </p>
-                           </div>
+                            </div>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+                    )}
+                  </div>
+                ));
+              })()}
               <div ref={messagesEndRef} />
             </div>
 
@@ -2508,6 +2544,33 @@ function OrdersTab({ orders, onUpdateStatus, userStore }: { orders: Order[], onU
                     <option value="entregado">🎉 Entregado</option>
                     <option value="cancelado">❌ Cancelado</option>
                   </select>
+
+                  {/* Direct Request Confirmation with Quick Action Buttons */}
+                  <button
+                    onClick={async () => {
+                      try {
+                        toast.loading("Enviando plantilla de confirmación con botones a WhatsApp...", { id: "req_conf_" + activeOrder.id });
+                        const res = await fetch("/api/admin/request-order-confirmation", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ orderId: activeOrder.id })
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                          toast.success("¡Botones de confirmación enviados al cliente por WhatsApp!", { id: "req_conf_" + activeOrder.id });
+                        } else {
+                          toast.error("Error: " + (data.error || "No se pudo enviar"), { id: "req_conf_" + activeOrder.id });
+                        }
+                      } catch (e: any) {
+                        toast.error("Error: " + e.message, { id: "req_conf_" + activeOrder.id });
+                      }
+                    }}
+                    title="Enviar plantilla interactiva de confirmación con botones rápido a WhatsApp"
+                    className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 px-3 py-2 rounded-xl text-[10px] font-black uppercase flex items-center gap-1.5 transition-all shadow-md shadow-amber-500/10 active:scale-95"
+                  >
+                    <CheckCircle size={12} className="text-amber-400 shrink-0" />
+                    Enviar Botones Confirmación
+                  </button>
 
                   {/* Re-notify WhatsApp Button */}
                   <button

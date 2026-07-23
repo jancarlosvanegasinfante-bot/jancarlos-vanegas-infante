@@ -160,7 +160,7 @@ async function preloadSupabaseData() {
     console.log("[Supabase Server] Not connected, skipping prefetch.");
     return;
   }
-  const collections = ["stores", "products", "orders", "activities", "customers", "conversations", "config", "followups"];
+  const collections = ["stores", "products", "orders", "activities", "customers", "conversations", "config", "followups", "processed_messages"];
   console.log(`[Supabase Prefetch] Starting prefetch on startup for: ${collections.join(", ")}`);
   for (const col of collections) {
     try {
@@ -551,6 +551,10 @@ if (SENDGRID_API_KEY) {
 }
 
 const twilioClient = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
+
+// Caché en memoria de MessageSids ya procesados (protección anti-duplicados
+// contra reintentos del webhook de Twilio). Ver uso en /api/webhook/whatsapp.
+const processedMessageSids = new Set<string>();
 
 // Global State
 const mediaCache = new Map<string, { data: Buffer, mimeType: string }>();
@@ -1181,6 +1185,101 @@ function getTimeGreeting(): string {
   }
 }
 
+async function checkIsCustomerAiPaused(cleanFrom: string, storeId: string = "default"): Promise<{ isPaused: boolean; reason?: string; customerData?: any; convoData?: any }> {
+  if (!cleanFrom) return { isPaused: false };
+  const digitsOnly = cleanFrom.replace(/\D/g, "");
+  const withoutCountry = digitsOnly.length > 10 && digitsOnly.startsWith("57") ? digitsOnly.slice(2) : digitsOnly;
+  
+  const phoneKeys = Array.from(new Set([
+    cleanFrom,
+    digitsOnly,
+    `+${digitsOnly}`,
+    withoutCountry,
+    `+57${withoutCountry}`,
+    `whatsapp:${cleanFrom}`,
+    `whatsapp:+${digitsOnly}`
+  ].filter(Boolean)));
+
+  let customerData: any = null;
+  let convoData: any = null;
+
+  for (const key of phoneKeys) {
+    try {
+      const snap = await getDoc(doc(db, "conversations", key));
+      if (snap.exists()) {
+        const d = snap.data();
+        if (d) {
+          if (!convoData) convoData = d;
+          if (d.aiPaused === true) {
+            return { isPaused: true, reason: `conversations key=${key}`, convoData: d };
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  const storesToCheck = Array.from(new Set([storeId, "default"].filter(Boolean)));
+  for (const sId of storesToCheck) {
+    for (const pKey of phoneKeys) {
+      try {
+        const custRefId = `${sId}_${pKey}`;
+        const snap = await getDoc(doc(db, "customers", custRefId));
+        if (snap.exists()) {
+          const d = snap.data();
+          if (d) {
+            if (!customerData) customerData = d;
+            if (d.aiPaused === true || d.etapa === "asesoria_solicitada") {
+              return { isPaused: true, reason: `customers key=${custRefId}`, customerData: d };
+            }
+          }
+        }
+      } catch (e) {}
+    }
+  }
+
+  return { isPaused: false, customerData, convoData };
+}
+
+async function setCustomerAiPauseState(cleanFrom: string, storeId: string = "default", pause: boolean): Promise<void> {
+  if (!cleanFrom) return;
+  const digitsOnly = cleanFrom.replace(/\D/g, "");
+  const withoutCountry = digitsOnly.length > 10 && digitsOnly.startsWith("57") ? digitsOnly.slice(2) : digitsOnly;
+
+  const phoneKeys = Array.from(new Set([
+    cleanFrom,
+    digitsOnly,
+    `+${digitsOnly}`,
+    withoutCountry,
+    `+57${withoutCountry}`
+  ].filter(Boolean)));
+
+  for (const key of phoneKeys) {
+    try {
+      await setDoc(doc(db, "conversations", key), {
+        aiPaused: !!pause,
+        updatedAt: serverTimestamp()
+      }, { merge: true });
+    } catch (e) {}
+  }
+
+  const storesSnap = await getDocs(collection(db, "stores"));
+  const storeIds = storesSnap.docs.map(d => d.id);
+  if (!storeIds.includes("default")) storeIds.push("default");
+  if (storeId && !storeIds.includes(storeId)) storeIds.push(storeId);
+
+  for (const sId of storeIds) {
+    for (const key of phoneKeys) {
+      try {
+        await setDoc(doc(db, "customers", `${sId}_${key}`), {
+          aiPaused: !!pause,
+          ...(pause ? { etapa: "asesoria_solicitada" } : { etapa: "interesado" }),
+          lastInteractionAt: serverTimestamp()
+        }, { merge: true });
+      } catch (e) {}
+    }
+  }
+}
+
 async function processInferenceOnServer(activityId: string, data: any) {
   try {
     await updateDoc(doc(db, "activities", activityId), { 
@@ -1189,28 +1288,19 @@ async function processInferenceOnServer(activityId: string, data: any) {
     });
     
     const assignedStoreId = data.storeId || "default";
-
     const fromPhone = data.from.replace("whatsapp:", "").trim();
-    let convoSnap = await getDoc(doc(db, "conversations", fromPhone));
-    
-    // Check without the + if it started with +
-    if (!convoSnap.exists() && fromPhone.startsWith('+')) {
-       convoSnap = await getDoc(doc(db, "conversations", fromPhone.substring(1)));
-    }
-    // Check with the + if it didn't start with +
-    if (!convoSnap.exists() && !fromPhone.startsWith('+') && !isNaN(Number(fromPhone))) {
-       convoSnap = await getDoc(doc(db, "conversations", `+${fromPhone}`));
-    }
 
-    if (convoSnap.exists() && convoSnap.data().aiPaused) {
-      console.log(`[Server AI] El bot está pausado para ${fromPhone}. Actuando solo como inbox.`);
+    // STRICT CHECK: IF AI IS PAUSED OR HUMAN ADVISOR ACTIVE, DO NOT RUN INFERENCE OR SEND MESSAGES!
+    const pauseCheck = await checkIsCustomerAiPaused(fromPhone, assignedStoreId);
+    if (pauseCheck.isPaused) {
+      console.log(`[Server AI] ⏸️ El bot está pausado para ${fromPhone} (razón: ${pauseCheck.reason}). Actuando solo como inbox.`);
       await updateDoc(doc(db, "activities", activityId), { 
         status: "respondido",
         response: "",
         senderType: "customer",
         customerPhone: fromPhone,
         processingAt: serverTimestamp(),
-        errorAt: serverTimestamp() // just to clear it from pending
+        errorAt: serverTimestamp()
       });
       return;
     }
@@ -1937,9 +2027,12 @@ Asegúrate de que la propiedad "mensaje" contenga tu respuesta real dirigida al 
       respondedAt: serverTimestamp()
     });
 
-    // 6. Notificar si se requiere atención humana
-    if (jsonResponse.accion === "notificar_admin") {
-      console.log("[Server AI] ¡ASESORÍA HUMANA SOLICITADA! Notificando...");
+    // 6. Notificar si se requiere atención humana y pausar IA automáticamente
+    if (jsonResponse.accion === "notificar_admin" || jsonResponse.accion === "solicitar_asesor") {
+      console.log("[Server AI] ¡ASESORÍA HUMANA SOLICITADA! Pausando IA y notificando...");
+      await setDoc(doc(db, "customers", customerProfileId), { etapa: "asesoria_solicitada", aiPaused: true }, { merge: true });
+      await setDoc(doc(db, "conversations", fromPhone), { aiPaused: true, updatedAt: serverTimestamp() }, { merge: true });
+
       const adminMessage = `🚨 *ASESORÍA HUMANA SOLICITADA*
 Cliente: ${customerProfile?.name || fromPhone} (${fromPhone})
 Producto/Duda: ${jsonResponse.producto || 'No especificado'}
@@ -3241,7 +3334,7 @@ async function ensureLandingPageCallToActionTemplate(landingUrl: string): Promis
     if (existingSid) return existingSid;
 
     const content = await (twilioClient as any).content.v1.contents.create({
-      friendlyName: `jan_landing_cta_v5_${Date.now()}`,
+      friendlyName: `jan_landing_cta_v6_${Date.now()}`,
       language: "es",
       variables: {},
       types: {
@@ -4797,6 +4890,58 @@ async function startServer() {
     }
   });
 
+  // Manual Admin Send Message Endpoint
+  app.post("/api/admin/send-message", express.json(), async (req, res) => {
+    try {
+      const { to, message, mediaUrl, platform, pageId } = req.body;
+      if (!to || (!message && !mediaUrl)) {
+        return res.status(400).json({ success: false, error: "Falta destinatario o contenido del mensaje." });
+      }
+
+      const cleanPhone = String(to).replace("whatsapp:", "").trim();
+      const formattedPhone = to.startsWith("whatsapp:") ? to : `whatsapp:${cleanPhone}`;
+      const targetPlatform = platform || (to.startsWith("whatsapp:") || !to.startsWith("0x") ? "whatsapp" : "instagram");
+      const botNumber = pageId ? (pageId.startsWith("whatsapp:") ? pageId : `whatsapp:${pageId}`) : (TWILIO_FROM_NUMBER || "whatsapp:+14155238886");
+      const assignedStoreId = await determineStoreId(cleanPhone, message || "");
+
+      // 1. Auto-pause AI for this customer when human manually sends a message
+      await setCustomerAiPauseState(cleanPhone, assignedStoreId, true);
+
+      let sendResult = false;
+      if (targetPlatform === "whatsapp" || formattedPhone.startsWith("whatsapp:")) {
+        sendResult = await sendWhatsApp(formattedPhone, message || "", mediaUrl || undefined, undefined, botNumber);
+      } else {
+        await sendMetaMessage(to, message || "", targetPlatform, pageId);
+        sendResult = true;
+      }
+
+      // 2. Register activity in Firestore so it appears in chat UI
+      const activityData = {
+        from: botNumber,
+        to: formattedPhone,
+        recipient: formattedPhone,
+        customerPhone: cleanPhone,
+        storeId: assignedStoreId,
+        message: "[Asesor Humano]",
+        response: message || (mediaUrl ? "[Imagen adjunta]" : ""),
+        mediaUrl: mediaUrl || null,
+        status: "respondido",
+        whatsappStatus: "sent",
+        senderType: "bot",
+        manualAgent: "Asesor Humano",
+        timestamp: serverTimestamp(),
+        receivedAt: serverTimestamp()
+      };
+      await addDoc(collection(db, "activities"), activityData);
+
+      console.log(`[Admin Send Message] Manual message sent to ${cleanPhone}`);
+      res.json({ success: true });
+    } catch (e: any) {
+      console.error("[Admin Send Message Error]", e);
+      res.status(500).json({ success: false, error: e.message });
+    }
+  });
+
   app.post("/api/admin/bulk-notify", async (req, res) => {
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: "Missing message" });
@@ -4882,17 +5027,66 @@ async function startServer() {
     res.json({ success: true, summary: lastCatalogSyncSummary, configured: !!process.env.GOOGLE_SHEETS_CATALOG_CSV_URL });
   });
 
-  // Toggle AI
+  // Toggle AI (Synchronize pause state across conversations and customer profiles)
   app.post("/api/whatsapp/toggle-ai", async (req, res) => {
     const { phone, pause } = req.body;
-    const cleanPhone = phone.replace("whatsapp:", "");
+    if (!phone) return res.status(400).json({ error: "Número requerido" });
+    const cleanPhone = String(phone).replace("whatsapp:", "").trim();
     try {
-      await setDoc(doc(db, "conversations", cleanPhone), {
-        aiPaused: pause,
-        updatedAt: serverTimestamp()
-      }, { merge: true });
-      res.json({ success: true });
+      await setCustomerAiPauseState(cleanPhone, "default", !!pause);
+      console.log(`[Toggle AI] Estado de IA actualizado para ${cleanPhone}: pause=${!!pause}`);
+      res.json({ success: true, pause: !!pause });
     } catch (e: any) {
+      console.error("[Toggle AI] Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Manual Order Confirmation Request Endpoint (Dispatches interactive WA buttons to client)
+  app.post("/api/admin/request-order-confirmation", async (req, res) => {
+    try {
+      const { orderId } = req.body;
+      if (!orderId) return res.status(400).json({ error: "orderId requerido" });
+
+      const orderSnap = await getDoc(doc(db, "orders", orderId));
+      if (!orderSnap.exists()) return res.status(404).json({ error: "Pedido no encontrado" });
+
+      const orderData = orderSnap.data();
+      const rawPhone = orderData.customerPhone || "";
+      const cleanPhone = rawPhone.replace("whatsapp:", "").trim();
+      const storeId = orderData.storeId || "default";
+      const customerProfileId = `${storeId}_${cleanPhone}`;
+
+      const totalPagar = Number(orderData.totalPrice || 0);
+
+      const checkoutData = {
+        producto: orderData.productName,
+        cantidad: orderData.quantity || 1,
+        nombre: orderData.customerName,
+        telefono: orderData.customerPhone,
+        ciudad: orderData.city,
+        direccion: orderData.address,
+        referencia: orderData.addressIndicator || "N/A",
+        valor: orderData.price || totalPagar
+      };
+
+      await sendCheckoutSummaryAndButtons(
+        `whatsapp:${cleanPhone}`,
+        TWILIO_FROM_NUMBER || "+14155238886",
+        customerProfileId,
+        checkoutData,
+        undefined,
+        storeId
+      );
+
+      await updateDoc(doc(db, "orders", orderId), {
+        confirmationRequestedAt: serverTimestamp(),
+        status: "pendiente"
+      });
+
+      res.json({ success: true, message: "Mensaje de confirmación enviado exitosamente por WhatsApp." });
+    } catch (e: any) {
+      console.error("[Request Order Confirmation] Error:", e);
       res.status(500).json({ error: e.message });
     }
   });
@@ -6127,6 +6321,42 @@ _El pedido ya se guardó y está listo en tu tablero._`;
     console.log("[WhatsApp Webhook] Received call. Body keys:", Object.keys(req.body));
     console.log("[WhatsApp Webhook] Incoming From:", req.body?.From, "To:", req.body?.To);
 
+    // ==============================================
+    // 🛡️ PROTECCIÓN ANTI-DUPLICADOS (MessageSid)
+    // ==============================================
+    // Twilio puede reintentar el webhook (timeouts, hipos de red, etc.) y
+    // reenviar el MISMO mensaje. Sin esto, el bot procesaba el mensaje dos
+    // veces y generaba respuestas duplicadas. Usamos el MessageSid (único por
+    // mensaje de Twilio) como llave de idempotencia, con una caché en memoria
+    // rápida + un respaldo en Supabase por si el proceso se reinicia.
+    const incomingMessageSid = req.body?.MessageSid || req.body?.SmsMessageSid || req.body?.SmsSid;
+    if (incomingMessageSid) {
+      if (processedMessageSids.has(incomingMessageSid)) {
+        console.log(`[WhatsApp Webhook] 🔁 MessageSid ${incomingMessageSid} ya fue procesado. Ignorando duplicado.`);
+        return res.status(200).send("");
+      }
+      try {
+        const dedupRef = doc(db, "processed_messages", incomingMessageSid);
+        const dedupSnap = await getDoc(dedupRef);
+        if (dedupSnap.exists()) {
+          console.log(`[WhatsApp Webhook] 🔁 MessageSid ${incomingMessageSid} ya estaba registrado en BD. Ignorando duplicado.`);
+          processedMessageSids.add(incomingMessageSid);
+          return res.status(200).send("");
+        }
+        await setDoc(dedupRef, { processedAt: serverTimestamp() });
+      } catch (dedupErr: any) {
+        console.error("[WhatsApp Webhook] Error verificando dedup de MessageSid:", dedupErr.message);
+        // Si falla la verificación en BD, seguimos igual (no bloqueamos el mensaje
+        // por un error de infraestructura), pero sí queda el guard en memoria.
+      }
+      processedMessageSids.add(incomingMessageSid);
+      // Limpieza simple para no crecer indefinidamente en memoria
+      if (processedMessageSids.size > 5000) {
+        const first = processedMessageSids.values().next().value;
+        if (first) processedMessageSids.delete(first);
+      }
+    }
+
     const from = req.body?.From || req.body?.from;
     const to = req.body?.To || req.body?.to;
     const messageBody = req.body?.Body || req.body?.body || "";
@@ -6265,6 +6495,13 @@ _El pedido ya se guardó y está listo en tu tablero._`;
     const customerData = cxSnap.exists() ? cxSnap.data() : null;
     const pending = customerData?.pendingConfirmation;
 
+    // CHECK IF AI IS PAUSED OR HUMAN ADVISOR WAS REQUESTED FOR THIS CUSTOMER
+    const pauseCheck = await checkIsCustomerAiPaused(cleanFrom, assignedStoreId);
+    if (pauseCheck.isPaused) {
+      console.log(`[WhatsApp Webhook] ⏸️ AI is PAUSED for ${cleanFrom} (reason: ${pauseCheck.reason}). Activity registered (${activityRefId}), skipping all automated responses.`);
+      return res.status(200).send("");
+    }
+
     // ==============================================
     // 🔘 RESPUESTA A BOTONES INTERACTIVOS (MENÚS Y CONFIRMACIÓN)
     // ==============================================
@@ -6360,11 +6597,13 @@ _El pedido ya se guardó y está listo en tu tablero._`;
             });
           }
         } else if (buttonPayload === "MENU_HUMAN") {
-          await updateDoc(doc(db, "customers", customerProfileId), { etapa: "asesoria_solicitada" });
+          await setCustomerAiPauseState(cleanFrom, assignedStoreId, true);
           
-          // Notificar a los administradores
+          const humanReplyMsg = "¡Claro que sí! 🙌 Ya le transferí tu conversación a uno de nuestros asesores humanos. En unos minutos se contactará contigo por aquí para atenderte personalmente.";
+          await sendWhatsApp(from, humanReplyMsg, undefined, activityRefId, to);
+
           const adminMessage = `🚨 *ASESORÍA HUMANA SOLICITADA*
-Cliente: ${customerData?.name || cleanFrom} (${cleanFrom})
+Cliente: ${customerData?.name || profileNameFromTwilio || cleanFrom} (${cleanFrom})
 Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
           
           const adminNumbersRaw = process.env.ADMIN_WHATSAPP_NUMBERS || "";
@@ -6377,15 +6616,15 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
               console.error("[Server AI] Error notificando asesoría de botón:", e);
             }
           }
-          
+
           if (activityRefId) {
-            processInferenceOnServer(activityRefId, { 
-              ...activityData, 
-              message: "Quiero hablar con un asesor 🙋‍♂️" 
-            }).catch(e => {
-              console.error("[Server Inference] Error in button MENU_HUMAN inference:", e.message);
+            await updateDoc(doc(db, "activities", activityRefId), {
+              status: "respondido",
+              response: humanReplyMsg,
+              respondedAt: serverTimestamp()
             });
           }
+          return res.status(200).send("");
         } else if (buttonPayload === "RESUME_CHECKOUT") {
           await resendCurrentCheckoutStepPrompt(from, to, customerData, activityRefId);
         } else if (buttonPayload === "RESUME_CHECKOUT_NO") {
@@ -6984,8 +7223,20 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
       const wantsAdvisor = advisorPhrases.some(p => cleanMsg.includes(p)) ||
         (cleanMsg.includes("asesor") && !cleanMsg.includes("no quiero"));
 
-      if (wantsAdvisor && from.startsWith("whatsapp:") && customerData?.etapa !== "asesoria_solicitada") {
-        await setDoc(doc(db, "customers", customerProfileId), { etapa: "asesoria_solicitada" }, { merge: true });
+      if (wantsAdvisor && from.startsWith("whatsapp:")) {
+        await setDoc(doc(db, "customers", customerProfileId), { etapa: "asesoria_solicitada", aiPaused: true }, { merge: true });
+        await setDoc(doc(db, "conversations", cleanFrom), { aiPaused: true, updatedAt: serverTimestamp() }, { merge: true });
+
+        const advisorMsg = "¡Claro que sí! 🙌 Ya le transferí tu chat a uno de nuestros asesores humanos. En unos minutos se contactará contigo para atenderte personalmente. Por favor dame un momento.";
+        await sendWhatsApp(from, advisorMsg, undefined, activityRefId, to);
+        if (activityRefId) {
+          await updateDoc(doc(db, "activities", activityRefId), {
+            status: "respondido",
+            response: advisorMsg,
+            respondedAt: serverTimestamp()
+          });
+        }
+
         try {
           let storeConfig: any = {};
           const storeSnap = await getDoc(doc(db, "stores", assignedStoreId));
@@ -6999,7 +7250,8 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         } catch (e) {
           console.error("[Advisor Interceptor] Error notificando asesoría:", e);
         }
-        // Dejamos que continúe hacia el flujo normal de la IA para que responda de forma natural
+
+        return res.status(200).send("");
       }
 
       // ==============================================
@@ -7497,22 +7749,80 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
       }
 
       // ==============================================
+      // 3.5. NUMERIC OR DIRECT MENU SELECTION INTERCEPTOR
+      // ==============================================
+      const normCleanText = (cleanMsg || "").toLowerCase().replace(/[^\w\s]/gi, " ").replace(/\s+/g, " ").trim();
+      
+      if (from.startsWith("whatsapp:") && (normCleanText === "1" || normCleanText === "1." || normCleanText === "opcion 1" || normCleanText === "ver catalogo")) {
+        console.log(`[WhatsApp Menu Interceptor] Opción 1 (Catálogo) seleccionada por ${from}`);
+        await sendCategoriesMenu(from, to);
+        await updateDoc(doc(db, "activities", activityRef.id), {
+          status: "respondido",
+          response: "[Opción 1: Menú de categorías enviado]",
+          respondedAt: serverTimestamp()
+        });
+        return res.status(200).send("");
+      }
+
+      if (from.startsWith("whatsapp:") && (normCleanText === "2" || normCleanText === "2." || normCleanText === "opcion 2" || normCleanText === "asesor" || normCleanText === "hablar con asesor" || normCleanText === "asesor humano")) {
+        console.log(`[WhatsApp Menu Interceptor] Opción 2 (Asesor Humano) seleccionada por ${from}`);
+        await setCustomerAiPauseState(cleanFrom, assignedStoreId, true);
+        const advisorTextMsg = "¡Claro que sí! 🙌 Ya le transferí tu conversación a uno de nuestros asesores humanos. En unos minutos se contactará contigo por aquí.";
+        await sendWhatsApp(from, advisorTextMsg, undefined, activityRef.id, to);
+
+        const adminMessage = `🚨 *ASESORÍA HUMANA SOLICITADA*
+Cliente: ${customerData?.name || cleanFrom} (${cleanFrom})
+Mensaje: "${finalMessage}"`;
+        const adminNumbersRaw = process.env.ADMIN_WHATSAPP_NUMBERS || "";
+        const adminNumbers = adminNumbersRaw.split(",").filter(n => n.trim().length > 0);
+        for (const num of adminNumbers) {
+          try {
+            const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
+            await sendWhatsApp(target, adminMessage);
+          } catch (e) {}
+        }
+
+        await updateDoc(doc(db, "activities", activityRef.id), {
+          status: "respondido",
+          response: advisorTextMsg,
+          respondedAt: serverTimestamp()
+        });
+        return res.status(200).send("");
+      }
+
+      if (from.startsWith("whatsapp:") && (normCleanText === "3" || normCleanText === "3." || normCleanText === "opcion 3" || normCleanText === "finalizar" || normCleanText === "finalizar chat")) {
+        console.log(`[WhatsApp Menu Interceptor] Opción 3 (Finalizar) seleccionada por ${from}`);
+        const endChatMsg = "¡Muchas gracias por contactarnos en *Jan Sel Shop*! 🌟 Si necesitas algo más en el futuro, estamos a tu orden.";
+        await sendWhatsApp(from, endChatMsg, undefined, activityRef.id, to);
+        await updateDoc(doc(db, "activities", activityRef.id), {
+          status: "respondido",
+          response: endChatMsg,
+          respondedAt: serverTimestamp()
+        });
+        return res.status(200).send("");
+      }
+
+      // ==============================================
       // 4. GREETING / WELCOME INTERCEPTOR (DETERMINISTIC)
       // ==============================================
-      const greetingWords = [
+      const greetingPhrases = [
         "hola", "buenas", "buenos dias", "buenas tardes", "buenas noches", 
         "que tal", "alo", "buen dia", "saludos", "epale", "oe", "que mas"
       ];
-      const isGreeting = (cleanMsg.length <= 15 && greetingWords.some(w => cleanMsg === w || cleanMsg.startsWith(w))) ||
-                         (cleanMsg.length <= 25 && (cleanMsg === "hola buenas" || cleanMsg === "hola buenos dias" || cleanMsg === "hola buen dia"));
+      const isGreetingStart = greetingPhrases.some(w => normCleanText === w || normCleanText.startsWith(w + " ") || normCleanText.startsWith(w + ","));
+      const isProductOrOrderInquiry = [
+        "precio", "cuanto vale", "cuanto cuesta", "comprar", "pedido", "catalogo", "cargador", "camara", "compresor",
+        "hidrolavadora", "intercomunicador", "funda", "aspiradora", "candado", "iniciador", "retrovisor", "lampara",
+        "envio", "direccion", "pago", "contraentrega", "dropi"
+      ].some(term => normCleanText.includes(term));
 
-      const isAwaitingHuman = customerData?.etapa === "asesoria_solicitada";
+      const isGreeting = (isGreetingStart || normCleanText === "hola" || normCleanText.startsWith("hola")) && !isProductOrOrderInquiry;
+      const isAwaitingHuman = customerData?.etapa === "asesoria_solicitada" || customerData?.aiPaused === true;
 
       if (isGreeting && from.startsWith("whatsapp:") && !isAwaitingHuman) {
-        console.log(`[WhatsApp Greeting Interceptor] Greeting detected from ${from}. Replying deterministically...`);
+        console.log(`[WhatsApp Greeting Interceptor] Greeting detected from ${from} ("${finalMessage}"). Replying deterministically...`);
 
         const greeting = getTimeGreeting();
-        // Saludo personalizado si es cliente recurrente con pedido anterior o si tenemos su nombre
         let WELCOME_MESSAGE = `${greeting} 👋 Te doy la bienvenida a *Jan Sel Shop*! 💎\n\n¿Cómo estás? Cuéntame en qué te puedo colaborar hoy o qué estás buscando de nuestro catálogo. ¡Aquí abajo te dejo unas opciones rápidas para empezar de una! 👇`;
 
         try {
@@ -7537,8 +7847,18 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         }
 
         await sendWhatsApp(from, WELCOME_MESSAGE, undefined, activityRef.id, to);
-        await new Promise(resolve => setTimeout(resolve, 1200));
-        await sendMainMenu(from, to);
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        const menuButtonsSent = await sendMainMenu(from, to);
+
+        if (!menuButtonsSent) {
+          const TEXT_FALLBACK_MENU = `📌 *MENÚ PRINCIPAL DE OPCIONES:*
+Responde directamente con el número de tu opción:
+
+1️⃣ Ver Catálogo de Productos 📦
+2️⃣ Hablar con un Asesor Humano 🙋‍♂️
+3️⃣ Finalizar Conversación 🛑`;
+          await sendWhatsApp(from, TEXT_FALLBACK_MENU, undefined, activityRef.id, to);
+        }
 
         await updateDoc(doc(db, "activities", activityRef.id), {
           status: "respondido",
