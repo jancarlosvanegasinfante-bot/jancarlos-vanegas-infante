@@ -2704,17 +2704,20 @@ async function ensureAllTemplates(): Promise<{
     }
 
     // 2. Main Menu
-    if (d?.mainMenuTemplateSid) {
-      result.mainMenuSid = d.mainMenuTemplateSid;
+    if (d?.mainMenuTemplateSidV2) {
+      result.mainMenuSid = d.mainMenuTemplateSidV2;
     } else {
       console.log("[WhatsApp Buttons] Creando template de menú principal...");
       const content = await (twilioClient as any).content.v1.contents.create({
-        friendlyName: `jan_main_menu_${Date.now()}`,
+        friendlyName: `jan_main_menu_v2_${Date.now()}`,
         language: "es",
         variables: {},
         types: {
           "twilio/quick-reply": {
-            body: "¡Hola! 👋 Te doy la bienvenida a nuestro catálogo con más de 360 productos. ¿Cómo te puedo ayudar hoy? Selecciona una opción 👇",
+            // Sin saludo aquí: el saludo personalizado ya se manda antes en un
+            // mensaje de texto aparte. Repetirlo aquí causaba el "saluda dos
+            // veces" (texto de bienvenida + este menú saludando otra vez).
+            body: "Selecciona una opción para continuar 👇",
             actions: [
               { title: "Ver Catálogo 📦", id: "MENU_CATALOG" },
               { title: "Hablar con Asesor 🙋‍♂️", id: "MENU_HUMAN" },
@@ -2722,12 +2725,12 @@ async function ensureAllTemplates(): Promise<{
             ]
           },
           "twilio/text": {
-            body: "¡Hola! 👋 Te doy la bienvenida a nuestro catálogo. ¿Cómo te puedo ayudar hoy?\n\n1. Ver Catálogo 📦\n2. Hablar con Asesor 🙋‍♂️\n3. Finalizar Chat 🛑"
+            body: "Selecciona una opción para continuar:\n\n1. Ver Catálogo 📦\n2. Hablar con Asesor 🙋‍♂️\n3. Finalizar Chat 🛑"
           }
         }
       });
       result.mainMenuSid = content.sid;
-      await setDoc(doc(db, "config", "system"), { mainMenuTemplateSid: content.sid }, { merge: true });
+      await setDoc(doc(db, "config", "system"), { mainMenuTemplateSidV2: content.sid }, { merge: true });
     }
 
     // 3. Categories Menu
