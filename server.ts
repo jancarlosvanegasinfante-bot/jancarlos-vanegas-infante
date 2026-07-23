@@ -3873,7 +3873,7 @@ function getAdminNumbers(storeConfig?: any): string[] {
   return adminNumbers;
 }
 
-async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activityId?: string, from?: string) {
+async function sendWhatsApp(to: string, body: string, mediaUrl?: string | string[], activityId?: string, from?: string) {
   if (!twilioClient) {
     console.error("[WhatsApp Send] Client not initialized.");
     return;
@@ -3899,29 +3899,17 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
     throw new Error("TWILIO_LIMIT_REACHED: Twilio 50-message trial limit exceeded.");
   }
 
+  // Normalizamos a arreglo para poder soportar 1 o varias imágenes al mismo
+  // tiempo (WhatsApp/Twilio permite hasta 10 medios por mensaje).
+  let mediaUrls: string[] = mediaUrl ? (Array.isArray(mediaUrl) ? mediaUrl : [mediaUrl]) : [];
+
   // Ensure mediaUrl is absolute
-  if (mediaUrl && mediaUrl.startsWith("/")) {
-    mediaUrl = `${appUrl.replace(/\/$/, '')}${mediaUrl}`;
-  }
+  mediaUrls = mediaUrls.map(u => (u && u.startsWith("/")) ? `${appUrl.replace(/\/$/, '')}${u}` : u).filter(Boolean);
 
-  // SIMPLIFY: Send as text links for reliability (User request)
-  let finalMediaUrl = mediaUrl;
+  // Enviamos las imágenes como adjunto NATIVO de WhatsApp (no como link de
+  // texto), para que se vean como fotos reales en el chat del cliente.
+  let finalMediaUrl = mediaUrls[0]; // usado solo para el registro/log de una sola imagen
   let finalBody = body;
-
-  if (finalMediaUrl) {
-    // If the link is not already in the body, append it
-    if (!finalBody.includes(finalMediaUrl)) {
-      finalBody += `\n\nVer aquí: ${finalMediaUrl}`;
-    }
-    
-    // Only send as 'media' if it's an internal resource (cached audio/image)
-    // External catalog links are sent as text links for 100% delivery
-    const isInternal = finalMediaUrl.includes('/api/admin/cache-media') || finalMediaUrl.includes('/api/media/');
-    if (!isInternal) {
-      console.log(`[Twilio Bot] Sending catalog link as text: ${finalMediaUrl}`);
-      finalMediaUrl = undefined;
-    }
-  }
 
   const params: any = {
     from: finalFrom,
@@ -3929,8 +3917,8 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string, activit
     body: finalBody
   };
 
-  if (finalMediaUrl) {
-    params.mediaUrl = [finalMediaUrl];
+  if (mediaUrls.length > 0) {
+    params.mediaUrl = mediaUrls.slice(0, 10);
   }
 
   if (activityId && appUrl) {
