@@ -4936,9 +4936,14 @@ async function startServer() {
       }
 
       // 2. Register activity in Firestore so it appears in chat UI
+      // IMPORTANTE: "from" debe ser el teléfono del CLIENTE (no el del bot),
+      // porque getCrmContext() arma el historial de la IA filtrando por
+      // from == customerPhone. Si aquí se guardaba from=botNumber, el mensaje
+      // del asesor humano quedaba invisible para la IA al reanudarse, dando
+      // la sensación de que "se pierde el contexto" tras la intervención manual.
       const activityData = {
-        from: botNumber,
-        to: formattedPhone,
+        from: formattedPhone,
+        to: botNumber,
         recipient: formattedPhone,
         customerPhone: cleanPhone,
         storeId: assignedStoreId,
@@ -5063,6 +5068,65 @@ async function startServer() {
   });
 
   // Manual Order Confirmation Request Endpoint (Dispatches interactive WA buttons to client)
+  // ==============================================
+  // 🆕 OFRECER PRODUCTO PERSONALIZADO (fuera de catálogo)
+  // ==============================================
+  // El asesor humano usa esto cuando le ofrece manualmente al cliente un
+  // producto que NO está en el catálogo (ej. "luces LED" a un precio que se
+  // negoció por chat). En vez de que el asesor tenga que redactar el mensaje
+  // Y esperar la respuesta del cliente a mano, este endpoint le manda
+  // botones reales de "Sí, confirmar" / "No, cambiar algo", y si el cliente
+  // toca "Sí", el flujo normal de checkout (ya existente) continúa solo:
+  // pide los datos de envío que falten y sube el pedido al dashboard, sin
+  // que el asesor tenga que hacer nada más.
+  app.post("/api/admin/offer-custom-product", async (req, res) => {
+    try {
+      const { phone, productName, price, quantity, notes } = req.body;
+      if (!phone || !productName || !price) {
+        return res.status(400).json({ error: "Faltan datos: phone, productName y price son requeridos." });
+      }
+
+      const cleanPhone = String(phone).replace("whatsapp:", "").trim();
+      const storeId = "default";
+      const customerProfileId = `${storeId}_${cleanPhone}`;
+
+      // Traemos cualquier dato que ya tengamos del cliente (nombre, ciudad,
+      // dirección) para no pedirle de nuevo lo que ya sabemos.
+      const custSnap = await getDoc(doc(db, "customers", customerProfileId));
+      const custData = custSnap.exists() ? custSnap.data() : {};
+
+      const checkoutData = {
+        producto: productName,
+        cantidad: quantity && quantity > 0 ? quantity : 1,
+        nombre: custData?.name || custData?.nombre || "",
+        telefono: `whatsapp:${cleanPhone}`,
+        ciudad: custData?.city || custData?.ciudad || "",
+        direccion: custData?.address || custData?.direccion || "",
+        referencia: custData?.addressIndicator || "N/A",
+        valor: Number(price),
+        notas: notes || "Producto ofrecido manualmente por asesor (fuera de catálogo)."
+      };
+
+      // Pausamos la IA para este cliente mientras se resuelve esta oferta
+      // puntual, para que no se cruce con lo que el asesor ya está haciendo.
+      await setCustomerAiPauseState(cleanPhone, storeId, true);
+
+      await sendCheckoutSummaryAndButtons(
+        `whatsapp:${cleanPhone}`,
+        TWILIO_FROM_NUMBER || "+14155238886",
+        customerProfileId,
+        checkoutData,
+        undefined,
+        storeId
+      );
+
+      res.json({ success: true, message: "Oferta enviada con botones de confirmación por WhatsApp." });
+    } catch (e: any) {
+      console.error("[Offer Custom Product] Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post("/api/admin/request-order-confirmation", async (req, res) => {
     try {
       const { orderId } = req.body;
