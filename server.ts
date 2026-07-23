@@ -2028,6 +2028,26 @@ Asegúrate de que la propiedad "mensaje" contenga tu respuesta real dirigida al 
     });
 
     // 6. Notificar si se requiere atención humana y pausar IA automáticamente
+    // ==============================================
+    // 🛟 RED DE SEGURIDAD: forzar escalamiento a humano
+    // ==============================================
+    // La IA a veces "olvida" marcar accion="notificar_admin" aunque su propio
+    // texto ya está diciendo que no tiene el producto o que no sabe algo. En
+    // vez de depender 100% de que el modelo se acuerde, revisamos su propia
+    // respuesta por frases de incertidumbre/no-disponibilidad y forzamos la
+    // escalación de todas formas, para nunca dejar a un cliente colgado.
+    const uncertaintyPhrases = [
+      "no lo tenemos", "no lo tengo", "no está disponible", "no tenemos ese",
+      "no manejamos ese", "no contamos con", "no sé si", "no estoy seguro",
+      "no tengo información", "voy a consultar", "permíteme consultar",
+      "un asesor te", "no puedo confirmar", "no encuentro ese producto"
+    ];
+    const mensajeLower = String(jsonResponse.mensaje || "").toLowerCase();
+    if (jsonResponse.accion === "respuesta" && uncertaintyPhrases.some(p => mensajeLower.includes(p))) {
+      console.log("[Server AI] 🛟 Red de seguridad activada: la IA mostró incertidumbre sin marcar notificar_admin. Forzando escalamiento.");
+      jsonResponse.accion = "notificar_admin";
+    }
+
     if (jsonResponse.accion === "notificar_admin" || jsonResponse.accion === "solicitar_asesor") {
       console.log("[Server AI] ¡ASESORÍA HUMANA SOLICITADA! Pausando IA y notificando...");
       await setDoc(doc(db, "customers", customerProfileId), { etapa: "asesoria_solicitada", aiPaused: true }, { merge: true });
