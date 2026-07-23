@@ -1312,6 +1312,71 @@ async function processInferenceOnServer(activityId: string, data: any) {
       storeConfig = storeSnap.data();
     }
 
+    // ==============================================
+    // 🎯 CONFIRMACIÓN DETERMINÍSTICA DE OFERTA MANUAL PENDIENTE
+    // ==============================================
+    // Si el asesor humano le ofreció al cliente un producto/precio (por fuera
+    // del catálogo) y luego reactivó la IA, el cliente puede responder
+    // afirmativamente HORAS después. En vez de confiar en que la IA entienda
+    // bien el contexto, revisamos aquí mismo, de forma determinística y sin
+    // margen de error, si hay una "pendingManualOffer" guardada y si el
+    // mensaje del cliente suena a un "sí". Si es así, mandamos los botones de
+    // confirmación exactos de una vez, sin pasar por el modelo de IA.
+    try {
+      const customerProfileIdForOffer = `${assignedStoreId}_${fromPhone}`;
+      const custSnapForOffer = await getDoc(doc(db, "customers", customerProfileIdForOffer));
+      const pendingOffer = custSnapForOffer.exists() ? custSnapForOffer.data()?.pendingManualOffer : null;
+
+      if (pendingOffer && pendingOffer.producto && pendingOffer.valor) {
+        const msgNorm = String(data.message || "").toLowerCase().trim();
+        const affirmativePatterns = [
+          "si", "sí", "sisas", "claro", "dale", "listo", "de una", "obvio",
+          "me interesa", "quiero", "lo quiero", "confirmo", "va", "vale", "ok", "okay"
+        ];
+        const isShortAffirmative = msgNorm.length <= 40 && affirmativePatterns.some(p => msgNorm === p || msgNorm.startsWith(p + " ") || msgNorm.includes(" " + p));
+
+        if (isShortAffirmative) {
+          console.log(`[Oferta Pendiente] ${fromPhone} confirmó afirmativamente la oferta manual: ${pendingOffer.producto} @ ${pendingOffer.valor}. Enviando botones sin pasar por IA.`);
+
+          const custData = custSnapForOffer.data() || {};
+          const checkoutData = {
+            producto: pendingOffer.producto,
+            cantidad: pendingOffer.cantidad || 1,
+            nombre: custData?.name || custData?.nombre || "",
+            telefono: `whatsapp:${fromPhone}`,
+            ciudad: custData?.city || custData?.ciudad || "",
+            direccion: custData?.address || custData?.direccion || "",
+            referencia: custData?.addressIndicator || "N/A",
+            valor: Number(pendingOffer.valor),
+            notas: "Producto ofrecido manualmente por asesor, confirmado por el cliente tras reanudar la IA."
+          };
+
+          await sendCheckoutSummaryAndButtons(
+            `whatsapp:${fromPhone}`,
+            TWILIO_FROM_NUMBER || "+14155238886",
+            customerProfileIdForOffer,
+            checkoutData,
+            undefined,
+            assignedStoreId
+          );
+
+          // Limpiamos la oferta pendiente para que no se vuelva a disparar
+          await setDoc(doc(db, "customers", customerProfileIdForOffer), { pendingManualOffer: null }, { merge: true });
+
+          await updateDoc(doc(db, "activities", activityId), {
+            status: "respondido",
+            response: "[Confirmación automática de oferta manual enviada]",
+            senderType: "bot",
+            processingAt: serverTimestamp()
+          });
+          return;
+        }
+      }
+    } catch (offerErr: any) {
+      console.error("[Oferta Pendiente] Error revisando oferta manual pendiente:", offerErr.message);
+      // Si esto falla, seguimos con el flujo normal de IA sin bloquear al cliente.
+    }
+
     // Al menos una clave de IA (NVIDIA u OpenRouter) debe existir, ya sea global (env) o por tienda
     const hasNvidiaKey = !!(NVIDIA_API_KEY || storeConfig.nvidiaApiKey);
     const hasOpenrouterKey = !!(OPENROUTER_API_KEY || storeConfig.openrouterApiKey);
@@ -4901,7 +4966,7 @@ async function startServer() {
   // Manual Admin Send Message Endpoint
   app.post("/api/admin/send-message", express.json(), async (req, res) => {
     try {
-      const { to, message, mediaUrl, platform, pageId } = req.body;
+      const { to, message, mediaUrl, platform, pageId, offeredProduct, offeredPrice, offeredQuantity } = req.body;
       if (!to || (!message && !mediaUrl)) {
         return res.status(400).json({ success: false, error: "Falta destinatario o contenido del mensaje." });
       }
@@ -4914,6 +4979,25 @@ async function startServer() {
 
       // 1. Auto-pause AI for this customer when human manually sends a message
       await setCustomerAiPauseState(cleanPhone, assignedStoreId, true);
+
+      // 1b. Si el asesor indicó qué producto/precio le está ofreciendo (campo
+      // opcional desde el dashboard), lo guardamos como "oferta pendiente".
+      // Esto permite que, cuando el asesor reactive la IA y el cliente
+      // responda afirmativamente (aunque sea horas después), el servidor
+      // reconozca EXACTAMENTE en qué quedaron y mande los botones de
+      // confirmación correctos — sin depender de que la IA "adivine" bien.
+      if (offeredProduct && offeredPrice) {
+        const customerProfileId = `${assignedStoreId}_${cleanPhone}`;
+        await setDoc(doc(db, "customers", customerProfileId), {
+          pendingManualOffer: {
+            producto: offeredProduct,
+            valor: Number(offeredPrice),
+            cantidad: offeredQuantity && offeredQuantity > 0 ? offeredQuantity : 1,
+            offeredAt: new Date().toISOString()
+          }
+        }, { merge: true });
+        console.log(`[Admin Send Message] Oferta pendiente guardada para ${cleanPhone}: ${offeredProduct} @ ${offeredPrice}`);
+      }
 
       let sendResult = false;
       if (targetPlatform === "whatsapp" || formattedPhone.startsWith("whatsapp:")) {
