@@ -1625,7 +1625,7 @@ ${history}
 
 MENSAJE ACTUAL: ${safeMessage}${imageParts.length > 0 ? ` (El cliente también envió una imagen que adjunto para tu análisis.${imageMatchedProducts.length > 0 ? ` Ya identificamos posibles coincidencias reales en el inventario, marcadas abajo con ⭐ — si la foto se parece a alguno de esos, ofrécelo con seguridad usando su nombre y precio EXACTOS del inventario, no inventes uno nuevo.` : ` No encontramos una coincidencia exacta en el inventario para esta foto — descríbele lo que ves y pregúntale qué necesita para poder ayudarlo mejor, sin inventar un producto que no existe.`}` : ""}
 
-INVENTARIO ACTUAL (Vista curada de los más vendidos y productos relevantes para esta consulta. Tenemos más de 360 productos en total, si piden algo diferente pregúntale a tu jefe o usa "notificar_admin"):
+INVENTARIO ACTUAL (Vista curada de los más vendidos y productos relevantes para esta consulta. Tenemos más de 150 productos en total, si piden algo diferente pregúntale a tu jefe o usa "notificar_admin"):
 ${compactProductsString}
 
 🧠 ROL DE VENDEDOR EXPERTO (aumento de ticket):
@@ -2114,15 +2114,24 @@ Asegúrate de que la propiedad "mensaje" contenga tu respuesta real dirigida al 
     }
 
     if (jsonResponse.accion === "notificar_admin" || jsonResponse.accion === "solicitar_asesor") {
-      console.log("[Server AI] ¡ASESORÍA HUMANA SOLICITADA! Pausando IA y notificando...");
-      await setDoc(doc(db, "customers", customerProfileId), { etapa: "asesoria_solicitada", aiPaused: true }, { merge: true });
-      await setDoc(doc(db, "conversations", fromPhone), { aiPaused: true, updatedAt: serverTimestamp() }, { merge: true });
+      console.log("[Server AI] ¡ASESORÍA HUMANA SOLICITADA! Notificando (la IA sigue aclarando dudas, no se pausa todavía)...");
+      // 🔄 CAMBIO IMPORTANTE: ya NO pausamos la IA de una vez aquí. La IA
+      // sigue activa y le puede seguir preguntando al cliente detalles del
+      // producto (ej. "¿es forro de sillas o tipo pijama?") para que, cuando
+      // el asesor (Jan) entre a cerrar, ya tenga la info clara — sin que la
+      // IA llegue a dar precio ni confirmar disponibilidad de ese producto
+      // fuera de catálogo (eso lo indica el prompt de la IA). Solo pausamos
+      // la IA cuando el asesor responda manualmente por primera vez (ver
+      // /api/admin/send-message, que ya hace setCustomerAiPauseState).
+      await setDoc(doc(db, "customers", customerProfileId), { etapa: "asesoria_solicitada" }, { merge: true });
 
       const adminMessage = `🚨 *ASESORÍA HUMANA SOLICITADA*
 Cliente: ${customerProfile?.name || fromPhone} (${fromPhone})
 Producto/Duda: ${jsonResponse.producto || 'No especificado'}
 Mensaje del cliente: "${data.message}"
-Jan respondió: "${jsonResponse.mensaje}"`;
+Jan (IA) respondió: "${jsonResponse.mensaje}"
+
+ℹ️ La IA sigue conversando con el cliente para aclarar detalles (sin dar precio). Entra cuando puedas a cerrar la venta.`;
       
       const adminNumbers = getAdminNumbers();
       for (const num of adminNumbers) {
@@ -8066,7 +8075,7 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         console.log(`[WhatsApp Interceptor] Catalog request detected from ${from}. Replying deterministically with trending products first...`);
 
         const greeting = getTimeGreeting();
-        const CATALOG_SHORT_MESSAGE = `${greeting} 👋 Te doy la bienvenida a *Jan Sel Shop*! 💎\n\nTenemos un catálogo gigante con *más de 360 productos espectaculares*. Cualquier cosa que busques o te imagines, ¡te la conseguimos de una! 🚀\n\n🔥 *ENVÍO GRATIS A TODA COLOMBIA* 🇨🇴\n🚛 *PAGO CONTRA ENTREGA*\n\n👇 ¡Abajo te dejo nuestros *Productos en Tendencia* más vendidos de hoy para que los mires de una!`;
+        const CATALOG_SHORT_MESSAGE = `${greeting} 👋 Te doy la bienvenida a *Jan Sel Shop*! 💎\n\nTenemos un catálogo gigante con *más de 150 productos espectaculares*. Cualquier cosa que busques o te imagines, ¡te la conseguimos de una! 🚀\n\n🔥 *ENVÍO GRATIS A TODA COLOMBIA* 🇨🇴\n🚛 *PAGO CONTRA ENTREGA*\n\n👇 ¡Abajo te dejo nuestros *Productos en Tendencia* más vendidos de hoy para que los mires de una!`;
 
         await sendWhatsApp(from, CATALOG_SHORT_MESSAGE, undefined, activityRef.id, to);
         await new Promise(resolve => setTimeout(resolve, 1200));
