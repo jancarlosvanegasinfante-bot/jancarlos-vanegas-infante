@@ -5351,6 +5351,91 @@ async function startServer() {
   // toca "Sí", el flujo normal de checkout (ya existente) continúa solo:
   // pide los datos de envío que falten y sube el pedido al dashboard, sin
   // que el asesor tenga que hacer nada más.
+  // ==============================================
+  // 🔄 CAMPAÑA DE REACTIVACIÓN DE CLIENTES FRÍOS
+  // ==============================================
+  // Le manda un mensaje de "reactivación" (con gatillo mental de urgencia)
+  // a clientes que navegaron el catálogo pero nunca confirmaron pedido y
+  // llevan tiempo sin escribir. Usa el mismo template YA APROBADO por Meta
+  // que usa la campaña de tendencias (obligatorio, porque WhatsApp no deja
+  // mandar texto libre a alguien con quien no hablas hace más de 24h).
+  // Personaliza el mensaje con el ÚLTIMO producto que esa persona vio
+  // (guardado en lastProductList), para que se sienta relevante y no como
+  // spam genérico.
+  app.post("/api/admin/reactivation-campaign", async (req, res) => {
+    try {
+      const storeId = req.body?.storeId || "default";
+      const dormantHours = Number(req.body?.dormantHours) || 12;
+      const cooldownHours = 72; // no reactivar al mismo cliente más de 1 vez cada 3 días
+
+      const custSnap = await getDocs(query(collection(db, "customers")));
+      const now = Date.now();
+      const candidates: any[] = [];
+
+      custSnap.forEach(d => {
+        const c = d.data();
+        if (c.marketingOptOut) return;
+        if (c.etapa === "compro" || c.etapa === "pedido_confirmado") return;
+
+        const lastInteraction = c.lastInteractionAt ? new Date(c.lastInteractionAt).getTime() : 0;
+        if (!lastInteraction) return;
+        const hoursSince = (now - lastInteraction) / (1000 * 60 * 60);
+        if (hoursSince < dormantHours) return; // todavía "caliente", no tocar
+
+        const lastReactivation = c.lastReactivationAt || 0;
+        if (now - lastReactivation < cooldownHours * 60 * 60 * 1000) return; // ya se reactivó hace poco
+
+        if (!c.phone) return;
+        candidates.push({ id: d.id, phone: c.phone, name: c.name, lastProductList: c.lastProductList || [] });
+      });
+
+      if (candidates.length === 0) {
+        return res.json({ success: true, sent: 0, message: "No hay clientes fríos elegibles en este momento (o todos siguen en cooldown)." });
+      }
+
+      let sentCount = 0;
+      for (const c of candidates) {
+        const topProduct = c.lastProductList?.[0];
+        const productName = topProduct?.name || "nuestro catálogo";
+        const pitch = topProduct
+          ? `¡Hola! 👋 Vi que te interesó *${topProduct.name}* — se está agotando rápido y no quería que te quedaras sin el tuyo. ¿Seguimos con tu pedido? 🚀 Envío gratis contraentrega.`
+          : `¡Hola! 👋 ¿Sigues buscando algo especial? Tenemos ofertas nuevas esta semana con envío gratis contraentrega. ¡Cuéntame qué necesitas! 🛍️`;
+
+        const sent = await sendTrendOfferButtons(
+          `whatsapp:${c.phone.replace("whatsapp:", "").replace("+", "")}`,
+          TWILIO_FROM_NUMBER || "+14155238886",
+          productName,
+          pitch,
+          topProduct?.imageUrl || ""
+        );
+
+        if (sent) {
+          sentCount++;
+          await setDoc(doc(db, "customers", c.id), { lastReactivationAt: now }, { merge: true });
+          await addDoc(collection(db, "activities"), {
+            from: normalizePhone(TWILIO_FROM_NUMBER || ""),
+            to: `whatsapp:${c.phone}`,
+            customerPhone: c.phone.replace("+", ""),
+            message: pitch,
+            status: "respondido",
+            whatsappStatus: "sent",
+            manualAgent: "Campaña de Reactivación",
+            storeId,
+            timestamp: serverTimestamp()
+          });
+        }
+
+        // Pequeña pausa entre envíos para no saturar/parecer spam masivo
+        await new Promise(r => setTimeout(r, 1500));
+      }
+
+      res.json({ success: true, sent: sentCount, totalCandidates: candidates.length });
+    } catch (e: any) {
+      console.error("[Reactivation Campaign] Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post("/api/admin/offer-custom-product", async (req, res) => {
     try {
       const { phone, productName, price, quantity, notes } = req.body;
