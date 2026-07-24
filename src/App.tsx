@@ -217,12 +217,6 @@ function JanAdmin() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
-  // 📜 Historial completo del cliente que tienes abierto ahora mismo. El
-  // listener global de "activities" trae solo los últimos 200 mensajes de
-  // TODOS los clientes juntos (para que el panel no se sature), así que un
-  // cliente con conversación larga podía perder mensajes viejos de vista.
-  // Este estado aparte trae SU historial completo, sin ese límite global.
-  const [selectedConvFullHistory, setSelectedConvFullHistory] = useState<Activity[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [webhookUrl, setWebhookUrl] = useState("");
   const [copied, setCopied] = useState(false);
@@ -239,36 +233,6 @@ function JanAdmin() {
   const [isResetting, setIsResetting] = useState(false);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Record<string, any>>({});
-
-  // 📜 Cuando se abre un cliente, traemos SU historial completo aparte del
-  // feed global (que está limitado a 200 mensajes entre todos los clientes).
-  // Así, aunque ese límite global se llene, el chat que tienes abierto
-  // siempre se ve completo, sin cortes.
-  useEffect(() => {
-    if (!selectedUser) {
-      setSelectedConvFullHistory([]);
-      return;
-    }
-    const cleanPhone = canonicalizePhone(selectedUser).replace("+", "");
-    if (!cleanPhone) return;
-
-    const qFull = query(
-      collection(db, "activities"),
-      where("customerPhone", "==", cleanPhone),
-      orderBy("timestamp", "asc"),
-      limit(1000)
-    );
-    const unsubFull = onSnapshot(qFull,
-      (snapshot) => {
-        const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Activity));
-        setSelectedConvFullHistory(docs);
-      },
-      (err) => {
-        console.error("[Firestore] Error cargando historial completo del cliente:", err);
-      }
-    );
-    return () => unsubFull();
-  }, [selectedUser]);
 
   const [humanMessage, setHumanMessage] = useState("");
   const [systemStatus, setSystemStatus] = useState<any>(null);
@@ -1527,6 +1491,40 @@ function ReportsTab({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const lastSelectedUserRef = useRef<string | null>(null);
+
+  // 📜 Historial completo del cliente que tienes abierto ahora mismo. El
+  // listener global de "activities" trae solo los últimos 200 mensajes de
+  // TODOS los clientes juntos (para que el panel no se sature), así que un
+  // cliente con conversación larga podía perder mensajes viejos de vista.
+  // Este estado aparte trae SU historial completo, sin ese límite global.
+  const [selectedConvFullHistory, setSelectedConvFullHistory] = useState<Activity[]>([]);
+
+  useEffect(() => {
+    if (!selectedUser) {
+      setSelectedConvFullHistory([]);
+      return;
+    }
+    const cleanPhone = canonicalizePhone(selectedUser).replace("+", "");
+    if (!cleanPhone) return;
+
+    const qFull = query(
+      collection(db, "activities"),
+      where("customerPhone", "==", cleanPhone),
+      orderBy("timestamp", "asc"),
+      limit(1000)
+    );
+    const unsubFull = onSnapshot(qFull,
+      (snapshot: any) => {
+        const docs = snapshot.docs.map((d: any) => ({ id: d.id, ...d.data() } as Activity));
+        setSelectedConvFullHistory(docs);
+      },
+      (err: any) => {
+        console.error("[Firestore] Error cargando historial completo del cliente:", err);
+      }
+    );
+    return () => unsubFull();
+  }, [selectedUser]);
+
 
   // ==============================================
   // 🧠 SCROLL INTELIGENTE (no más saltos molestos al subir)

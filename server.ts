@@ -3450,6 +3450,17 @@ async function sendProductListPicker(to: string, from: string, products: any[], 
       contentSid
     });
     console.log(`[WhatsApp List] Lista de productos (${categoryKey}) enviada a ${to}`);
+
+    const buttonLabels = top.map((p: any) => `${p.name} — $${Number(p.price || 0).toLocaleString("es-CO")} COP`);
+    if (hasMore) buttonLabels.push("➡️ Ver más productos");
+    await logOutgoingButtonsActivity(
+      to,
+      "default",
+      from,
+      "Toca *Ver productos* 👇 y elige el que te interesa. Después podrás agregar más o confirmar tu pedido.",
+      buttonLabels
+    );
+
     return true;
   } catch (e: any) {
     console.error(`[WhatsApp List] Error enviando lista de productos:`, e.message);
