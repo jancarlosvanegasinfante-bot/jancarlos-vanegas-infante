@@ -2206,6 +2206,85 @@ async function checkTwilioStatus(): Promise<boolean> {
 const CONFIRM_YES_ID = "JAN_CONFIRM_YES";
 const CONFIRM_NO_ID = "JAN_CONFIRM_NO";
 
+// ==============================================
+// 🚚 CONFIRMACIÓN FINAL DE DESPACHO (antes de subir a Dropi)
+// ==============================================
+// Esto es DISTINTO a la confirmación inicial del pedido (CONFIRM_YES_ID /
+// CONFIRM_NO_ID de arriba, que es cuando el cliente arma su carrito). Este
+// otro flujo es para cuando TÚ, como dueño, ya vas a llevar el pedido
+// físicamente a Dropi (ej. a las 5pm revisas lo que se pidió en el día) y
+// quieres una última confirmación del cliente antes de despachar, con un
+// mensaje de urgencia/gatillo mental, y la opción extra de reprogramar.
+const DISPATCH_YES_ID = "JAN_DISPATCH_YES";
+const DISPATCH_NO_ID = "JAN_DISPATCH_NO";
+const DISPATCH_RESCHEDULE_ID = "JAN_DISPATCH_RESCHEDULE";
+
+async function ensureDispatchConfirmTemplate(): Promise<string | null> {
+  if (!twilioClient) return null;
+  try {
+    const cfgSnap = await getDoc(doc(db, "config", "system"));
+    const d = cfgSnap.exists() ? cfgSnap.data() : {};
+    if (d?.dispatchConfirmTemplateSid) return d.dispatchConfirmTemplateSid;
+
+    const content = await (twilioClient as any).content.v1.contents.create({
+      friendlyName: `jan_dispatch_confirm_${Date.now()}`,
+      language: "es",
+      variables: { "1": "tu pedido" },
+      types: {
+        "twilio/quick-reply": {
+          body: "📦 *¡Última llamada!* 🚨\n\nTu pedido de *{{1}}* está a punto de salir con la transportadora en las próximas horas — este es el último momento para confirmar antes de despacharlo. ⏰\n\n¿Sigues interesado en recibirlo?",
+          actions: [
+            { title: "✅ Sí, lo quiero", id: DISPATCH_YES_ID },
+            { title: "❌ No, cancelar", id: DISPATCH_NO_ID },
+            { title: "📅 Reprogramar", id: DISPATCH_RESCHEDULE_ID }
+          ]
+        }
+      }
+    });
+
+    await setDoc(doc(db, "config", "system"), { dispatchConfirmTemplateSid: content.sid }, { merge: true });
+    return content.sid;
+  } catch (e: any) {
+    console.error("[Dispatch Confirm] Error creando template:", e.message);
+    return null;
+  }
+}
+
+async function sendDispatchConfirmationButtons(to: string, from: string, orderId: string, productName: string): Promise<boolean> {
+  if (!twilioClient) return false;
+  try {
+    const contentSid = await ensureDispatchConfirmTemplate();
+    if (!contentSid) return false;
+
+    await (twilioClient as any).messages.create({
+      from: normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886"),
+      to: normalizePhone(to),
+      contentSid,
+      contentVariables: JSON.stringify({ "1": productName })
+    });
+
+    await logOutgoingButtonsActivity(
+      to, "default", from,
+      `📦 ¡Última llamada! Tu pedido de ${productName} está a punto de salir con la transportadora. ¿Sigues interesado en recibirlo?`,
+      ["✅ Sí, lo quiero", "❌ No, cancelar", "📅 Reprogramar"]
+    );
+
+    // Guardamos a qué pedido corresponde esta confirmación, para saber qué
+    // orden actualizar cuando el cliente responda.
+    const cleanPhone = to.replace("whatsapp:", "").trim();
+    const customerProfileId = `default_${cleanPhone}`;
+    await setDoc(doc(db, "customers", customerProfileId), {
+      pendingDispatchConfirmation: { orderId, productName }
+    }, { merge: true });
+
+    return true;
+  } catch (e: any) {
+    console.error("[Dispatch Confirm] Error enviando botones:", e.message);
+    return false;
+  }
+}
+
+
 async function ensureOrderConfirmationTemplate(): Promise<string | null> {
   if (!twilioClient) return null;
   try {
@@ -5277,37 +5356,19 @@ async function startServer() {
       const orderData = orderSnap.data();
       const rawPhone = orderData.customerPhone || "";
       const cleanPhone = rawPhone.replace("whatsapp:", "").trim();
-      const storeId = orderData.storeId || "default";
-      const customerProfileId = `${storeId}_${cleanPhone}`;
 
-      const totalPagar = Number(orderData.totalPrice || 0);
-
-      const checkoutData = {
-        producto: orderData.productName,
-        cantidad: orderData.quantity || 1,
-        nombre: orderData.customerName,
-        telefono: orderData.customerPhone,
-        ciudad: orderData.city,
-        direccion: orderData.address,
-        referencia: orderData.addressIndicator || "N/A",
-        valor: orderData.price || totalPagar
-      };
-
-      await sendCheckoutSummaryAndButtons(
+      await sendDispatchConfirmationButtons(
         `whatsapp:${cleanPhone}`,
         TWILIO_FROM_NUMBER || "+14155238886",
-        customerProfileId,
-        checkoutData,
-        undefined,
-        storeId
+        orderId,
+        orderData.productName || "tu producto"
       );
 
       await updateDoc(doc(db, "orders", orderId), {
-        confirmationRequestedAt: serverTimestamp(),
-        status: "pendiente"
+        confirmationRequestedAt: serverTimestamp()
       });
 
-      res.json({ success: true, message: "Mensaje de confirmación enviado exitosamente por WhatsApp." });
+      res.json({ success: true, message: "Mensaje de confirmación de despacho enviado exitosamente por WhatsApp." });
     } catch (e: any) {
       console.error("[Request Order Confirmation] Error:", e);
       res.status(500).json({ error: e.message });
@@ -6768,6 +6829,62 @@ _El pedido ya se guardó y está listo en tu tablero._`;
             await updateDoc(doc(db, "activities", activityRefId), {
               status: "respondido",
               response: noMsg,
+              respondedAt: serverTimestamp()
+            });
+          }
+        } else if (buttonPayload === DISPATCH_YES_ID || buttonPayload === DISPATCH_NO_ID || buttonPayload === DISPATCH_RESCHEDULE_ID) {
+          // ==============================================
+          // 🚚 RESPUESTAS A LA CONFIRMACIÓN FINAL DE DESPACHO
+          // ==============================================
+          const dispatchPending = customerData?.pendingDispatchConfirmation;
+          const orderIdForDispatch = dispatchPending?.orderId;
+
+          if (!orderIdForDispatch) {
+            const noPendMsg = "No encontramos ningún pedido pendiente de despacho en este momento. 😊 ¿En qué más te puedo ayudar?";
+            await sendWhatsApp(from, noPendMsg, undefined, activityRefId, to);
+          } else if (buttonPayload === DISPATCH_YES_ID) {
+            await updateDoc(doc(db, "orders", orderIdForDispatch), {
+              status: "confirmado",
+              dispatchConfirmedAt: serverTimestamp()
+            });
+            const yesMsg = "¡Genial! 🎉 Confirmado — tu pedido sigue en camino con la transportadora, en breve lo tendrás en tus manos. ¡Gracias por tu compra! 🚚📦";
+            await sendWhatsApp(from, yesMsg, undefined, activityRefId, to);
+          } else if (buttonPayload === DISPATCH_NO_ID) {
+            await updateDoc(doc(db, "orders", orderIdForDispatch), {
+              status: "cancelado",
+              dispatchCancelledAt: serverTimestamp()
+            });
+            const noMsg = "Entendido, cancelamos el envío de tu pedido. 🙏 Si cambias de opinión o buscas otra cosa, aquí estamos. ¿Te ayudo con algo más?";
+            await sendWhatsApp(from, noMsg, undefined, activityRefId, to);
+            // Avisamos al dueño de la tienda que un pedido se canceló en el último momento
+            try {
+              const admins = getAdminNumbers();
+              for (const num of admins) {
+                await sendWhatsApp(`whatsapp:+${num}`, `⚠️ El pedido ${orderIdForDispatch} (${dispatchPending.productName}) fue *cancelado* por el cliente justo antes del despacho.`, undefined, undefined, TWILIO_FROM_NUMBER);
+              }
+            } catch {}
+          } else if (buttonPayload === DISPATCH_RESCHEDULE_ID) {
+            await updateDoc(doc(db, "orders", orderIdForDispatch), {
+              status: "pendiente",
+              dispatchRescheduleRequestedAt: serverTimestamp()
+            });
+            const rescheduleMsg = "¡Sin problema! 📅 Vamos a reprogramar la entrega de tu pedido. Un asesor te va a escribir en breve para acordar la nueva fecha. 🙌";
+            await sendWhatsApp(from, rescheduleMsg, undefined, activityRefId, to);
+            // Esto SÍ requiere seguimiento humano, así que pausamos la IA y avisamos.
+            await setCustomerAiPauseState(cleanFrom, assignedStoreId, true);
+            try {
+              const admins = getAdminNumbers();
+              for (const num of admins) {
+                await sendWhatsApp(`whatsapp:+${num}`, `📅 El cliente de ${cleanFrom} pidió *reprogramar* la entrega del pedido ${orderIdForDispatch} (${dispatchPending.productName}). Escríbele para acordar nueva fecha.`, undefined, undefined, TWILIO_FROM_NUMBER);
+              }
+            } catch {}
+          }
+
+          await updateDoc(doc(db, "customers", customerProfileId), { pendingDispatchConfirmation: null });
+          if (activityRefId) {
+            await updateDoc(doc(db, "activities", activityRefId), {
+              status: "respondido",
+              response: "[Respuesta a confirmación de despacho procesada]",
               respondedAt: serverTimestamp()
             });
           }

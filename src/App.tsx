@@ -2551,14 +2551,14 @@ function OrdersTab({ orders, onUpdateStatus, userStore }: { orders: Order[], onU
                   key={o.id}
                   onClick={() => setSelectedOrderId(o.id)}
                   className={cn(
-                    "w-full text-left p-4 rounded-xl border transition-all duration-200 outline-none relative overflow-hidden flex flex-col gap-2.5",
+                    "w-full text-left p-4 rounded-xl border transition-all duration-200 outline-none relative flex flex-col gap-2.5",
                     isActive 
                       ? "bg-neutral-900 border-[#F27D26]/60 shadow-lg shadow-black/40 ring-1 ring-[#F27D26]/20" 
                       : "bg-[#111]/80 border-neutral-800 hover:bg-neutral-900/50 hover:border-neutral-700"
                   )}
                 >
                   {/* Left accent color bar if active */}
-                  {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#F27D26]" />}
+                  {isActive && <div className="absolute left-0 top-0 bottom-0 w-1 bg-[#F27D26] rounded-l-xl" />}
 
                   {/* Top Status & Date Row */}
                   <div className="flex justify-between items-center text-[9px]">
