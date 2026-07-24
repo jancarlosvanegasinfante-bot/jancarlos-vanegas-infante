@@ -1243,11 +1243,11 @@ export default function LandingPage() {
             // urgencia usamos un número de marketing creíble y ESTABLE por
             // producto (no cambia en cada refresh, pero sí varía entre
             // productos), salvo que el producto esté realmente agotado.
-            const isReallyOutOfStock = p.stock <= 0;
+            const isReallyOutOfStock = false; // Nunca mostramos "agotado": siempre se consigue el producto
             const idHash = String(p.id).split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
-            const displayStock = isReallyOutOfStock ? 0 : (idHash % 13) + 3; // 3 a 15
+            const displayStock = (idHash % 13) + 3; // 3 a 15
             const stockPct = Math.min((displayStock / 20) * 100, 100);
-            const isLowStock = !isReallyOutOfStock;
+            const isLowStock = true;
             const liveViewers = (idx * 7 + 12) % 18 + 14;
             const cartItem = cart.find((item) => item.product.id === p.id);
             const discountPct = Math.round(((p.originalPrice - p.price) / p.originalPrice) * 100);
@@ -1272,11 +1272,11 @@ export default function LandingPage() {
                       ¡Solo {displayStock} restantes!
                     </span>
                   )}
-                  {isReallyOutOfStock && (
-                    <span className="bg-neutral-700 text-white text-[8.5px] font-black uppercase tracking-wider px-2 py-1 rounded-md">
-                      Agotado
-                    </span>
-                  )}
+                  {/* Nota: NO mostramos "Agotado" aquí a propósito. El modelo
+                      de negocio es que SIEMPRE se consigue el producto para
+                      el cliente, sin importar el inventario real del
+                      proveedor — mostrar "agotado" espantaría ventas que sí
+                      se pueden cerrar igual. */}
                 </div>
 
                 {/* Discount badge top-right */}

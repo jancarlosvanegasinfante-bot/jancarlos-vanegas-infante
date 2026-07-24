@@ -151,11 +151,11 @@ export default function Storefront() {
                       <ShoppingBag size={48} />
                     </div>
                   )}
-                  {p.stock <= 0 && (
-                     <div className="absolute top-3 right-3 bg-red-500 text-white text-xs font-black uppercase tracking-widest px-3 py-1 rounded-full shadow-lg">
-                       Agotado
-                     </div>
-                  )}
+                  {/* Nota: NO se muestra "Agotado" ni se bloquea el botón de
+                      contacto — el modelo de negocio es que SIEMPRE se
+                      consigue el producto para el cliente, aunque el stock
+                      del proveedor esté en 0. Bloquear la compra aquí
+                      perdería ventas reales. */}
                 </div>
                 <div className="p-5 flex-1 flex flex-col">
                   <div className="mb-2">
@@ -172,12 +172,8 @@ export default function Storefront() {
                     </div>
                     <button 
                       onClick={() => handleWhatsAppContact(p.name)}
-                      disabled={p.stock <= 0}
-                      className={cn(
-                        "w-10 h-10 rounded-full flex items-center justify-center text-white transition-transform hover:scale-110 active:scale-95",
-                        p.stock <= 0 ? "opacity-50 cursor-not-allowed bg-neutral-300" : ""
-                      )}
-                      style={{ backgroundColor: p.stock > 0 ? themeColor : undefined }}
+                      className="w-10 h-10 rounded-full flex items-center justify-center text-white transition-transform hover:scale-110 active:scale-95"
+                      style={{ backgroundColor: themeColor }}
                     >
                       <ShoppingBag size={18} />
                     </button>
