@@ -2142,6 +2142,38 @@ Jan (IA) respondió: "${jsonResponse.mensaje}"
             console.error("[Server AI] Error notificando asesoría:", e);
           }
       }
+
+      // ⏰ RECORDATORIO SI TARDAS EN ENTRAR: si en 20 minutos no has
+      // respondido manualmente (no hay ninguna actividad con manualAgent
+      // registrada después de este momento), te mandamos un segundo aviso
+      // más urgente para que no se enfríe el cliente.
+      const escalationTimestamp = Date.now();
+      setTimeout(async () => {
+        try {
+          const recentActQ = query(
+            collection(db, "activities"),
+            where("customerPhone", "==", fromPhone),
+            orderBy("timestamp", "desc"),
+            limit(5)
+          );
+          const recentSnap = await getDocs(recentActQ);
+          const alreadyHandled = recentSnap.docs.some(d => {
+            const dd = d.data();
+            const ts = dd.timestamp?.toMillis?.() || 0;
+            return dd.manualAgent && ts >= escalationTimestamp;
+          });
+          if (alreadyHandled) return;
+
+          const reminderMsg = `🚨🚨 *RECORDATORIO:* Sigues sin responder a ${customerProfile?.name || fromPhone} sobre "${jsonResponse.producto || 'su duda'}" — ya pasaron 20 minutos. ¡No dejes que se enfríe! 🔥`;
+          const admins = getAdminNumbers();
+          for (const num of admins) {
+            const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
+            await sendWhatsApp(target, reminderMsg);
+          }
+        } catch (e: any) {
+          console.error("[Reminder] Error enviando recordatorio de asesoría pendiente:", e.message);
+        }
+      }, 20 * 60 * 1000);
     }
 
     // 7. PROGRAMAR SEGUIMIENTO INTELIGENTE SI NO CERRÓ
@@ -3549,6 +3581,16 @@ async function sendProductListPicker(to: string, from: string, products: any[], 
       buttonLabels
     );
 
+    // 📌 SEGUIMIENTO AUTOMÁTICO: este es el punto exacto donde más clientes
+    // "desaparecen" (ven la lista de productos y nunca vuelven a escribir).
+    // Programamos un mensaje de recordatorio con gatillo mental si no
+    // responden en un rato — antes esto solo se disparaba cuando la IA
+    // respondía con texto, pero la mayoría de la navegación es por botones,
+    // así que ese seguimiento casi nunca se activaba en la práctica.
+    scheduleFollowUp(to, 45, `Vio la lista de productos de la categoría "${categoryKey}" y no confirmó nada`, "default").catch(e =>
+      console.error("[Follow-up] Error programando seguimiento tras lista de productos:", e.message)
+    );
+
     return true;
   } catch (e: any) {
     console.error(`[WhatsApp List] Error enviando lista de productos:`, e.message);
@@ -3606,6 +3648,9 @@ async function sendLandingPageButton(to: string, from: string, landingUrl: strin
       contentSid
     });
     console.log(`[WhatsApp CTA] Botón CTA de landing enviado correctamente a ${to}`);
+    scheduleFollowUp(to, 40, "Tocó el botón de ver la página web/catálogo completo y no volvió a escribir", "default").catch(e =>
+      console.error("[Follow-up] Error programando seguimiento tras botón de landing:", e.message)
+    );
     await logOutgoingButtonsActivity(to, "default", from, "🌐 ¿Prefieres explorar todo nuestro catálogo con fotos y descripciones detalladas?", [
       "🌐 Ver en Página Web"
     ]);
