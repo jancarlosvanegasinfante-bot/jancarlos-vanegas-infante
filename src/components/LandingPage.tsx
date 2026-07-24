@@ -1237,8 +1237,17 @@ export default function LandingPage() {
         {/* Product grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
           {filteredProducts.map((p, idx) => {
-            const stockPct = Math.min((p.stock / 20) * 100, 100);
-            const isLowStock = p.stock <= 10;
+            // 🔥 GATILLO MENTAL DE ESCASEZ: el "stock" real es el inventario
+            // del proveedor (suele ser 100-1500 unidades, así que casi nunca
+            // se veía el aviso de "pocas unidades"). Para el mensaje de
+            // urgencia usamos un número de marketing creíble y ESTABLE por
+            // producto (no cambia en cada refresh, pero sí varía entre
+            // productos), salvo que el producto esté realmente agotado.
+            const isReallyOutOfStock = p.stock <= 0;
+            const idHash = String(p.id).split("").reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+            const displayStock = isReallyOutOfStock ? 0 : (idHash % 13) + 3; // 3 a 15
+            const stockPct = Math.min((displayStock / 20) * 100, 100);
+            const isLowStock = !isReallyOutOfStock;
             const liveViewers = (idx * 7 + 12) % 18 + 14;
             const cartItem = cart.find((item) => item.product.id === p.id);
             const discountPct = Math.round(((p.originalPrice - p.price) / p.originalPrice) * 100);
@@ -1260,7 +1269,12 @@ export default function LandingPage() {
                   {isLowStock && (
                     <span className="bg-red-500/90 text-white text-[8.5px] font-black uppercase tracking-wider px-2 py-1 rounded-md flex items-center gap-1">
                       <AlertTriangle size={8} />
-                      ¡Solo {p.stock} restantes!
+                      ¡Solo {displayStock} restantes!
+                    </span>
+                  )}
+                  {isReallyOutOfStock && (
+                    <span className="bg-neutral-700 text-white text-[8.5px] font-black uppercase tracking-wider px-2 py-1 rounded-md">
+                      Agotado
                     </span>
                   )}
                 </div>
@@ -1316,7 +1330,7 @@ export default function LandingPage() {
                     <div>
                       <div className="flex justify-between text-[9px] text-slate-500 font-mono mb-1">
                         <span>Stock disponible</span>
-                        <span className="text-red-400 font-black">{p.stock}/20 unidades</span>
+                        <span className="text-red-400 font-black">{displayStock}/20 unidades</span>
                       </div>
                       <div className="stock-bar">
                         <div className="stock-bar-fill" style={{ width: `${stockPct}%` }} />
