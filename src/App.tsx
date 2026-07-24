@@ -2579,8 +2579,8 @@ function OrdersTab({ orders, onUpdateStatus, userStore }: { orders: Order[], onU
 
                   {/* Customer Name & Source Badger */}
                   <div>
-                    <h4 className="text-white font-black text-xs uppercase tracking-tight leading-tight flex items-center gap-1.5 flex-wrap">
-                      <span>{o.customerName}</span>
+                    <h4 className="text-white font-black text-xs uppercase tracking-tight leading-tight flex items-center gap-1.5 flex-wrap break-words">
+                      <span className="break-words">{o.customerName}</span>
                       {(o as any).origin === 'landing' && (
                         <span className="text-[7.5px] bg-amber-500/15 text-amber-400 border border-amber-500/20 font-black px-1.5 py-0.2 rounded uppercase tracking-widest leading-none">
                           Landing ⚡
