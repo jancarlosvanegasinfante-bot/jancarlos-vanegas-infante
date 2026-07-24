@@ -1766,6 +1766,32 @@ function ReportsTab({
       };
     });
 
+    // 👥 CLIENTES SIEMPRE VISIBLES: si un cliente existe en la base de datos
+    // pero no tiene mensajes dentro de la ventana cargada (por ejemplo, no ha
+    // escrito hace mucho), igual lo agregamos a la lista con una conversación
+    // vacía, para que siempre lo puedas buscar y abrir para intervenir.
+    customers.forEach(c => {
+      const rawPhone = c.phone || c.id || "";
+      if (!rawPhone) return;
+      const userId = canonicalizePhone(rawPhone);
+      if (!userId || userId === '+') return;
+      const botNumbers = ['14155238886', '15072233213'];
+      if (botNumbers.some(n => userId.includes(n))) return;
+
+      if (!result[userId]) {
+        result[userId] = {
+          lastMessage: "(Sin mensajes recientes)",
+          timestamp: c.lastInteractionAt || c.createdAt || null,
+          platform: 'whatsapp',
+          customerName: c.name || c.nombre || null,
+          customerEtapa: c.etapa || 'interesado',
+          aiPaused: c.aiPaused || false,
+          messages: [],
+          pageId: undefined
+        } as any;
+      }
+    });
+
     return result;
   }, [userConversations, customerNameMap, customers]);
 
