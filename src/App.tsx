@@ -217,6 +217,12 @@ function JanAdmin() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
+  // 📜 Historial completo del cliente que tienes abierto ahora mismo. El
+  // listener global de "activities" trae solo los últimos 200 mensajes de
+  // TODOS los clientes juntos (para que el panel no se sature), así que un
+  // cliente con conversación larga podía perder mensajes viejos de vista.
+  // Este estado aparte trae SU historial completo, sin ese límite global.
+  const [selectedConvFullHistory, setSelectedConvFullHistory] = useState<Activity[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [webhookUrl, setWebhookUrl] = useState("");
   const [copied, setCopied] = useState(false);
@@ -233,6 +239,37 @@ function JanAdmin() {
   const [isResetting, setIsResetting] = useState(false);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [conversations, setConversations] = useState<Record<string, any>>({});
+
+  // 📜 Cuando se abre un cliente, traemos SU historial completo aparte del
+  // feed global (que está limitado a 200 mensajes entre todos los clientes).
+  // Así, aunque ese límite global se llene, el chat que tienes abierto
+  // siempre se ve completo, sin cortes.
+  useEffect(() => {
+    if (!selectedUser) {
+      setSelectedConvFullHistory([]);
+      return;
+    }
+    const cleanPhone = canonicalizePhone(selectedUser).replace("+", "");
+    if (!cleanPhone) return;
+
+    const qFull = query(
+      collection(db, "activities"),
+      where("customerPhone", "==", cleanPhone),
+      orderBy("timestamp", "asc"),
+      limit(1000)
+    );
+    const unsubFull = onSnapshot(qFull,
+      (snapshot) => {
+        const docs = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Activity));
+        setSelectedConvFullHistory(docs);
+      },
+      (err) => {
+        console.error("[Firestore] Error cargando historial completo del cliente:", err);
+      }
+    );
+    return () => unsubFull();
+  }, [selectedUser]);
+
   const [humanMessage, setHumanMessage] = useState("");
   const [systemStatus, setSystemStatus] = useState<any>(null);
   const [startDate, setStartDate] = useState<string>("");
@@ -1488,9 +1525,39 @@ function ReportsTab({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [platformFilter, setPlatformFilter] = useState<'all'|'whatsapp'|'instagram'|'messenger'>('all');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement>(null);
+  const lastSelectedUserRef = useRef<string | null>(null);
 
+  // ==============================================
+  // 🧠 SCROLL INTELIGENTE (no más saltos molestos al subir)
+  // ==============================================
+  // Antes, CUALQUIER cambio en conversations/activities forzaba el scroll al
+  // fondo, así estuvieras leyendo mensajes viejos arriba — muy molesto. Ahora:
+  // 1) Al cambiar de cliente, bajamos al fondo UNA sola vez.
+  // 2) Si llega un mensaje nuevo mientras ya estás al final, seguimos bajando
+  //    suave para que veas lo nuevo.
+  // 3) Si estás leyendo arriba, NO te movemos el scroll a la fuerza.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const switchedConversation = lastSelectedUserRef.current !== selectedUser;
+    lastSelectedUserRef.current = selectedUser;
+
+    if (switchedConversation) {
+      // Nuevo cliente seleccionado: ir al fondo una sola vez (sin animación
+      // para que no se sienta un scroll largo al abrir el chat).
+      messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      return;
+    }
+
+    // Mismo cliente, pero llegaron datos nuevos (mensaje nuevo, actualización
+    // de estado, etc.): solo bajamos si el usuario ya estaba cerca del fondo.
+    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    const wasNearBottom = distanceFromBottom < 150;
+    if (wasNearBottom) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [conversations, selectedUser, activities]);
 
   const selectedCanonicalPhone = useMemo(() => {
@@ -1598,7 +1665,16 @@ function ReportsTab({
 
   // Group activities by user (canonical phone number)
   const userConversations = useMemo(() => {
-    return activities.reduce((acc, curr) => {
+    // Combinamos el feed global (limitado a 200 para rendimiento) con el
+    // historial completo del cliente actualmente abierto, para que ver un
+    // chat específico nunca quede incompleto por el límite global.
+    const combinedActivities = [...activities];
+    const existingIds = new Set(activities.map(a => a.id));
+    selectedConvFullHistory.forEach(a => {
+      if (!existingIds.has(a.id)) combinedActivities.push(a);
+    });
+
+    return combinedActivities.reduce((acc, curr) => {
       let rawUser = 'unknown';
       const from = curr.from || "";
       const to = curr.to || "";
@@ -1644,7 +1720,7 @@ function ReportsTab({
       
       return acc;
     }, {} as Record<string, { lastMessage: string, timestamp: any, platform: string, customerName?: string | null, pageId?: string, messages: Activity[] }>);
-  }, [activities]);
+  }, [activities, selectedConvFullHistory]);
 
   // Post-process each conversation: sort messages chronologically and compute metadata
   const processedUserConversations = useMemo(() => {
@@ -2055,7 +2131,7 @@ function ReportsTab({
                 </div>
 
             {/* Messages Area */}
-            <div className="flex-1 overflow-y-auto p-4 lg:p-8 flex flex-col gap-6 custom-scrollbar">
+            <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 lg:p-8 flex flex-col gap-6 custom-scrollbar">
               {(() => {
                 if (!activeUserConv || !activeUserConv.messages) return null;
                 const currentPlatform = activeUserConv.platform || 'whatsapp';
