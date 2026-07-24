@@ -2646,6 +2646,9 @@ async function sendOrderConfirmationButtons(to: string, from: string, jsonRespon
       contentVariables: JSON.stringify({ "1": buildOrderSummaryLine(jsonResponse) })
     });
     console.log(`[WhatsApp Buttons] Botones de confirmación enviados a ${to}`);
+    await logOutgoingButtonsActivity(to, "default", from, `🧾 Resumen de tu pedido:\n${buildOrderSummaryLine(jsonResponse)}\n\n¿Confirmas para enviarlo ya?`, [
+      "Sí, confirmar ✅", "No, cambiar algo ✏️"
+    ]);
     return true;
   } catch (e: any) {
     console.error("[WhatsApp Buttons] Error enviando botones de confirmación:", e.message);
@@ -2848,6 +2851,44 @@ async function ensureAllTemplates(): Promise<{
   return result;
 }
 
+// ==============================================
+// 📋 REGISTRO DE BOTONES ENVIADOS (para el panel admin)
+// ==============================================
+// Antes, cuando el bot mandaba un mensaje de botones (menú, categorías,
+// confirmar pedido, etc.), esa información se perdía apenas Twilio la
+// entregaba — el panel de administración solo veía texto plano, nunca los
+// botones reales que el cliente estaba viendo en su celular. Esta función
+// guarda esos botones en la actividad para que el dashboard los pueda
+// dibujar exactamente como se ven en WhatsApp.
+async function logOutgoingButtonsActivity(
+  customerPhone: string,
+  storeId: string,
+  botNumber: string,
+  bodyText: string,
+  buttons: string[]
+): Promise<void> {
+  try {
+    const cleanPhone = customerPhone.replace("whatsapp:", "").trim();
+    await addDoc(collection(db, "activities"), {
+      from: `whatsapp:${cleanPhone}`,
+      to: botNumber,
+      recipient: `whatsapp:${cleanPhone}`,
+      customerPhone: cleanPhone,
+      storeId: storeId || "default",
+      message: "[Menú de botones]",
+      response: bodyText,
+      buttons,
+      status: "respondido",
+      whatsappStatus: "sent",
+      senderType: "bot",
+      timestamp: serverTimestamp(),
+      receivedAt: serverTimestamp()
+    });
+  } catch (e: any) {
+    console.error("[Log Buttons Activity] Error guardando botones enviados:", e.message);
+  }
+}
+
 async function sendMainMenu(to: string, from: string): Promise<boolean> {
   if (!twilioClient) return false;
   const templates = await ensureAllTemplates();
@@ -2859,6 +2900,9 @@ async function sendMainMenu(to: string, from: string): Promise<boolean> {
       contentSid: templates.mainMenuSid
     });
     console.log(`[WhatsApp Buttons] Menú principal enviado a ${to}`);
+    await logOutgoingButtonsActivity(to, "default", from, "Selecciona una opción para continuar 👇", [
+      "Ver Catálogo 📦", "Hablar con Asesor 🙋‍♂️", "Finalizar Chat 🛑"
+    ]);
     return true;
   } catch (e: any) {
     console.error("[WhatsApp Buttons] Error enviando Menú Principal:", e.message);
@@ -2877,6 +2921,9 @@ async function sendCategoriesMenu(to: string, from: string): Promise<boolean> {
       contentSid: templates.categoriesSid
     });
     console.log(`[WhatsApp Buttons] Menú de categorías enviado a ${to}`);
+    await logOutgoingButtonsActivity(to, "default", from, "Tenemos las mejores ofertas de Colombia. ¡Mira los más vendidos del día o explora nuestras categorías! 👇", [
+      "🔥 Tendencias 🔥", "Tecnología 💻", "Más Secciones ➡️"
+    ]);
     return true;
   } catch (e: any) {
     console.error("[WhatsApp Buttons] Error enviando Menú de Categorías:", e.message);
@@ -3460,6 +3507,9 @@ async function sendLandingPageButton(to: string, from: string, landingUrl: strin
       contentSid
     });
     console.log(`[WhatsApp CTA] Botón CTA de landing enviado correctamente a ${to}`);
+    await logOutgoingButtonsActivity(to, "default", from, "🌐 ¿Prefieres explorar todo nuestro catálogo con fotos y descripciones detalladas?", [
+      "🌐 Ver en Página Web"
+    ]);
     return true;
   } catch (e: any) {
     console.error(`[WhatsApp CTA] Error enviando botón CTA de landing:`, e.message);
@@ -3520,6 +3570,9 @@ async function sendCartActionButtons(to: string, from: string, cartSummary: stri
       contentSid,
       contentVariables: JSON.stringify({ "1": line })
     });
+    await logOutgoingButtonsActivity(to, "default", from, line, [
+      "➕ Agregar otro", "✅ Confirmar pedido", "🗑️ Quitar producto"
+    ]);
     return true;
   } catch (e: any) {
     console.error("[WhatsApp Buttons] Error enviando botones de carrito:", e.message);

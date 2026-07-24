@@ -2210,7 +2210,8 @@ function ReportsTab({
                         text: bText,
                         timestamp: msg.respondedAt || msg.timestamp || msg.createdAt,
                         whatsappStatus: msg.whatsappStatus,
-                        manualAgent: msg.manualAgent || (msg.message === '[Asesor Humano]' ? 'Asesor Humano' : undefined)
+                        manualAgent: msg.manualAgent || (msg.message === '[Asesor Humano]' ? 'Asesor Humano' : undefined),
+                        buttons: msg.buttons || undefined
                       });
                     }
                   }
@@ -2278,6 +2279,25 @@ function ReportsTab({
                             </div>
                             <span>{b.text.split(" [Media:")[0]}</span>
                             {renderMedia(b.text)}
+
+                            {/* 🔘 Botones interactivos, tal cual los ve el cliente en WhatsApp */}
+                            {b.buttons && b.buttons.length > 0 && (
+                              <div className="mt-3 pt-2 border-t border-white/10 flex flex-col gap-1.5">
+                                {b.buttons.map((label: string, bi: number) => (
+                                  <button
+                                    key={bi}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      alert(`Este botón fue enviado al cliente: "${label}"\n\nEs una réplica visual de lo que ve en su WhatsApp.`);
+                                    }}
+                                    className="w-full text-center text-[12px] font-semibold text-blue-400 bg-black/30 hover:bg-black/50 rounded-lg py-2 px-3 transition-colors not-italic"
+                                  >
+                                    {label}
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
                           <div className="flex flex-col items-end gap-1 mt-2">
                             <div className="flex items-center justify-end gap-2">
