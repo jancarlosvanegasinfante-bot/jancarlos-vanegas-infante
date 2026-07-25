@@ -2530,7 +2530,7 @@ async function ensureTrendOfferTemplate(): Promise<string | null> {
   }
 }
 
-async function sendTrendOfferButtons(to: string, from: string, productName: string, pitch: string, imageUrl: string): Promise<boolean> {
+async function sendTrendOfferButtons(to: string, from: string, productName: string, pitch: string, imageUrl: string, price?: number): Promise<boolean> {
   if (!twilioClient) return false;
   const contentSid = await ensureTrendOfferTemplate();
   if (!contentSid) return false;
@@ -2546,6 +2546,18 @@ async function sendTrendOfferButtons(to: string, from: string, productName: stri
         "3": imageUrl || "https://via.placeholder.com/600"
       })
     });
+
+    // 🎯 Guardamos EXACTAMENTE qué producto y precio se ofreció, para que si
+    // el cliente toca "Sí, la quiero", el servidor sepa con certeza a qué se
+    // refiere (sin depender de que la IA lo adivine del historial).
+    if (price) {
+      const cleanPhone = to.replace("whatsapp:", "").trim();
+      const customerProfileId = `default_${cleanPhone}`;
+      await setDoc(doc(db, "customers", customerProfileId), {
+        pendingManualOffer: { producto: productName, valor: Number(price), cantidad: 1, offeredAt: new Date().toISOString() }
+      }, { merge: true });
+    }
+
     return true;
   } catch (e: any) {
     console.error("[WhatsApp Buttons] Error enviando oferta de tendencia:", e.message);
@@ -3382,6 +3394,24 @@ async function sendTrendingProducts(to: string, from: string, assignedStoreId: s
     }
 
     await sendWhatsApp(to, responseText, undefined, undefined, from);
+
+    // 🛒 REDUCIR FRICCIÓN: en vez de que el único camino sea salir a la
+    // página web, mandamos el producto #1 más destacado como tarjeta de
+    // compra instantánea (imagen + botón "Sí, la quiero 🛒") directo en el
+    // chat. Solo en la primera página para no repetirla en "ver más".
+    if (offset === 0 && page.length > 0) {
+      const featured = page[0];
+      const featuredImg = featured.imageUrl && featured.imageUrl.startsWith("/")
+        ? `${baseUrl}${featured.imageUrl}`
+        : (featured.imageUrl || "https://via.placeholder.com/600");
+      await sendTrendOfferButtons(
+        to, from,
+        featured.name,
+        `🔥 ¡Nuestro producto más pedido! $${Number(featured.price || 0).toLocaleString("es-CO")} COP — Envío gratis contraentrega. Cómpralo aquí mismo, sin salir de WhatsApp 👇`,
+        featuredImg,
+        featured.price
+      );
+    }
 
     await sendLandingPageButton(to, from, landingUrl);
 
@@ -7130,16 +7160,45 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
             });
           }
         } else if (buttonPayload === TREND_YES_ID) {
-          const trendMsg = "¡Genial! 🎉 Dame un momento para confirmarte el pedido. ¿Me confirmas tu nombre completo, dirección y ciudad para despacharlo hoy mismo?";
-          await setDoc(doc(db, "customers", customerProfileId), {
-            etapa: "interesado",
-            checkoutStep: "recolectando_datos"
-          }, { merge: true });
-          await sendWhatsApp(from, trendMsg, undefined, activityRefId, to);
+          const pendingTrendOffer = customerData?.pendingManualOffer;
+          if (pendingTrendOffer && pendingTrendOffer.producto && pendingTrendOffer.valor) {
+            // Camino determinístico: ya sabemos exactamente qué producto y
+            // precio se ofreció, así que vamos directo a pedir los datos de
+            // envío con el resumen correcto, sin ambigüedad.
+            const custDataForOffer = customerData || {};
+            await sendCheckoutSummaryAndButtons(
+              from,
+              to,
+              customerProfileId,
+              {
+                producto: pendingTrendOffer.producto,
+                cantidad: pendingTrendOffer.cantidad || 1,
+                nombre: custDataForOffer?.name || custDataForOffer?.nombre || "",
+                telefono: from,
+                ciudad: custDataForOffer?.city || custDataForOffer?.ciudad || "",
+                direccion: custDataForOffer?.address || custDataForOffer?.direccion || "",
+                referencia: custDataForOffer?.addressIndicator || "N/A",
+                valor: Number(pendingTrendOffer.valor),
+                notas: "Compra directa desde tarjeta de producto en tendencia (sin salir de WhatsApp)."
+              },
+              undefined,
+              "default"
+            );
+            await setDoc(doc(db, "customers", customerProfileId), { pendingManualOffer: null }, { merge: true });
+          } else {
+            // Respaldo: si por algún motivo no quedó guardada la oferta,
+            // seguimos preguntando de forma normal (comportamiento anterior).
+            const trendMsg = "¡Genial! 🎉 Dame un momento para confirmarte el pedido. ¿Me confirmas tu nombre completo, dirección y ciudad para despacharlo hoy mismo?";
+            await setDoc(doc(db, "customers", customerProfileId), {
+              etapa: "interesado",
+              checkoutStep: "recolectando_datos"
+            }, { merge: true });
+            await sendWhatsApp(from, trendMsg, undefined, activityRefId, to);
+          }
           if (activityRefId) {
             await updateDoc(doc(db, "activities", activityRefId), {
               status: "respondido",
-              response: trendMsg,
+              response: "[Confirmación de compra directa desde tarjeta de tendencia]",
               respondedAt: serverTimestamp()
             });
           }
