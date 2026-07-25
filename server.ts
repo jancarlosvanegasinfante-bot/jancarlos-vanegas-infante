@@ -8386,6 +8386,16 @@ Mensaje: "${finalMessage}"`;
             } else {
               WELCOME_MESSAGE = `${greeting} *${firstName}*! 👋 Te doy la bienvenida a *Jan Sel Shop*! 💎\n\n¿Cómo estás? Cuéntame en qué te puedo colaborar hoy o qué estás buscando de nuestro catálogo. ¡Aquí abajo te dejo unas opciones rápidas para empezar de una! 👇`;
             }
+          } else if (customerData?.lastProductList && customerData.lastProductList.length > 0) {
+            // 👀 CASO MÁS COMÚN: la persona ya navegó el catálogo antes (vio
+            // productos) pero nunca llegó a dar su nombre ni a comprar. En
+            // vez del saludo genérico de siempre, le recordamos justo lo que
+            // vio la última vez — se siente atendida, no como si fuera la
+            // primera vez que habla con nosotros.
+            const lastSeenProduct = customerData.lastProductList[0];
+            if (lastSeenProduct?.name) {
+              WELCOME_MESSAGE = `${greeting} de nuevo! 👋 Qué bueno verte otra vez por *Jan Sel Shop* 💎\n\nLa última vez estabas mirando *${lastSeenProduct.name}* — ¿seguimos con eso, o buscas algo más hoy? Aquí abajo te dejo opciones rápidas 👇`;
+            }
           }
         } catch (e) {
           console.error("[Greeting Interceptor] Error buscando historial para saludo personalizado:", e);
