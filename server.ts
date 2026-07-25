@@ -160,7 +160,7 @@ async function preloadSupabaseData() {
     console.log("[Supabase Server] Not connected, skipping prefetch.");
     return;
   }
-  const collections = ["stores", "products", "orders", "activities", "customers", "conversations", "config", "followups", "processed_messages"];
+  const collections = ["stores", "products", "orders", "activities", "customers", "conversations", "config", "followups", "processed_messages", "demand_requests"];
   console.log(`[Supabase Prefetch] Starting prefetch on startup for: ${collections.join(", ")}`);
   for (const col of collections) {
     try {
@@ -2124,6 +2124,21 @@ Asegúrate de que la propiedad "mensaje" contenga tu respuesta real dirigida al 
       // la IA cuando el asesor responda manualmente por primera vez (ver
       // /api/admin/send-message, que ya hace setCustomerAiPauseState).
       await setDoc(doc(db, "customers", customerProfileId), { etapa: "asesoria_solicitada" }, { merge: true });
+
+      // 📊 Registro aparte y queryable para el reporte semanal de demanda:
+      // qué productos pide la gente que NO tenemos en catálogo. Esto es lo
+      // que nos dice qué agregar con demanda ya comprobada.
+      try {
+        await addDoc(collection(db, "demand_requests"), {
+          customerPhone: fromPhone,
+          requestedProduct: jsonResponse.producto || data.message,
+          customerMessage: data.message,
+          storeId: assignedStoreId,
+          timestamp: serverTimestamp()
+        });
+      } catch (e: any) {
+        console.error("[Demand Report] Error registrando solicitud:", e.message);
+      }
 
       const adminMessage = `🚨 *ASESORÍA HUMANA SOLICITADA*
 Cliente: ${customerProfile?.name || fromPhone} (${fromPhone})
@@ -5458,6 +5473,48 @@ async function startServer() {
     return { sent: sentCount, totalCandidates: candidates.length };
   }
 
+  // ==============================================
+  // 📊 REPORTE DE DEMANDA (qué piden que NO tenemos)
+  // ==============================================
+  // Agrupa las solicitudes de productos fuera de catálogo (registradas cada
+  // vez que la IA escala a un asesor) para saber qué agregar al catálogo
+  // con demanda YA comprobada por clientes reales.
+  async function buildDemandReport(days: number = 7): Promise<{ total: number; grouped: { producto: string; veces: number; ejemploMensaje: string }[] }> {
+    const sinceTs = Date.now() - days * 24 * 60 * 60 * 1000;
+    const snap = await getDocs(query(collection(db, "demand_requests"), orderBy("timestamp", "desc")));
+
+    const items: any[] = [];
+    snap.forEach(d => {
+      const data = d.data();
+      const ts = data.timestamp?.toMillis?.() || 0;
+      if (ts >= sinceTs) items.push(data);
+    });
+
+    const groups: Record<string, { veces: number; ejemploMensaje: string }> = {};
+    for (const it of items) {
+      const key = String(it.requestedProduct || "Sin especificar").trim().toLowerCase();
+      if (!groups[key]) groups[key] = { veces: 0, ejemploMensaje: it.customerMessage || it.requestedProduct };
+      groups[key].veces++;
+    }
+
+    const grouped = Object.entries(groups)
+      .map(([producto, v]) => ({ producto, veces: v.veces, ejemploMensaje: v.ejemploMensaje }))
+      .sort((a, b) => b.veces - a.veces);
+
+    return { total: items.length, grouped };
+  }
+
+  app.get("/api/admin/demand-report", async (req, res) => {
+    try {
+      const days = Number(req.query.days) || 7;
+      const report = await buildDemandReport(days);
+      res.json({ success: true, periodDays: days, ...report });
+    } catch (e: any) {
+      console.error("[Demand Report] Error:", e);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.post("/api/admin/reactivation-campaign", async (req, res) => {
     try {
       const storeId = req.body?.storeId || "default";
@@ -8637,6 +8694,46 @@ Responde directamente con el número de tu opción:
       console.error("[Reactivation Campaign] Error en ejecución automática:", e.message);
     }
   }, 6 * 60 * 60 * 1000);
+
+  /**
+   * 📊 REPORTE SEMANAL DE DEMANDA AUTOMÁTICO
+   * Revisa una vez al día si ya es lunes y si no se ha mandado el reporte
+   * esta semana; si es así, le manda a Jan por WhatsApp un resumen de qué
+   * productos pidió la gente que no están en el catálogo.
+   */
+  setInterval(async () => {
+    try {
+      const cfgSnap = await getDoc(doc(db, "config", "system"));
+      const lastSent = cfgSnap.exists() ? cfgSnap.data()?.lastDemandReportSentAt || 0 : 0;
+      const daysSinceLastSent = (Date.now() - lastSent) / (1000 * 60 * 60 * 24);
+      const today = new Date();
+      const isMonday = today.getDay() === 1;
+
+      if (!isMonday || daysSinceLastSent < 6) return;
+
+      const report = await buildDemandReport(7);
+      if (report.total === 0) return;
+
+      const top = report.grouped.slice(0, 10);
+      let msg = `📊 *REPORTE SEMANAL DE DEMANDA*\n\nEsto pidieron tus clientes esta semana que NO tenemos en catálogo:\n\n`;
+      top.forEach((g, i) => {
+        msg += `${i + 1}. *${g.producto}* — ${g.veces} ${g.veces === 1 ? 'vez' : 'veces'}\n`;
+      });
+      msg += `\n💡 Considera agregar los más pedidos a tu catálogo — ya tienen demanda comprobada.`;
+
+      const admins = getAdminNumbers();
+      for (const num of admins) {
+        const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
+        await sendWhatsApp(target, msg);
+      }
+
+      await setDoc(doc(db, "config", "system"), { lastDemandReportSentAt: Date.now() }, { merge: true });
+      console.log("[Demand Report] Reporte semanal enviado.");
+    } catch (e: any) {
+      console.error("[Demand Report] Error en envío automático:", e.message);
+    }
+  }, 24 * 60 * 60 * 1000);
+
 
 
   /**
