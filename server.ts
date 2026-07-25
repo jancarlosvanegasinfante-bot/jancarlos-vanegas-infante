@@ -550,6 +550,32 @@ if (SENDGRID_API_KEY) {
   sgMail.setApiKey(SENDGRID_API_KEY);
 }
 
+// 📧 Canal de respaldo por email: si WhatsApp está teniendo problemas de
+// envío, un aviso por WhatsApp podría no llegar. El email es independiente
+// de Twilio/Meta, así que es la red de seguridad real.
+const ADMIN_ALERT_EMAIL = "jancarlosvanegasinfante@gmail.com";
+async function sendAdminAlertEmail(subject: string, body: string): Promise<void> {
+  if (!SENDGRID_API_KEY || !SENDGRID_FROM_EMAIL) {
+    console.error("[Email Alert] SendGrid no configurado (falta SENDGRID_API_KEY o SENDGRID_FROM_EMAIL), no se pudo mandar alerta por correo.");
+    return;
+  }
+  try {
+    await sgMail.send({
+      to: ADMIN_ALERT_EMAIL,
+      from: SENDGRID_FROM_EMAIL,
+      subject,
+      text: body
+    });
+    console.log(`[Email Alert] Alerta enviada a ${ADMIN_ALERT_EMAIL}: ${subject}`);
+  } catch (e: any) {
+    console.error("[Email Alert] Error enviando alerta por correo:", e.message);
+  }
+}
+
+// 🚦 Rastreo de errores de límite de Twilio recientes (últimos 60 min)
+const recentTwilioLimitErrors: number[] = [];
+let lastTwilioLimitAlertAt = 0;
+
 const twilioClient = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN) : null;
 
 // Caché en memoria de MessageSids ya procesados (protección anti-duplicados
@@ -4265,6 +4291,47 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string | string
     return msg;
   } catch (err: any) {
     console.error(`[Twilio Error] FATAL: From:${finalFrom} To:${finalTo} Error: ${err.message}`);
+
+    // 🚨 DETECCIÓN DE LÍMITES DE ENVÍO (para que no se te vaya en silencio)
+    // Códigos de Twilio relacionados con límites de mensajería/calidad de
+    // número: 63038 (límite diario de mensajes excedido), 63016/63024/63018
+    // (problemas de template/ventana de 24h), y 429 genérico de rate-limit.
+    const LIMIT_ERROR_CODES = [63038, 63016, 63024, 63018];
+    const isLimitError = LIMIT_ERROR_CODES.includes(Number(err.code)) || err.status === 429;
+    if (isLimitError) {
+      const oneHourAgo = Date.now() - 60 * 60 * 1000;
+      recentTwilioLimitErrors.push(Date.now());
+      while (recentTwilioLimitErrors.length && recentTwilioLimitErrors[0] < oneHourAgo) {
+        recentTwilioLimitErrors.shift();
+      }
+      console.error(`[Twilio Límite] ⚠️ Error de límite/calidad detectado (code=${err.code}). Van ${recentTwilioLimitErrors.length} en la última hora.`);
+
+      const nowLimitCheck = Date.now();
+      if (recentTwilioLimitErrors.length >= 5 && nowLimitCheck - lastTwilioLimitAlertAt > 30 * 60 * 1000) {
+        lastTwilioLimitAlertAt = nowLimitCheck;
+        const alertBody = `Se detectaron ${recentTwilioLimitErrors.length} errores de límite/calidad de Twilio en la última hora (código más reciente: ${err.code} - ${err.message}).
+
+Esto puede significar que WhatsApp está limitando tus envíos. Revisa tu cuenta de Twilio y el Meta Business Manager.`;
+
+        (async () => {
+          try {
+            const admins = getAdminNumbers();
+            for (const num of admins) {
+              const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
+              await twilioClient?.messages.create({
+                from: normalizePhone(TWILIO_FROM_NUMBER || "+14155238886"),
+                to: normalizePhone(target),
+                body: `🚨🚨 *ALERTA DE ENVÍO DE WHATSAPP* 🚨🚨
+
+${alertBody}`
+              }).catch(() => {});
+            }
+          } catch {}
+        })();
+
+        sendAdminAlertEmail("🚨 Alerta: Posible limite de envio en WhatsApp - Jansel Shop", alertBody).catch(() => {});
+      }
+    }
     
     // Fallback: If it failed with media, try text only
     if (finalMediaUrl) {
