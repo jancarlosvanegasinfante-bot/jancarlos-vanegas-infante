@@ -3491,7 +3491,7 @@ async function sendCategoryFeaturedProducts(to: string, from: string, category: 
 async function ensureProductListTemplate(categoryKey: string, items: any[], hasMore: boolean = false): Promise<string | null> {
   if (!twilioClient) return null;
   try {
-    const hashSource = items.map((p: any) => `${p.name}|${p.price}`).join(";") + `|hasMore=${hasMore}`;
+    const hashSource = items.map((p: any) => `${p.name}|${p.price}`).join(";") + `|hasMore=${hasMore}|v2`;
     const hash = crypto.createHash("md5").update(hashSource).digest("hex").slice(0, 12);
     const cfgKey = `productListSid_${categoryKey}`;
     const cfgHashKey = `productListHash_${categoryKey}`;
@@ -3526,12 +3526,12 @@ async function ensureProductListTemplate(categoryKey: string, items: any[], hasM
       variables: {},
       types: {
         "twilio/list-picker": {
-          body: "Toca *Ver productos* 👇 y elige el que te interesa. Después podrás agregar más o confirmar tu pedido.",
+          body: "👀 *¿Cuál de estos te gustó más?*\n\nToca *Ver productos* 👇, o simplemente dime el nombre o número aquí mismo y te lo aparto de una vez antes de que se agote. 🙌",
           button: "Ver productos 📦",
           items: listItems
         },
         "twilio/text": {
-          body: `Escríbeme el número del producto que te interesa:\n\n${textFallback}`
+          body: `👀 ¿Cuál de estos te gustó más? Escríbeme el número y te lo aparto de una:\n\n${textFallback}`
         }
       }
     });
@@ -3577,7 +3577,7 @@ async function sendProductListPicker(to: string, from: string, products: any[], 
       to,
       "default",
       from,
-      "Toca *Ver productos* 👇 y elige el que te interesa. Después podrás agregar más o confirmar tu pedido.",
+      "👀 ¿Cuál de estos te gustó más? Toca Ver productos o dime el nombre y te lo aparto de una.",
       buttonLabels
     );
 
