@@ -5289,6 +5289,14 @@ async function startServer() {
       const botNumber = pageId ? (pageId.startsWith("whatsapp:") ? pageId : `whatsapp:${pageId}`) : (TWILIO_FROM_NUMBER || "whatsapp:+14155238886");
       const assignedStoreId = await determineStoreId(cleanPhone, message || "");
 
+      // 🛡️ Nunca dejar que el bot/asesor se mande un mensaje a sí mismo
+      // (protección rescatada de una ruta duplicada que existía antes).
+      if (targetPlatform === "whatsapp" && formattedPhone === (botNumber.startsWith("whatsapp:") ? botNumber : `whatsapp:${botNumber}`)) {
+        console.warn("[Admin Send Message] Intento de enviar mensaje al propio número del bot. Bloqueado.");
+        return res.status(400).json({ success: false, error: "No se puede enviar un mensaje al mismo número del bot." });
+      }
+
+
       // 1. Auto-pause AI for this customer when human manually sends a message
       await setCustomerAiPauseState(cleanPhone, assignedStoreId, true);
 
@@ -5869,7 +5877,7 @@ async function startServer() {
           type: eventName === "AddToCart" ? "add_to_cart" : eventName === "ViewContent" ? "page_view" : "funnel_event",
           customerName: customerPhone ? `Cliente ${customerPhone}` : "Visitante Web",
           message: eventName === "AddToCart" ? `🛒 Producto añadido al carrito: ${contentName || 'Producto'}` : eventName === "ViewContent" ? `👀 Visita en tienda web: ${contentName || 'Página Principal'}` : `⚡ Inicio de Checkout: ${contentName || 'Carrito'}`,
-          timestamp: Date.now(),
+          timestamp: serverTimestamp(),
           storeId: targetStoreId,
           contentName: contentName || "",
           value: value || 0
@@ -8626,79 +8634,6 @@ Responde directamente con el número de tu opción:
     }
   });
 
-  app.post("/api/admin/send-message", async (req, res) => {
-    detectCurrentUrl(req);
-    const { to, message, mediaUrl, from: requestedFrom, platform, pageId } = req.body;
-
-    if (!to || (!message && !mediaUrl)) {
-      console.warn("[Admin Send] Validation failed");
-      return res.status(400).json({ success: false, error: "Missing data" });
-    }
-
-    try {
-      const isMeta = platform === 'instagram' || platform === 'messenger';
-      
-      const cleanTo = (!isMeta && to.startsWith("whatsapp:")) ? to : (!isMeta ? `whatsapp:${to}` : to);
-      const customerPhone = cleanTo.replace("whatsapp:", "").trim();
-      
-      // We set from to the page id or twilio number based on platform
-      const finalFrom = isMeta ? (pageId || "meta-page") : (requestedFrom || TWILIO_FROM_NUMBER || "whatsapp:+14155238886");
-
-      console.log(`[Admin] Sending FROM ${finalFrom} TO ${to} (Platform: ${platform || 'whatsapp'}).`);
-      
-      // CRITICAL: Ensure Jan never talks to himself (only for WA)
-      if (!isMeta && cleanTo === (finalFrom.startsWith("whatsapp:") ? finalFrom : `whatsapp:${finalFrom}`)) {
-        console.warn("[Admin] Bot attempted to send message to itself. Blocked.");
-        return res.status(400).json({ success: false, error: "Cannot send to self" });
-      }
-
-      // Log activity
-      const activityRef = await addDoc(collection(db, "activities"), {
-        from: finalFrom, 
-        to: cleanTo, 
-        recipient: cleanTo,
-        message: (message || "") + (mediaUrl && !message?.includes(mediaUrl) ? `${message ? '\n\n' : ''}[Media: ${mediaUrl}]` : (!message ? "[Media enviado]" : "")),
-        status: "respondido",
-        mediaUrl: mediaUrl || null,
-        platform: platform || 'whatsapp',
-        whatsappStatus: isMeta ? "sent" : "sending",
-        senderType: 'agent',
-        manualAgent: "Asesor Humano",
-        timestamp: serverTimestamp(),
-        customerPhone: customerPhone
-      });
-
-      try {
-        if (isMeta) {
-          const metaRes = await sendMetaMessage(to, message || "", platform, pageId);
-          res.json({ success: true, activityId: activityRef.id, metaRes });
-        } else {
-          // Fallback to whatsapp
-          if (!twilioClient) throw new Error("WhatsApp no configurado. Faltan claves.");
-          const twilioRes = await sendWhatsApp(to, message || "", mediaUrl, activityRef.id, requestedFrom);
-          res.json({ success: true, SID: twilioRes?.sid, activityId: activityRef.id });
-        }
-      } catch (sendErr: any) {
-        console.error("[Send] Failed:", sendErr.message);
-        await updateDoc(activityRef, { 
-          status: "error", 
-          whatsappStatus: "failed", 
-          errorMessage: sendErr.message 
-        });
-        throw sendErr;
-      }
-    } catch (err: any) {
-      const isLimitError = err.message.includes("limit") || err.message.includes("50");
-      res.status(isLimitError ? 429 : 500).json({ 
-        success: false, 
-        error: err.message,
-        limitReached: isLimitError
-      });
-    }
-  });
-
-  // App API
-  app.get("/api/health", (req, res) => res.json({ status: "ok" }));
 
   // Media Serving Endpoint
   app.get("/api/media/:id", (req, res) => {
