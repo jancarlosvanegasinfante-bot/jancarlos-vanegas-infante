@@ -1621,7 +1621,16 @@ async function processInferenceOnServer(activityId: string, data: any) {
     filteredProductsForPrompt = Array.from(combinedSet.values());
     
     const compactProductsString = filteredProductsForPrompt.map(p => {
-      const desc = p.description ? (p.description.length > 80 ? p.description.substring(0, 80) + "..." : p.description) : "";
+      // 🔧 FIX: antes la descripción SIEMPRE se cortaba a 80 caracteres, así
+      // que cuando el cliente preguntaba "más características" sobre un
+      // producto puntual, la IA no tenía info real para responder y
+      // terminaba repitiendo un relleno genérico. Ahora, para el producto
+      // específico que coincide con lo que el cliente está preguntando (o ya
+      // tiene en el carrito), le damos la descripción COMPLETA.
+      const isRelevantProduct = matchedProducts.some(mp => mp.id === p.id) || topProducts.some(tp => tp.id === p.id);
+      const desc = p.description
+        ? (isRelevantProduct || p.description.length <= 80 ? p.description : p.description.substring(0, 80) + "...")
+        : "";
       const isImageMatch = imageMatchedProducts.some(imp => imp.id === p.id);
       const isUpsell = !isImageMatch && upsellProducts.some(up => up.id === p.id) && !matchedProducts.some(mp => mp.id === p.id) && !topProducts.some(tp => tp.id === p.id);
       return `- ${p.name} ($${p.price}) [id: ${p.id}]${p.category ? ` [Cat: ${p.category}]` : ""}${desc ? ` - ${desc}` : ""}${isImageMatch ? " ⭐ COINCIDE CON LA FOTO QUE ENVIÓ EL CLIENTE" : ""}${isUpsell ? " 🔁 COMPLEMENTO SUGERIDO (mismo lote de despacho — bueno para ofrecer junto al producto principal)" : ""}`;
