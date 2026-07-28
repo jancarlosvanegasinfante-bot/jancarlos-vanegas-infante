@@ -1776,6 +1776,14 @@ function ReportsTab({
       const botNumbers = ['14155238886', '15072233213'];
       if (botNumbers.some(n => userId.includes(n))) return;
 
+      // 🔧 FIX: antes se mostraba CUALQUIER registro de cliente, incluso
+      // registros huérfanos/vacíos sin ninguna interacción real, lo que
+      // llenaba la lista de tarjetas confusas tipo "(Sin mensajes
+      // recientes)" que parecían errores. Ahora solo se muestran clientes
+      // con evidencia real de haber interactuado alguna vez.
+      const hasRealInteraction = !!(c.lastInteractionAt || c.createdAt || (c.lastProductList && c.lastProductList.length > 0));
+      if (!hasRealInteraction) return;
+
       if (!result[userId]) {
         result[userId] = {
           lastMessage: "(Sin mensajes recientes)",
@@ -2026,7 +2034,7 @@ function ReportsTab({
                       </p>
                     )}
                     <span className="text-[8px] text-neutral-600 font-mono shrink-0 ml-1">
-                      {safeFormat(conv.timestamp, 'HH:mm')}
+                      {safeFormat(conv.timestamp, 'dd/MM HH:mm')}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2 mt-1">
