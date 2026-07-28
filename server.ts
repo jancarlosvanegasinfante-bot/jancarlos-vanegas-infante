@@ -5205,6 +5205,34 @@ async function startServer() {
     if (!imageUrl) {
       return res.status(400).send("Missing url parameter");
     }
+
+    // 🛡️ VALIDACIÓN DE SEGURIDAD (SSRF): sin esto, cualquiera podía usar
+    // este endpoint para que el servidor consultara direcciones internas de
+    // la red o el endpoint de metadatos de la nube (un vector clásico de
+    // robo de credenciales), o usarlo como un "open redirect" de phishing.
+    let parsedUrl: URL;
+    try {
+      parsedUrl = new URL(imageUrl);
+    } catch {
+      return res.status(400).send("URL inválida");
+    }
+    if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+      return res.status(400).send("Protocolo no permitido");
+    }
+    const hostname = parsedUrl.hostname.toLowerCase();
+    const isBlockedHost =
+      hostname === "localhost" ||
+      hostname === "0.0.0.0" ||
+      hostname === "169.254.169.254" || // metadata de la nube (AWS/GCP/Azure)
+      /^127\./.test(hostname) ||
+      /^10\./.test(hostname) ||
+      /^192\.168\./.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+    if (isBlockedHost) {
+      console.warn(`[Image Proxy] Bloqueado intento de acceder a host interno: ${hostname}`);
+      return res.status(403).send("Host no permitido");
+    }
+
     try {
       const response = await axios.get(imageUrl, {
         responseType: "arraybuffer",
@@ -5212,7 +5240,8 @@ async function startServer() {
           "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
           "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"
         },
-        timeout: 10000 // 10s timeout
+        timeout: 10000, // 10s timeout
+        maxRedirects: 3
       });
       const contentType = response.headers["content-type"] || "image/jpeg";
       res.setHeader("Content-Type", contentType);
@@ -5220,7 +5249,9 @@ async function startServer() {
       return res.send(response.data);
     } catch (error: any) {
       console.error(`[Image Proxy Error] Failed to proxy image: ${imageUrl}. Error: ${error.message}`);
-      return res.redirect(imageUrl);
+      // Ya NO hacemos redirect a la URL arbitraria (era un open-redirect).
+      // Devolvemos un error controlado en su lugar.
+      return res.status(502).send("No se pudo cargar la imagen");
     }
   });
 
