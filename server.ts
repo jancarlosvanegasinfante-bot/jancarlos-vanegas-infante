@@ -584,6 +584,45 @@ const processedMessageSids = new Set<string>();
 
 // Global State
 const mediaCache = new Map<string, { data: Buffer, mimeType: string }>();
+
+// 💾 PERSISTENCIA DE MEDIA (fix de imágenes que no llegaban)
+// Antes, los archivos subidos desde el dashboard solo vivían en memoria
+// (mediaCache). Si Railway reiniciaba/redesplegaba el servidor justo después
+// de subir una imagen (algo común, pasa en cada deploy), Twilio intentaba
+// descargar la imagen y se encontraba con que ya no existía — el mensaje
+// fallaba con "media urls must be specified". Ahora también se guarda en
+// Supabase, que sí sobrevive reinicios. La memoria se sigue usando como
+// acceso rápido; si no está ahí (por un reinicio), se busca en Supabase.
+async function saveMediaPersistent(id: string, data: Buffer, mimeType: string): Promise<void> {
+  mediaCache.set(id, { data, mimeType });
+  try {
+    await setDoc(doc(db, "media_cache", id), {
+      dataBase64: data.toString("base64"),
+      mimeType
+    });
+  } catch (e: any) {
+    console.error("[Media Persist] Error guardando media en Supabase:", e.message);
+  }
+}
+
+async function getMediaPersistent(id: string): Promise<{ data: Buffer, mimeType: string } | null> {
+  const cached = mediaCache.get(id);
+  if (cached) return cached;
+  try {
+    const snap = await getDoc(doc(db, "media_cache", id));
+    if (snap.exists()) {
+      const d = snap.data();
+      const buf = Buffer.from(d.dataBase64, "base64");
+      const result = { data: buf, mimeType: d.mimeType };
+      mediaCache.set(id, result); // recalentar la caché rápida
+      return result;
+    }
+  } catch (e: any) {
+    console.error("[Media Persist] Error leyendo media de Supabase:", e.message);
+  }
+  return null;
+}
+
 const userRateLimitCache = new Map<string, { lastTime: number, msgCount: number }>();
 let currentAppUrl = process.env.APP_URL || "";
 
@@ -2140,12 +2179,52 @@ Asegúrate de que la propiedad "mensaje" contenga tu respuesta real dirigida al 
       "no lo tenemos", "no lo tengo", "no está disponible", "no tenemos ese",
       "no manejamos ese", "no contamos con", "no sé si", "no estoy seguro",
       "no tengo información", "voy a consultar", "permíteme consultar",
-      "un asesor te", "no puedo confirmar", "no encuentro ese producto"
+      "un asesor te", "no puedo confirmar", "no encuentro ese producto",
+      "estoy aquí para ayudarte con tus necesidades", "qué te gustaría saber o comprar"
     ];
     const mensajeLower = String(jsonResponse.mensaje || "").toLowerCase();
     if (jsonResponse.accion === "respuesta" && uncertaintyPhrases.some(p => mensajeLower.includes(p))) {
       console.log("[Server AI] 🛟 Red de seguridad activada: la IA mostró incertidumbre sin marcar notificar_admin. Forzando escalamiento.");
       jsonResponse.accion = "notificar_admin";
+    }
+
+    // 🔁 DETECTOR DE RESPUESTA REPETIDA (loop): a veces la IA queda "trabada"
+    // repitiendo casi textualmente su mensaje anterior cuando el cliente
+    // pregunta algo muy genérico/amplio que no matchea productos concretos
+    // (ej. "repuestos o herramientas"). En vez de dejar al cliente colgado
+    // con la misma frase de relleno una y otra vez, si detectamos que la
+    // respuesta es casi igual a la última que le mandamos a este mismo
+    // cliente, forzamos escalación a humano.
+    if (jsonResponse.accion === "respuesta" && jsonResponse.mensaje) {
+      try {
+        const lastBotActQ = query(
+          collection(db, "activities"),
+          where("customerPhone", "==", fromPhone),
+          where("senderType", "==", "bot"),
+          orderBy("timestamp", "desc"),
+          limit(1)
+        );
+        const lastBotActSnap = await getDocs(lastBotActQ);
+        if (!lastBotActSnap.empty) {
+          const lastResponseText = String(lastBotActSnap.docs[0].data()?.response || lastBotActSnap.docs[0].data()?.message || "").toLowerCase().trim();
+          const currentText = mensajeLower.trim();
+          if (lastResponseText.length > 20 && currentText.length > 20) {
+            const shortestLen = Math.min(lastResponseText.length, currentText.length);
+            const matchingPrefixLen = (() => {
+              let i = 0;
+              while (i < shortestLen && lastResponseText[i] === currentText[i]) i++;
+              return i;
+            })();
+            const similarity = matchingPrefixLen / shortestLen;
+            if (similarity > 0.85) {
+              console.log("[Server AI] 🔁 Respuesta casi idéntica a la anterior detectada (posible loop). Forzando escalamiento.");
+              jsonResponse.accion = "notificar_admin";
+            }
+          }
+        }
+      } catch (e: any) {
+        console.error("[Server AI] Error verificando respuesta repetida:", e.message);
+      }
     }
 
     if (jsonResponse.accion === "notificar_admin" || jsonResponse.accion === "solicitar_asesor") {
@@ -2183,16 +2262,7 @@ Jan (IA) respondió: "${jsonResponse.mensaje}"
 
 ℹ️ La IA sigue conversando con el cliente para aclarar detalles (sin dar precio). Entra cuando puedas a cerrar la venta.`;
       
-      const adminNumbers = getAdminNumbers();
-      for (const num of adminNumbers) {
-          try {
-            const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
-            await sendWhatsApp(target, adminMessage);
-          } catch (e) {
-            console.error("[Server AI] Error notificando asesoría:", e);
-          }
-      }
-
+      await sendAdminAlert(adminMessage);
       // ⏰ RECORDATORIO SI TARDAS EN ENTRAR: si en 20 minutos no has
       // respondido manualmente (no hay ninguna actividad con manualAgent
       // registrada después de este momento), te mandamos un segundo aviso
@@ -2215,11 +2285,7 @@ Jan (IA) respondió: "${jsonResponse.mensaje}"
           if (alreadyHandled) return;
 
           const reminderMsg = `🚨🚨 *RECORDATORIO:* Sigues sin responder a ${customerProfile?.name || fromPhone} sobre "${jsonResponse.producto || 'su duda'}" — ya pasaron 20 minutos. ¡No dejes que se enfríe! 🔥`;
-          const admins = getAdminNumbers();
-          for (const num of admins) {
-            const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
-            await sendWhatsApp(target, reminderMsg);
-          }
+          await sendAdminAlert(reminderMsg);
         } catch (e: any) {
           console.error("[Reminder] Error enviando recordatorio de asesoría pendiente:", e.message);
         }
@@ -2341,7 +2407,65 @@ async function ensureDispatchConfirmTemplate(): Promise<string | null> {
   }
 }
 
-async function sendDispatchConfirmationButtons(to: string, from: string, orderId: string, productName: string): Promise<boolean> {
+// ==============================================
+// 🚨 ALERTA A ADMIN CONFIABLE (bypass de ventana de 24h de WhatsApp)
+// ==============================================
+// Antes, las alertas al dueño (escalación, recordatorios, límites, etc.) se
+// mandaban como texto libre con sendWhatsApp(). El problema: si el dueño no
+// le ha escrito a su propio número de bot en las últimas 24 horas, WhatsApp
+// BLOQUEA en silencio los mensajes de texto libre — Twilio dice "enviado"
+// pero nunca llega. Usamos un template APROBADO (que sí puede saltarse esa
+// ventana) para garantizar que las alertas críticas siempre lleguen.
+async function ensureAdminAlertTemplate(): Promise<string | null> {
+  if (!twilioClient) return null;
+  try {
+    const cfgSnap = await getDoc(doc(db, "config", "system"));
+    const d = cfgSnap.exists() ? cfgSnap.data() : {};
+    if (d?.adminAlertTemplateSid) return d.adminAlertTemplateSid;
+
+    const content = await (twilioClient as any).content.v1.contents.create({
+      friendlyName: `jan_admin_alert_${Date.now()}`,
+      language: "es",
+      variables: { "1": "Alerta del sistema" },
+      types: {
+        "twilio/text": {
+          body: "{{1}}"
+        }
+      }
+    });
+
+    await setDoc(doc(db, "config", "system"), { adminAlertTemplateSid: content.sid }, { merge: true });
+    return content.sid;
+  } catch (e: any) {
+    console.error("[Admin Alert] Error creando template de alerta:", e.message);
+    return null;
+  }
+}
+
+async function sendAdminAlert(message: string): Promise<void> {
+  const admins = getAdminNumbers();
+  for (const num of admins) {
+    const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
+    try {
+      const contentSid = await ensureAdminAlertTemplate();
+      if (contentSid && twilioClient) {
+        await (twilioClient as any).messages.create({
+          from: normalizePhone(TWILIO_FROM_NUMBER || "+14155238886"),
+          to: normalizePhone(target),
+          contentSid,
+          contentVariables: JSON.stringify({ "1": message.slice(0, 1024) })
+        });
+      } else {
+        // Respaldo si el template falla por algún motivo
+        await sendWhatsApp(target, message);
+      }
+    } catch (e: any) {
+      console.error(`[Admin Alert] Error enviando alerta a ${target}:`, e.message);
+    }
+  }
+}
+
+
   if (!twilioClient) return false;
   try {
     const contentSid = await ensureDispatchConfirmTemplate();
@@ -4325,15 +4449,24 @@ Esto puede significar que WhatsApp está limitando tus envíos. Revisa tu cuenta
         (async () => {
           try {
             const admins = getAdminNumbers();
+            const limitAlertContentSid = await ensureAdminAlertTemplate();
+            const fullAlertText = `🚨🚨 *ALERTA DE ENVÍO DE WHATSAPP* 🚨🚨\n\n${alertBody}`;
             for (const num of admins) {
               const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
-              await twilioClient?.messages.create({
-                from: normalizePhone(TWILIO_FROM_NUMBER || "+14155238886"),
-                to: normalizePhone(target),
-                body: `🚨🚨 *ALERTA DE ENVÍO DE WHATSAPP* 🚨🚨
-
-${alertBody}`
-              }).catch(() => {});
+              if (limitAlertContentSid) {
+                await twilioClient?.messages.create({
+                  from: normalizePhone(TWILIO_FROM_NUMBER || "+14155238886"),
+                  to: normalizePhone(target),
+                  contentSid: limitAlertContentSid,
+                  contentVariables: JSON.stringify({ "1": fullAlertText.slice(0, 1024) })
+                }).catch(() => {});
+              } else {
+                await twilioClient?.messages.create({
+                  from: normalizePhone(TWILIO_FROM_NUMBER || "+14155238886"),
+                  to: normalizePhone(target),
+                  body: fullAlertText
+                }).catch(() => {});
+              }
             }
           } catch {}
         })();
@@ -5024,17 +5157,7 @@ Jan acaba de cerrar un negocio de una vez.
 _El inventario ya fue descontado automáticamente._`;
   }
 
-  console.log(`[Admin Notify] Notifying ${adminNumbers.length} admins...`);
-  
-  for (const num of adminNumbers) {
-    try {
-      // Ensure 'whatsapp:' prefix
-      const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
-      await sendWhatsApp(target, message);
-    } catch (e: any) {
-      console.error(`[Admin Notify] Error notifying ${num}:`, e.message);
-    }
-  }
+  await sendAdminAlert(message);
 }
 
 async function startServer() {
@@ -5411,10 +5534,20 @@ async function startServer() {
     }
 
     const results = [];
+    const testContentSid = await ensureAdminAlertTemplate();
     for (const num of adminNumbers) {
       try {
         const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
-        await sendWhatsApp(target, message);
+        if (testContentSid && twilioClient) {
+          await (twilioClient as any).messages.create({
+            from: normalizePhone(TWILIO_FROM_NUMBER || "+14155238886"),
+            to: normalizePhone(target),
+            contentSid: testContentSid,
+            contentVariables: JSON.stringify({ "1": message.slice(0, 1024) })
+          });
+        } else {
+          await sendWhatsApp(target, message);
+        }
         results.push({ phone: num, success: true });
       } catch (e: any) {
         results.push({ phone: num, success: false, error: e.message });
@@ -5736,7 +5869,7 @@ async function startServer() {
   app.post("/api/admin/upload", express.raw({ type: "*/*", limit: "50mb" }), async (req, res) => {
     const mimeType = req.headers["content-type"] || "application/octet-stream";
     const id = Math.random().toString(36).substring(7);
-    mediaCache.set(id, { data: req.body, mimeType });
+    await saveMediaPersistent(id, req.body, String(mimeType));
     
     let ext = "";
     if (mimeType.includes("image/jpeg")) ext = ".jpg";
@@ -7043,10 +7176,7 @@ _El pedido ya se guardó y está listo en tu tablero._`;
           if (mediaItem) {
             mediaItems.push(mediaItem);
             const mediaId = Math.random().toString(36).substring(7) + Date.now().toString(36);
-            mediaCache.set(mediaId, {
-              data: Buffer.from(mediaItem.data, 'base64'),
-              mimeType: mediaItem.mimeType
-            });
+            await saveMediaPersistent(mediaId, Buffer.from(mediaItem.data, 'base64'), mediaItem.mimeType);
             let extension = "";
             if (mediaItem.mimeType.includes("image/jpeg")) extension = ".jpg";
             else if (mediaItem.mimeType.includes("image/png")) extension = ".png";
@@ -7293,18 +7423,7 @@ _El pedido ya se guardó y está listo en tu tablero._`;
           const adminMessage = `🚨 *ASESORÍA HUMANA SOLICITADA*
 Cliente: ${customerData?.name || profileNameFromTwilio || cleanFrom} (${cleanFrom})
 Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
-          
-          const adminNumbersRaw = process.env.ADMIN_WHATSAPP_NUMBERS || "";
-          const adminNumbers = adminNumbersRaw.split(",").filter(n => n.trim().length > 0);
-          for (const num of adminNumbers) {
-            try {
-              const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
-              await sendWhatsApp(target, adminMessage);
-            } catch (e) {
-              console.error("[Server AI] Error notificando asesoría de botón:", e);
-            }
-          }
-
+          await sendAdminAlert(adminMessage);
           if (activityRefId) {
             await updateDoc(doc(db, "activities", activityRefId), {
               status: "respondido",
@@ -8490,14 +8609,7 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         const adminMessage = `🚨 *ASESORÍA HUMANA SOLICITADA*
 Cliente: ${customerData?.name || cleanFrom} (${cleanFrom})
 Mensaje: "${finalMessage}"`;
-        const adminNumbersRaw = process.env.ADMIN_WHATSAPP_NUMBERS || "";
-        const adminNumbers = adminNumbersRaw.split(",").filter(n => n.trim().length > 0);
-        for (const num of adminNumbers) {
-          try {
-            const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
-            await sendWhatsApp(target, adminMessage);
-          } catch (e) {}
-        }
+        await sendAdminAlert(adminMessage);
 
         await updateDoc(doc(db, "activities", activityRef.id), {
           status: "respondido",
@@ -8636,15 +8748,12 @@ Responde directamente con el número de tu opción:
     }
   });
 
-  app.post("/api/admin/cache-media", express.json({ limit: '50mb' }), (req, res) => {
+  app.post("/api/admin/cache-media", express.json({ limit: '50mb' }), async (req, res) => {
     detectCurrentUrl(req);
     const { data, mimeType } = req.body;
     if (!data || !mimeType) return res.status(400).json({ error: "Missing data" });
     const id = Math.random().toString(36).substring(7);
-    mediaCache.set(id, {
-      data: Buffer.from(data, 'base64'),
-      mimeType: mimeType
-    });
+    await saveMediaPersistent(id, Buffer.from(data, 'base64'), mimeType);
     let baseUrl = currentAppUrl || (req.headers.origin && !req.headers.origin.includes('localhost') ? req.headers.origin : process.env.APP_URL);
     if (!baseUrl) {
       console.warn("[Media Cache] No absolute base URL found, Twilio might fail to download this media.");
@@ -8676,10 +8785,10 @@ Responde directamente con el número de tu opción:
 
 
   // Media Serving Endpoint
-  app.get("/api/media/:id", (req, res) => {
+  app.get("/api/media/:id", async (req, res) => {
     // Handle optional extensions like .mp3 or .png
     const id = req.params.id.split(".")[0];
-    const media = mediaCache.get(id);
+    const media = await getMediaPersistent(id);
     if (media) {
       res.set("Content-Type", media.mimeType);
       res.send(media.data);
@@ -8763,11 +8872,7 @@ Responde directamente con el número de tu opción:
       });
       msg += `\n💡 Considera agregar los más pedidos a tu catálogo — ya tienen demanda comprobada.`;
 
-      const admins = getAdminNumbers();
-      for (const num of admins) {
-        const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
-        await sendWhatsApp(target, msg);
-      }
+      await sendAdminAlert(msg);
 
       await setDoc(doc(db, "config", "system"), { lastDemandReportSentAt: Date.now() }, { merge: true });
       console.log("[Demand Report] Reporte semanal enviado.");
