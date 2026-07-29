@@ -2466,6 +2466,7 @@ async function sendAdminAlert(message: string): Promise<void> {
 }
 
 
+async function sendDispatchConfirmationButtons(to: string, from: string, orderId: string, productName: string): Promise<boolean> {
   if (!twilioClient) return false;
   try {
     const contentSid = await ensureDispatchConfirmTemplate();
