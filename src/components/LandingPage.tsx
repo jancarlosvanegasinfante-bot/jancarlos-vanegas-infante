@@ -406,6 +406,80 @@ export default function LandingPage() {
   const [heroViewers] = useState(Math.floor(Math.random() * 30) + 45);
   const [isWaMenuOpen, setIsWaMenuOpen] = useState(false);
 
+  // ==============================================
+  // 🎡 RULETA DE DESCUENTOS (gatillo mental estilo Temu)
+  // ==============================================
+  // Premios de MARKETING (envío gratis, % en combos, regalo sorpresa) — NO
+  // se descuentan automáticamente del precio real del producto. Es pura
+  // psicología: la persona "gana" algo y eso la empuja a comprar. El premio
+  // se reclama mencionándolo por WhatsApp, donde el asesor/bot decide cómo
+  // aplicarlo (ej. combo real, envío ya es gratis de por sí, etc.)
+  const WHEEL_PRIZES = [
+    { label: "🎁 Envío GRATIS", weight: 25, color: "#22c55e" },
+    { label: "10% OFF 2do producto", weight: 20, color: "#3b82f6" },
+    { label: "15% OFF x2 artículos", weight: 15, color: "#f59e0b" },
+    { label: "5% de descuento", weight: 20, color: "#a855f7" },
+    { label: "🎊 Combo sorpresa", weight: 12, color: "#ec4899" },
+    { label: "⭐ 20% OFF ¡Máximo premio!", weight: 8, color: "#ef4444" },
+  ];
+  const [wheelOpen, setWheelOpen] = useState(false);
+  const [wheelSpinning, setWheelSpinning] = useState(false);
+  const [wheelRotation, setWheelRotation] = useState(0);
+  const [wheelPrize, setWheelPrize] = useState<string | null>(null);
+  const [wheelAlreadyPlayed, setWheelAlreadyPlayed] = useState(false);
+
+  useEffect(() => {
+    try {
+      const played = localStorage.getItem("jan_sel_shop_wheel_played");
+      const savedPrize = localStorage.getItem("jan_sel_shop_wheel_prize");
+      if (played === "true" && savedPrize) {
+        setWheelAlreadyPlayed(true);
+        setWheelPrize(savedPrize);
+      } else {
+        // Mostrar la ruleta automáticamente a los pocos segundos de entrar
+        const timer = setTimeout(() => setWheelOpen(true), 4000);
+        return () => clearTimeout(timer);
+      }
+    } catch {}
+  }, []);
+
+  const spinWheel = () => {
+    if (wheelSpinning || wheelAlreadyPlayed) return;
+    setWheelSpinning(true);
+
+    // Selección ponderada del premio
+    const totalWeight = WHEEL_PRIZES.reduce((sum, p) => sum + p.weight, 0);
+    let rand = Math.random() * totalWeight;
+    let selectedIdx = 0;
+    for (let i = 0; i < WHEEL_PRIZES.length; i++) {
+      rand -= WHEEL_PRIZES[i].weight;
+      if (rand <= 0) { selectedIdx = i; break; }
+    }
+
+    const segmentAngle = 360 / WHEEL_PRIZES.length;
+    // Apuntamos al centro del segmento ganador, con varias vueltas completas para el efecto visual
+    const targetAngle = 360 * 6 + (360 - (selectedIdx * segmentAngle + segmentAngle / 2));
+    setWheelRotation(targetAngle);
+
+    setTimeout(() => {
+      const prize = WHEEL_PRIZES[selectedIdx].label;
+      setWheelPrize(prize);
+      setWheelSpinning(false);
+      setWheelAlreadyPlayed(true);
+      try {
+        localStorage.setItem("jan_sel_shop_wheel_played", "true");
+        localStorage.setItem("jan_sel_shop_wheel_prize", prize);
+      } catch {}
+    }, 4200);
+  };
+
+  const claimWheelPrize = () => {
+    const phone = officialBotNumber || "14155238886";
+    const msg = `¡Hola! 🎉 Gané "${wheelPrize}" en la ruleta de Jan Sel Shop, ¿me ayudas a reclamarlo?`;
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+  };
+
+
   const formRef = useRef<HTMLDivElement>(null);
 
   // Pixel IDs States
@@ -2267,6 +2341,133 @@ export default function LandingPage() {
           </motion.button>
         )}
       </AnimatePresence>
+
+      {/* ════════════════════════════════════════════
+          🎡 RULETA DE DESCUENTOS
+      ════════════════════════════════════════════ */}
+      <AnimatePresence>
+        {wheelOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.7, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.7, opacity: 0 }}
+              className="bg-neutral-900 border border-neutral-700 rounded-3xl p-6 md:p-8 max-w-sm w-full text-center relative"
+            >
+              {!wheelPrize && (
+                <button
+                  onClick={() => setWheelOpen(false)}
+                  className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
+                >
+                  <X size={20} />
+                </button>
+              )}
+
+              {!wheelPrize ? (
+                <>
+                  <h3 className="text-xl font-black text-white uppercase mb-1">🎉 ¡Gira y Gana!</h3>
+                  <p className="text-xs text-neutral-400 mb-5">Tienes 1 giro gratis — ¡todo el mundo gana algo!</p>
+
+                  <div className="relative w-64 h-64 mx-auto mb-6">
+                    <div className="absolute top-[-10px] left-1/2 -translate-x-1/2 z-10 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[20px] border-t-amber-400" />
+                    <svg
+                      viewBox="0 0 200 200"
+                      className="w-full h-full"
+                      style={{
+                        transform: `rotate(${wheelRotation}deg)`,
+                        transition: wheelSpinning ? "transform 4.2s cubic-bezier(0.17, 0.67, 0.12, 0.99)" : "none"
+                      }}
+                    >
+                      {WHEEL_PRIZES.map((prize, i) => {
+                        const angle = 360 / WHEEL_PRIZES.length;
+                        const startAngle = i * angle;
+                        const endAngle = startAngle + angle;
+                        const toRad = (deg: number) => (deg - 90) * (Math.PI / 180);
+                        const x1 = 100 + 100 * Math.cos(toRad(startAngle));
+                        const y1 = 100 + 100 * Math.sin(toRad(startAngle));
+                        const x2 = 100 + 100 * Math.cos(toRad(endAngle));
+                        const y2 = 100 + 100 * Math.sin(toRad(endAngle));
+                        const midAngle = startAngle + angle / 2;
+                        const textX = 100 + 62 * Math.cos(toRad(midAngle));
+                        const textY = 100 + 62 * Math.sin(toRad(midAngle));
+                        return (
+                          <g key={i}>
+                            <path
+                              d={`M100,100 L${x1},${y1} A100,100 0 0,1 ${x2},${y2} Z`}
+                              fill={prize.color}
+                              stroke="#171717"
+                              strokeWidth="2"
+                            />
+                            <text
+                              x={textX}
+                              y={textY}
+                              fill="white"
+                              fontSize="8.5"
+                              fontWeight="900"
+                              textAnchor="middle"
+                              transform={`rotate(${midAngle}, ${textX}, ${textY})`}
+                            >
+                              {prize.label.length > 16 ? prize.label.slice(0, 15) + "…" : prize.label}
+                            </text>
+                          </g>
+                        );
+                      })}
+                      <circle cx="100" cy="100" r="14" fill="#171717" stroke="#f59e0b" strokeWidth="2" />
+                    </svg>
+                  </div>
+
+                  <button
+                    onClick={spinWheel}
+                    disabled={wheelSpinning}
+                    className="w-full btn-cta-primary text-black font-black uppercase tracking-wide py-3.5 rounded-xl text-sm disabled:opacity-60 transition-transform hover:scale-[1.02] active:scale-95"
+                  >
+                    {wheelSpinning ? "Girando… 🎡" : "¡Girar Ahora! 🎯"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="text-5xl mb-3">🎉</div>
+                  <h3 className="text-lg font-black text-white uppercase mb-2">¡Felicidades!</h3>
+                  <p className="text-sm text-neutral-300 mb-1">Ganaste:</p>
+                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl py-3 px-4 mb-5">
+                    <span className="text-lg font-black text-amber-400">{wheelPrize}</span>
+                  </div>
+                  <button
+                    onClick={claimWheelPrize}
+                    className="w-full btn-cta-primary text-black font-black uppercase tracking-wide py-3.5 rounded-xl text-sm transition-transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 mb-2"
+                  >
+                    <MessageCircle size={16} /> Reclamar por WhatsApp
+                  </button>
+                  <button
+                    onClick={() => setWheelOpen(false)}
+                    className="w-full text-neutral-500 text-xs uppercase tracking-wide py-2 hover:text-neutral-300 transition-colors"
+                  >
+                    Seguir viendo el catálogo
+                  </button>
+                </>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Botón flotante para reabrir la ruleta si ya se cerró */}
+      {!wheelOpen && (
+        <motion.button
+          initial={{ scale: 0 }}
+          animate={{ scale: 1 }}
+          onClick={() => setWheelOpen(true)}
+          className="fixed bottom-24 left-6 z-40 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-black shadow-2xl hover:scale-110 active:scale-95 transition-transform w-14 h-14 flex items-center justify-center text-2xl"
+          title={wheelAlreadyPlayed ? "Ver mi premio" : "¡Gira y gana!"}
+        >
+          🎡
+        </motion.button>
+      )}
 
       {/* ════════════════════════════════════════════
           WHATSAPP FLOATING SUPPORT WIDGET
