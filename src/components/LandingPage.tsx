@@ -415,12 +415,12 @@ export default function LandingPage() {
   // se reclama mencionándolo por WhatsApp, donde el asesor/bot decide cómo
   // aplicarlo (ej. combo real, envío ya es gratis de por sí, etc.)
   const WHEEL_PRIZES = [
-    { label: "🎁 Envío GRATIS", weight: 25, color: "#22c55e" },
-    { label: "10% OFF 2do producto", weight: 20, color: "#3b82f6" },
-    { label: "15% OFF x2 artículos", weight: 15, color: "#f59e0b" },
-    { label: "5% de descuento", weight: 20, color: "#a855f7" },
-    { label: "🎊 Combo sorpresa", weight: 12, color: "#ec4899" },
-    { label: "⭐ 20% OFF ¡Máximo premio!", weight: 8, color: "#ef4444" },
+    { label: "🎁 Envío GRATIS", weight: 25, color: "#0f766e" },
+    { label: "10% OFF 2do producto", weight: 20, color: "#7c3aed" },
+    { label: "15% OFF x2 artículos", weight: 15, color: "#b45309" },
+    { label: "5% de descuento", weight: 20, color: "#0e7490" },
+    { label: "🎊 Combo sorpresa", weight: 12, color: "#be123c" },
+    { label: "⭐ 20% OFF ¡Máximo premio!", weight: 8, color: "#a16207" },
   ];
   const [wheelOpen, setWheelOpen] = useState(false);
   const [wheelSpinning, setWheelSpinning] = useState(false);
@@ -2360,112 +2360,141 @@ export default function LandingPage() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[100] bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+            className="fixed inset-0 z-[100] bg-black/85 backdrop-blur-md flex items-center justify-center p-4"
           >
             <motion.div
-              initial={{ scale: 0.7, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.7, opacity: 0 }}
-              className="bg-neutral-900 border border-neutral-700 rounded-3xl p-6 md:p-8 max-w-sm w-full text-center relative"
+              initial={{ scale: 0.85, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.85, opacity: 0, y: 20 }}
+              transition={{ type: "spring", damping: 22, stiffness: 300 }}
+              className="relative max-w-sm w-full rounded-[28px] p-[1.5px] bg-gradient-to-br from-amber-300 via-amber-600/40 to-amber-300 shadow-[0_0_60px_-10px_rgba(245,158,11,0.35)]"
             >
-              {!wheelPrize && (
-                <button
-                  onClick={() => setWheelOpen(false)}
-                  className="absolute top-4 right-4 text-neutral-500 hover:text-white transition-colors"
-                >
-                  <X size={20} />
-                </button>
-              )}
+              <div className="bg-gradient-to-b from-neutral-950 to-neutral-900 rounded-[26px] p-6 md:p-8 text-center relative overflow-hidden">
+                {/* Textura de fondo sutil */}
+                <div className="absolute inset-0 opacity-[0.04] pointer-events-none" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "16px 16px" }} />
 
-              {!wheelPrize ? (
-                <>
-                  <h3 className="text-xl font-black text-white uppercase mb-1">🎉 ¡Gira y Gana!</h3>
-                  <p className="text-xs text-neutral-400 mb-5">Tienes 1 giro gratis — ¡todo el mundo gana algo!</p>
-
-                  <div className="relative w-64 h-64 mx-auto mb-6">
-                    <div className="absolute top-[-10px] left-1/2 -translate-x-1/2 z-10 w-0 h-0 border-l-[12px] border-l-transparent border-r-[12px] border-r-transparent border-t-[20px] border-t-amber-400" />
-                    <svg
-                      viewBox="0 0 200 200"
-                      className="w-full h-full"
-                      style={{
-                        transform: `rotate(${wheelRotation}deg)`,
-                        transition: wheelSpinning ? "transform 4.2s cubic-bezier(0.17, 0.67, 0.12, 0.99)" : "none"
-                      }}
-                    >
-                      {WHEEL_PRIZES.map((prize, i) => {
-                        const angle = 360 / WHEEL_PRIZES.length;
-                        const startAngle = i * angle;
-                        const endAngle = startAngle + angle;
-                        const toRad = (deg: number) => (deg - 90) * (Math.PI / 180);
-                        const x1 = 100 + 100 * Math.cos(toRad(startAngle));
-                        const y1 = 100 + 100 * Math.sin(toRad(startAngle));
-                        const x2 = 100 + 100 * Math.cos(toRad(endAngle));
-                        const y2 = 100 + 100 * Math.sin(toRad(endAngle));
-                        const midAngle = startAngle + angle / 2;
-                        const textX = 100 + 62 * Math.cos(toRad(midAngle));
-                        const textY = 100 + 62 * Math.sin(toRad(midAngle));
-                        return (
-                          <g key={i}>
-                            <path
-                              d={`M100,100 L${x1},${y1} A100,100 0 0,1 ${x2},${y2} Z`}
-                              fill={prize.color}
-                              stroke="#171717"
-                              strokeWidth="2"
-                            />
-                            <text
-                              x={textX}
-                              y={textY}
-                              fill="white"
-                              fontSize="8.5"
-                              fontWeight="900"
-                              textAnchor="middle"
-                              transform={`rotate(${midAngle}, ${textX}, ${textY})`}
-                            >
-                              {prize.label.length > 16 ? prize.label.slice(0, 15) + "…" : prize.label}
-                            </text>
-                          </g>
-                        );
-                      })}
-                      <circle cx="100" cy="100" r="14" fill="#171717" stroke="#f59e0b" strokeWidth="2" />
-                    </svg>
-                  </div>
-
-                  <button
-                    onClick={spinWheel}
-                    disabled={wheelSpinning}
-                    className="w-full btn-cta-primary text-black font-black uppercase tracking-wide py-3.5 rounded-xl text-sm disabled:opacity-60 transition-transform hover:scale-[1.02] active:scale-95"
-                  >
-                    {wheelSpinning ? "Girando… 🎡" : "¡Girar Ahora! 🎯"}
-                  </button>
-                </>
-              ) : (
-                <>
-                  <div className="text-5xl mb-3">🎉</div>
-                  <h3 className="text-lg font-black text-white uppercase mb-2">¡Felicidades!</h3>
-                  <p className="text-sm text-neutral-300 mb-1">Ganaste:</p>
-                  <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl py-3 px-4 mb-5">
-                    <span className="text-lg font-black text-amber-400">{wheelPrize}</span>
-                  </div>
-                  <button
-                    onClick={claimWheelPrize}
-                    className="w-full btn-cta-primary text-black font-black uppercase tracking-wide py-3.5 rounded-xl text-sm transition-transform hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 mb-2"
-                  >
-                    <MessageCircle size={16} /> Reclamar por WhatsApp
-                  </button>
+                {!wheelPrize && (
                   <button
                     onClick={() => setWheelOpen(false)}
-                    className="w-full text-neutral-500 text-xs uppercase tracking-wide py-2 hover:text-neutral-300 transition-colors"
+                    className="absolute top-4 right-4 z-20 w-7 h-7 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-neutral-500 hover:text-white transition-colors"
                   >
-                    Seguir viendo el catálogo
+                    <X size={16} />
                   </button>
-                </>
-              )}
+                )}
+
+                {!wheelPrize ? (
+                  <div className="relative">
+                    <div className="inline-flex items-center gap-1.5 bg-amber-400/10 border border-amber-400/25 px-3 py-1 rounded-full text-amber-300 text-[9px] font-black uppercase tracking-widest mb-3">
+                      <Sparkles size={10} />
+                      Exclusivo para nuevos visitantes
+                    </div>
+                    <h3 className="text-2xl font-black text-white uppercase tracking-tight mb-1">
+                      ¡Gira y <span className="text-amber-400">Gana!</span>
+                    </h3>
+                    <p className="text-xs text-neutral-400 mb-6">Tienes <span className="text-white font-bold">1 giro gratis</span> — todo el mundo se lleva un premio 🎯</p>
+
+                    <div className="relative w-64 h-64 mx-auto mb-7">
+                      {/* Aro dorado exterior */}
+                      <div className="absolute inset-[-6px] rounded-full bg-gradient-to-br from-amber-300 via-amber-500 to-amber-700 shadow-[0_8px_30px_-8px_rgba(245,158,11,0.5)]" />
+                      <div className="absolute inset-0 rounded-full bg-neutral-950" />
+
+                      {/* Puntero */}
+                      <div className="absolute top-[-14px] left-1/2 -translate-x-1/2 z-20 drop-shadow-lg">
+                        <div className="w-0 h-0 border-l-[11px] border-l-transparent border-r-[11px] border-r-transparent border-t-[22px] border-t-amber-400" />
+                      </div>
+
+                      <svg
+                        viewBox="0 0 200 200"
+                        className="absolute inset-[6px] w-[calc(100%-12px)] h-[calc(100%-12px)] rounded-full drop-shadow-xl"
+                        style={{
+                          transform: `rotate(${wheelRotation}deg)`,
+                          transition: wheelSpinning ? "transform 4.2s cubic-bezier(0.17, 0.67, 0.12, 0.99)" : "none"
+                        }}
+                      >
+                        {WHEEL_PRIZES.map((prize, i) => {
+                          const angle = 360 / WHEEL_PRIZES.length;
+                          const startAngle = i * angle;
+                          const endAngle = startAngle + angle;
+                          const toRad = (deg: number) => (deg - 90) * (Math.PI / 180);
+                          const x1 = 100 + 100 * Math.cos(toRad(startAngle));
+                          const y1 = 100 + 100 * Math.sin(toRad(startAngle));
+                          const x2 = 100 + 100 * Math.cos(toRad(endAngle));
+                          const y2 = 100 + 100 * Math.sin(toRad(endAngle));
+                          const midAngle = startAngle + angle / 2;
+                          const textX = 100 + 62 * Math.cos(toRad(midAngle));
+                          const textY = 100 + 62 * Math.sin(toRad(midAngle));
+                          return (
+                            <g key={i}>
+                              <path
+                                d={`M100,100 L${x1},${y1} A100,100 0 0,1 ${x2},${y2} Z`}
+                                fill={prize.color}
+                                stroke="#0a0a0a"
+                                strokeWidth="1.5"
+                              />
+                              <text
+                                x={textX}
+                                y={textY}
+                                fill="white"
+                                fontSize="8"
+                                fontWeight="800"
+                                textAnchor="middle"
+                                opacity={0.95}
+                                transform={`rotate(${midAngle}, ${textX}, ${textY})`}
+                              >
+                                {prize.label.length > 16 ? prize.label.slice(0, 15) + "…" : prize.label}
+                              </text>
+                            </g>
+                          );
+                        })}
+                        <circle cx="100" cy="100" r="15" fill="#0a0a0a" stroke="#f59e0b" strokeWidth="2.5" />
+                        <circle cx="100" cy="100" r="4" fill="#f59e0b" />
+                      </svg>
+                    </div>
+
+                    <button
+                      onClick={spinWheel}
+                      disabled={wheelSpinning}
+                      className="w-full bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-black font-black uppercase tracking-wide py-4 rounded-2xl text-sm disabled:opacity-60 transition-all hover:scale-[1.02] active:scale-95 shadow-lg shadow-amber-500/20"
+                    >
+                      {wheelSpinning ? "Girando… 🎡" : "¡Girar Ahora! 🎯"}
+                    </button>
+                    <p className="text-[9px] text-neutral-600 mt-3 uppercase tracking-widest">Sin compra obligatoria · 1 giro por persona</p>
+                  </div>
+                ) : (
+                  <div className="relative py-2">
+                    <motion.div
+                      initial={{ scale: 0 }}
+                      animate={{ scale: 1 }}
+                      transition={{ type: "spring", damping: 12, delay: 0.1 }}
+                      className="text-6xl mb-3"
+                    >
+                      🎉
+                    </motion.div>
+                    <h3 className="text-xl font-black text-white uppercase tracking-tight mb-1">¡Felicidades!</h3>
+                    <p className="text-xs text-neutral-400 mb-4">Ganaste un premio exclusivo por hoy:</p>
+                    <div className="bg-gradient-to-r from-amber-500/15 to-orange-500/10 border border-amber-400/30 rounded-2xl py-4 px-4 mb-6">
+                      <span className="text-lg font-black text-amber-300">{wheelPrize}</span>
+                    </div>
+                    <button
+                      onClick={claimWheelPrize}
+                      className="w-full bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 text-black font-black uppercase tracking-wide py-4 rounded-2xl text-sm transition-all hover:scale-[1.02] active:scale-95 flex items-center justify-center gap-2 mb-2 shadow-lg shadow-amber-500/20"
+                    >
+                      <ShoppingCart size={16} /> Reclamar y Pedir Ahora
+                    </button>
+                    <button
+                      onClick={() => setWheelOpen(false)}
+                      className="w-full text-neutral-500 text-[11px] uppercase tracking-widest py-2 hover:text-neutral-300 transition-colors"
+                    >
+                      Seguir viendo el catálogo
+                    </button>
+                  </div>
+                )}
+              </div>
             </motion.div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Botón flotante para reabrir la ruleta si ya se cerró */}
       {/* ════════════════════════════════════════════
           WHATSAPP FLOATING SUPPORT WIDGET
       ════════════════════════════════════════════ */}
