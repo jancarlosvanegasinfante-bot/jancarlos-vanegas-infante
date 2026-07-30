@@ -474,9 +474,9 @@ export default function LandingPage() {
   };
 
   const claimWheelPrize = () => {
-    const phone = officialBotNumber || "14155238886";
-    const msg = `¡Hola! 🎉 Gané "${wheelPrize}" en la ruleta de Jan Sel Shop, ¿me ayudas a reclamarlo?`;
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+    setWheelOpen(false);
+    setCheckoutMode("formulario");
+    setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 200);
   };
 
 
@@ -1543,6 +1543,15 @@ export default function LandingPage() {
       <section className="py-20 px-4 relative" ref={formRef} id="formulario">
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-emerald-950/5 to-transparent pointer-events-none" />
         <div className="max-w-5xl mx-auto relative z-10">
+          {wheelPrize && (
+            <div className="mb-8 bg-gradient-to-r from-amber-500/15 to-orange-500/15 border-2 border-amber-400/40 rounded-2xl px-5 py-4 flex items-center gap-3">
+              <span className="text-3xl">🎉</span>
+              <div>
+                <p className="text-amber-300 font-black text-sm uppercase tracking-wide">¡Premio de tu ruleta activo!</p>
+                <p className="text-white text-sm">Ganaste: <span className="font-bold">{wheelPrize}</span> — menciónalo al confirmar tu pedido y te lo aplicamos 🙌</p>
+              </div>
+            </div>
+          )}
           {/* Section header */}
           <div className="text-center space-y-4 mb-12">
             <div className="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-4 py-1.5 rounded-full text-emerald-400 text-[10px] font-black uppercase tracking-widest">
@@ -2457,18 +2466,6 @@ export default function LandingPage() {
       </AnimatePresence>
 
       {/* Botón flotante para reabrir la ruleta si ya se cerró */}
-      {!wheelOpen && (
-        <motion.button
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          onClick={() => setWheelOpen(true)}
-          className="fixed bottom-24 left-6 z-40 rounded-full bg-gradient-to-br from-amber-400 to-orange-500 text-black shadow-2xl hover:scale-110 active:scale-95 transition-transform w-14 h-14 flex items-center justify-center text-2xl"
-          title={wheelAlreadyPlayed ? "Ver mi premio" : "¡Gira y gana!"}
-        >
-          🎡
-        </motion.button>
-      )}
-
       {/* ════════════════════════════════════════════
           WHATSAPP FLOATING SUPPORT WIDGET
       ════════════════════════════════════════════ */}
