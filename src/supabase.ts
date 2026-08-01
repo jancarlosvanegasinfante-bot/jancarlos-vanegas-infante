@@ -153,8 +153,18 @@ export function onAuthStateChanged(authObj: any, callback: (user: SupabaseUser |
           exchangeAdminSessionToken(phoneForAdmin, { supabaseAccessToken: session.access_token });
         }
       } else {
-        currentAuthUser = null;
-        clearAdminSessionToken();
+        // 🔧 FIX SESIÓN QUE SE PERDÍA: el login por teléfono/contraseña es un
+        // flujo personalizado que NO crea una sesión real de Supabase. Pero
+        // este listener de Supabase se dispara igual al cargar la página
+        // (con session=null, porque nunca hubo sesión real de Supabase), y
+        // antes eso BORRABA la sesión que acabábamos de restaurar desde
+        // localStorage un instante antes — obligando a iniciar sesión cada
+        // vez. Ahora, si ya había una sesión de admin válida guardada (del
+        // login personalizado), la respetamos y no la borramos aquí.
+        if (!adminSessionToken) {
+          currentAuthUser = null;
+          clearAdminSessionToken();
+        }
       }
       notifyAuthListeners();
     });
