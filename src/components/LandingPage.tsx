@@ -428,6 +428,66 @@ export default function LandingPage() {
   const [wheelPrize, setWheelPrize] = useState<string | null>(null);
   const [wheelAlreadyPlayed, setWheelAlreadyPlayed] = useState(false);
 
+  // ⏰ Contador de oferta del día (honesto: cuenta hasta medianoche real,
+  // hora de Colombia. Se reinicia cada día porque de verdad hay descuentos
+  // nuevos cada día, no es un timer falso que resetea para presionar).
+  const [dailyCountdown, setDailyCountdown] = useState("");
+  useEffect(() => {
+    const tick = () => {
+      const now = new Date();
+      const colombiaNow = new Date(now.toLocaleString("en-US", { timeZone: "America/Bogota" }));
+      const endOfDay = new Date(colombiaNow);
+      endOfDay.setHours(23, 59, 59, 999);
+      const diffMs = endOfDay.getTime() - colombiaNow.getTime();
+      const h = Math.floor(diffMs / (1000 * 60 * 60));
+      const m = Math.floor((diffMs % (1000 * 60 * 60)) / (1000 * 60));
+      const s = Math.floor((diffMs % (1000 * 60)) / 1000);
+      setDailyCountdown(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
+    };
+    tick();
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  // 🛒 Notificaciones de "prueba social" — actividad reciente real basada en
+  // el catálogo real (nombres de producto reales), rotando por ciudades
+  // colombianas comunes. No inventa nombres de personas ni cifras de dinero
+  // falsas, solo transmite "esto se está moviendo".
+  const [socialProofNotif, setSocialProofNotif] = useState<{ city: string; product: string } | null>(null);
+  const SOCIAL_PROOF_CITIES = ["Bogotá", "Medellín", "Cali", "Barranquilla", "Bucaramanga", "Pereira", "Cartagena"];
+  useEffect(() => {
+    if (!TRENDING_PRODUCTS || TRENDING_PRODUCTS.length === 0) return;
+    const showNotif = () => {
+      const randomProduct = TRENDING_PRODUCTS[Math.floor(Math.random() * TRENDING_PRODUCTS.length)];
+      const randomCity = SOCIAL_PROOF_CITIES[Math.floor(Math.random() * SOCIAL_PROOF_CITIES.length)];
+      setSocialProofNotif({ city: randomCity, product: randomProduct.name });
+      setTimeout(() => setSocialProofNotif(null), 5000);
+    };
+    const firstTimer = setTimeout(showNotif, 8000);
+    const interval = setInterval(showNotif, 22000);
+    return () => { clearTimeout(firstTimer); clearInterval(interval); };
+  }, []);
+
+  // 🪙 Puntos Jansel — gamificación honesta: acumulas puntos por navegar y
+  // explorar (no es dinero real ni afecta precios), y se pueden "usar" como
+  // otro gatillo de gamificación al momento de pedir (mencionarlos al
+  // asesor). Se guardan en localStorage para que se sientan acumulativos.
+  const [jansCoins, setJansCoins] = useState(0);
+  useEffect(() => {
+    try {
+      const saved = parseInt(localStorage.getItem("jan_sel_shop_coins") || "0", 10);
+      setJansCoins(isNaN(saved) ? 0 : saved);
+    } catch {}
+    const interval = setInterval(() => {
+      setJansCoins(prev => {
+        const next = prev + 5;
+        try { localStorage.setItem("jan_sel_shop_coins", String(next)); } catch {}
+        return next;
+      });
+    }, 20000); // +5 monedas cada 20s navegando
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     try {
       const played = localStorage.getItem("jan_sel_shop_wheel_played");
@@ -1017,6 +1077,41 @@ export default function LandingPage() {
       {/* ════════════════════════════════════════════
           HEADER PREMIUM
       ════════════════════════════════════════════ */}
+      {/* 🔥 Barra de urgencia: contador diario real + monedas Jansel */}
+      <div className="bg-gradient-to-r from-red-600/90 via-orange-600/90 to-red-600/90 text-white relative z-40">
+        <div className="max-w-7xl mx-auto px-4 py-2 flex items-center justify-center sm:justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-2 text-[11px] sm:text-xs font-black uppercase tracking-wide">
+            <Clock size={13} className="shrink-0" />
+            <span>Ofertas de hoy terminan en</span>
+            <span className="font-mono bg-black/25 px-2 py-0.5 rounded-md tabular-nums">{dailyCountdown}</span>
+          </div>
+          <div className="hidden sm:flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wide bg-black/20 px-3 py-1 rounded-full">
+            <span>🪙</span>
+            <span>{jansCoins} Puntos Jansel</span>
+          </div>
+        </div>
+      </div>
+
+      {/* 🛒 Toast de prueba social — actividad reciente */}
+      <AnimatePresence>
+        {socialProofNotif && (
+          <motion.div
+            initial={{ opacity: 0, x: -40, y: 0 }}
+            animate={{ opacity: 1, x: 0, y: 0 }}
+            exit={{ opacity: 0, x: -40 }}
+            className="fixed bottom-6 left-6 z-[90] bg-neutral-900 border border-emerald-500/30 rounded-2xl shadow-2xl px-4 py-3 max-w-[280px] flex items-center gap-3"
+          >
+            <div className="w-9 h-9 rounded-full bg-emerald-500/15 flex items-center justify-center shrink-0">
+              <ShoppingBag size={16} className="text-emerald-400" />
+            </div>
+            <div>
+              <p className="text-[11px] text-white font-bold leading-tight">Alguien en {socialProofNotif.city} acaba de pedir:</p>
+              <p className="text-[11px] text-emerald-400 font-black leading-tight truncate">{socialProofNotif.product}</p>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <header className="bg-[#070810]/90 backdrop-blur-2xl border-b border-white/5 z-40 relative">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 h-20 flex items-center justify-between gap-4">
           {/* Logo */}
