@@ -4514,7 +4514,15 @@ Esto puede significar que WhatsApp está limitando tus envíos. Revisa tu cuenta
       }
     }
     
-    if (err.message.includes("limit") || err.message.includes("50")) {
+    // 🔧 FIX CRÍTICO: antes se buscaba la palabra "50" en CUALQUIER parte del
+    // mensaje de error — y un número de teléfono corrupto como
+    // "+1036185125805012" contiene "50" dentro de sus dígitos, activando por
+    // error el bloqueo TOTAL de mensajería para todos los clientes (¡por un
+    // solo número mal formado, nada que ver con límites reales de Twilio!).
+    // Ahora solo revisamos los códigos de error REALES de Twilio para
+    // límites de cuenta trial/cuota (63038 = límite diario excedido).
+    const TRIAL_LIMIT_ERROR_CODES = [63038];
+    if (TRIAL_LIMIT_ERROR_CODES.includes(Number(err.code))) {
       await updateTwilioStatus(true, err.message);
     }
     throw err;
