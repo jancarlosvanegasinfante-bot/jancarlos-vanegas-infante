@@ -4362,12 +4362,10 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string | string
 
   console.log(`[Twilio Debug] Final Numbers: FROM=${finalFrom} TO=${finalTo}`);
 
-  // Check Twilio limits early
-  const canSend = await checkTwilioStatus();
-  if (!canSend) {
-    console.error("[Twilio Limit] Blocked: Trial 50-message limit reached.");
-    throw new Error("TWILIO_LIMIT_REACHED: Twilio 50-message trial limit exceeded.");
-  }
+  // 🔧 Se eliminó el chequeo de "límite de cuenta trial" (Jan ya hizo el
+  // upgrade de su cuenta de Twilio a una cuenta paga real, así que ese
+  // límite de 50 mensajes de prueba no le aplica más). Mantenerlo solo
+  // arriesgaba falsos positivos como el que causó el apagón total de hoy.
 
   // Normalizamos a arreglo para poder soportar 1 o varias imágenes al mismo
   // tiempo (WhatsApp/Twilio permite hasta 10 medios por mensaje).
@@ -4514,17 +4512,10 @@ Esto puede significar que WhatsApp está limitando tus envíos. Revisa tu cuenta
       }
     }
     
-    // 🔧 FIX CRÍTICO: antes se buscaba la palabra "50" en CUALQUIER parte del
-    // mensaje de error — y un número de teléfono corrupto como
-    // "+1036185125805012" contiene "50" dentro de sus dígitos, activando por
-    // error el bloqueo TOTAL de mensajería para todos los clientes (¡por un
-    // solo número mal formado, nada que ver con límites reales de Twilio!).
-    // Ahora solo revisamos los códigos de error REALES de Twilio para
-    // límites de cuenta trial/cuota (63038 = límite diario excedido).
-    const TRIAL_LIMIT_ERROR_CODES = [63038];
-    if (TRIAL_LIMIT_ERROR_CODES.includes(Number(err.code))) {
-      await updateTwilioStatus(true, err.message);
-    }
+    // 🔧 Se eliminó por completo el mecanismo de "bloqueo por límite trial":
+    // como la cuenta de Twilio ya está en modo pago (upgrade confirmado),
+    // este concepto no aplica y solo representaba un riesgo de falso
+    // positivo (como el que causó el apagón total del 4 de agosto).
     throw err;
   }
 }
