@@ -2687,8 +2687,8 @@ async function ensureTrendOfferTemplate(): Promise<string | null> {
           subtitle: "{{2}}",
           media: ["{{3}}"],
           actions: [
-            { title: "Sí, la quiero 🛒", id: TREND_YES_ID },
-            { title: "No, gracias ❌", id: TREND_NO_ID }
+            { type: "QUICK_REPLY", title: "Sí, la quiero 🛒", id: TREND_YES_ID },
+            { type: "QUICK_REPLY", title: "No, gracias ❌", id: TREND_NO_ID }
           ]
         },
         "twilio/text": {
