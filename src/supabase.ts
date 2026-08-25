@@ -468,12 +468,25 @@ export function serverTimestamp() {
 // dejar al usuario mirando un panel vacio sin explicacion.
 let sessionExpiredNotified = false;
 function notifySessionExpired() {
+  const habiaToken = !!adminSessionToken;
   clearAdminSessionToken();
   if (sessionExpiredNotified) return;
   sessionExpiredNotified = true;
   try {
     window.dispatchEvent(new CustomEvent("jansel:session-expired"));
   } catch { /* entorno sin window */ }
+
+  // No basta con avisar: el primer 403 llega ANTES de que la pantalla monte su
+  // listener, asi que ese aviso se pierde y el usuario se queda mirando un panel
+  // vacio para siempre. Si habia un token (o sea, la sesion vencio de verdad),
+  // borramos tambien el usuario guardado y recargamos: al arrancar sin sesion la
+  // app muestra el login, que es lo unico que resuelve la situacion.
+  if (!habiaToken) return;
+  try {
+    localStorage.removeItem("jansel_supabase_user");
+    currentAuthUser = null;
+    setTimeout(() => window.location.reload(), 600);
+  } catch { /* noop */ }
 }
 
 function adminAuthHeaders(): Record<string, string> {
