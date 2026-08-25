@@ -1186,22 +1186,25 @@ export default function LandingPage() {
             transition={{ delay: 0.2 }}
             className="space-y-4"
           >
+            {/* El titular ataca la objecion #1 de comprar online en Colombia: la
+                desconfianza. Y es 100% cierto, que es lo que lo hace funcionar.
+                Antes decia "Los N Productos Mas Deseados de Colombia": una
+                presuncion que nadie puede verificar, y ademas mostraba el numero
+                del catalogo, que con 10 productos comunica poco surtido. */}
             <h2 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black tracking-tight leading-[1.05]">
-              <span className="text-white">Los</span>{" "}
-              <span className="text-gradient-gold">{TRENDING_PRODUCTS.length} Productos</span>
+              <span className="text-white">Pídelo hoy.</span>
               <br />
-              <span className="text-white">Más Deseados</span>{" "}
               <span className="relative inline-block">
-                <span className="text-gradient-fire">de Colombia</span>
+                <span className="text-gradient-gold">Págalo cuando</span>{" "}
+                <span className="text-gradient-fire">lo tengas en la mano.</span>
                 <span className="absolute -bottom-1 left-0 right-0 h-0.5 bg-gradient-to-r from-amber-400 to-orange-500 rounded-full" />
               </span>
             </h2>
             <p className="text-slate-300 text-base sm:text-lg md:text-xl max-w-3xl mx-auto leading-relaxed font-light">
-              Compra con total seguridad y{" "}
-              <span className="text-white font-bold">paga cuando recibas tu pedido.</span>{" "}
-              Agrega productos a tu carrito y disfruta{" "}
-              <span className="text-amber-400 font-bold underline decoration-amber-400/50">envío 100% gratis</span>{" "}
-              con descuentos automáticos por cantidad.
+              No mandas un peso por adelantado. El mensajero te lo lleva, lo revisas,{" "}
+              <span className="text-white font-bold">y ahí sí pagas.</span>{" "}
+              <span className="text-amber-400 font-bold underline decoration-amber-400/50">Envío gratis</span>{" "}
+              a toda Colombia y 30 días de garantía.
             </p>
           </motion.div>
 
@@ -1217,7 +1220,7 @@ export default function LandingPage() {
               className="btn-cta-primary text-black font-black text-sm tracking-wider uppercase px-8 py-4 rounded-2xl flex items-center gap-3 cursor-pointer w-full sm:w-auto justify-center"
             >
               <Zap size={18} />
-              Ver Productos Ahora
+              Ver Ofertas de Hoy
               <ArrowRight size={16} />
             </button>
             <button
@@ -1338,7 +1341,7 @@ export default function LandingPage() {
             <span className="text-[10px] font-mono tracking-[0.25em] text-amber-400 uppercase">✦ Selección Premium</span>
             <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tight mt-1 flex items-center gap-3">
               <ShoppingBag className="text-amber-400" size={28} />
-              Nuestros {TRENDING_PRODUCTS.length} Más Vendidos
+              Lo Más Vendido Esta Semana
             </h2>
             <p className="text-slate-500 text-xs mt-1.5">
               🔴 {ordersToday} pedidos despachados hoy · Stock limitado
@@ -1515,7 +1518,7 @@ export default function LandingPage() {
                         onClick={() => { setIsCartOpen(true); setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth" }), 150); }}
                         className="h-11 px-4 rounded-xl btn-cta-primary text-black font-black text-[10px] uppercase tracking-wider flex items-center gap-1 cursor-pointer"
                       >
-                        Pagar 🚀
+                        Finalizar 🚀
                       </button>
                     </div>
                   ) : (
@@ -1526,14 +1529,14 @@ export default function LandingPage() {
                         className="py-3 rounded-xl glass-card text-white font-extrabold text-[10px] uppercase tracking-wider transition-all flex items-center justify-center gap-1.5 hover:border-white/15 active:scale-95 cursor-pointer"
                       >
                         <ShoppingCart size={12} className="text-amber-400" />
-                        Al Carrito
+                        Agregar
                       </button>
                       <button
                         type="button"
                         onClick={() => handleInstantBuy(p)}
                         className="py-3 rounded-xl btn-cta-primary text-black font-black text-[10px] uppercase tracking-wider flex items-center justify-center gap-1 cursor-pointer"
                       >
-                        Comprar ⚡
+                        Lo quiero ⚡
                       </button>
                     </div>
                   )}
