@@ -28,12 +28,15 @@ import {
   X
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
+import { Link } from "react-router-dom";
+import ReferralChallenge, { ReferralJoin } from "./ReferralChallenge";
 import { getProxiedImageUrl } from "../lib/utils";
 import toast from "react-hot-toast";
 import PromoFlow from "./PromoFlow";
+import { ACTIVE_PROMOTIONS } from "../lib/promotions";
 
 // ─── Products ────────────────────────────────────────────────────────────────
-const TRENDING_PRODUCTS = [
+export const TRENDING_PRODUCTS = [
   {
     id: "soporte-de-carga-magnetica",
     name: "Soporte de Carga Magnética",
@@ -291,6 +294,12 @@ const getProductPriceConfig = (price: number) => {
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function LandingPage() {
+  // Reto de referidos: el descuento vive aqui y se aplica al total del carrito.
+  const [showReferral, setShowReferral] = useState(false);
+  const [referralPct, setReferralPct] = useState(0);
+  const [joinCode, setJoinCode] = useState<string | null>(null);
+  const referralPrompted = useRef(false);
+
   const [cart, setCart] = useState<{ product: typeof TRENDING_PRODUCTS[0]; quantity: number }[]>(() => {
     try {
       const saved = localStorage.getItem("jan_sel_shop_cart");
@@ -714,6 +723,20 @@ export default function LandingPage() {
     });
   };
 
+  // Agrega todos los productos de un combo al carrito de una sola vez.
+  const addComboToCart = (combo: typeof ACTIVE_PROMOTIONS[0]) => {
+    const items = combo.productIds
+      .map((pid) => TRENDING_PRODUCTS.find((p) => p.id === pid))
+      .filter(Boolean) as typeof TRENDING_PRODUCTS;
+    if (items.length === 0) {
+      toast.error("Ese combo no esta disponible por ahora");
+      return;
+    }
+    items.forEach((p) => addToCart(p, true));
+    toast.success("Combo " + combo.name + " agregado!");
+    setIsCartOpen(true);
+  };
+
   const removeFromCart = (productId: string) => {
     setCart((prev) => prev.filter((item) => item.product.id !== productId));
     toast.success("Producto removido");
@@ -734,6 +757,23 @@ export default function LandingPage() {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
   };
+
+  // Si llegan por un link de invitacion, primero les pedimos el WhatsApp.
+  useEffect(() => {
+    try {
+      const ref = new URLSearchParams(window.location.search).get("ref");
+      if (ref) setJoinCode(ref.toUpperCase());
+    } catch { /* ignore */ }
+  }, []);
+
+  // El reto se ofrece cuando ya decidio comprar (abrio el carrito), no al entrar:
+  // antes de eso no tiene ningun motivo para invitar a nadie.
+  useEffect(() => {
+    if (!isCartOpen || referralPrompted.current || referralPct > 0 || joinCode) return;
+    referralPrompted.current = true;
+    const t = setTimeout(() => setShowReferral(true), 900);
+    return () => clearTimeout(t);
+  }, [isCartOpen, referralPct, joinCode]);
 
   const calculateTotals = () => {
     const subtotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
@@ -774,11 +814,12 @@ export default function LandingPage() {
       });
     }
 
-    const finalTotal = Math.max(0, intermediateTotal - prepaymentDiscount);
-    return { subtotal, originalSubtotal, totalQty, quantityDiscount, prepaymentDiscount, finalTotal, savings: originalSubtotal - finalTotal };
+    const referralDiscount = Math.round((intermediateTotal * referralPct) / 100);
+    const finalTotal = Math.max(0, intermediateTotal - prepaymentDiscount - referralDiscount);
+    return { subtotal, originalSubtotal, totalQty, quantityDiscount, prepaymentDiscount, referralDiscount, finalTotal, savings: originalSubtotal - finalTotal };
   };
 
-  const { subtotal, totalQty, quantityDiscount, prepaymentDiscount, finalTotal, savings } = calculateTotals();
+  const { subtotal, totalQty, quantityDiscount, prepaymentDiscount, referralDiscount, finalTotal, savings } = calculateTotals();
 
   const handleProceedToForm = () => {
     setIsCartOpen(false);
@@ -863,10 +904,11 @@ export default function LandingPage() {
     const itemsText = cart.map((item) => `• *${item.product.name}* (x${item.quantity}) - $${item.product.price.toLocaleString()} COP c/u`).join("\n");
     const discountText = quantityDiscount > 0 ? `\n🎁 *Descuento Combo:* -$${quantityDiscount.toLocaleString()} COP` : "";
     const prepayText = selectedMode === "anticipado" ? `\n🌟 *Descuento Anticipado:* -$${prepaymentDiscount.toLocaleString()} COP` : "";
+    const referralText = referralDiscount > 0 ? `\n🎁 *Descuento por Invitar:* -$${referralDiscount.toLocaleString()} COP` : "";
     const modeLabel = selectedMode === "anticipado"
       ? "🔴 *Pago Anticipado (Nequi / Daviplata / Bancolombia) - ¡Descuento aplicado!*"
       : "🟢 *Pago Contraentrega (Pagas al recibir en efectivo)*";
-    const msg = `¡Hola Jan Sel Shop! 👋 Quiero realizar el siguiente pedido desde la Landing Page:\n\n🛒 *CARRITO:*\n${itemsText}\n\n⚙️ *DESGLOSE:*\n• *Subtotal:* $${subtotal.toLocaleString()} COP${discountText}${prepayText}\n🚚 *Envío:* ¡COMPLETAMENTE GRATIS! 🇨🇴\n💰 *TOTAL:* $${finalTotal.toLocaleString()} COP\n\n💳 *PAGO:* ${modeLabel}\n\n👤 *DATOS:*\n• *Nombre:* ${formData.customerName || "Por confirmar"}\n• *Celular:* ${formData.customerPhone || "Por confirmar"}\n• *Ciudad:* ${formData.city || "Por confirmar"}\n• *Dirección:* ${formData.address || "Por confirmar"}\n• *Indicaciones:* ${formData.addressIndicator || "Ninguna"}\n\n¡Por favor agendar mi despacho hoy! 🚀`;
+    const msg = `¡Hola Jan Sel Shop! 👋 Quiero realizar el siguiente pedido desde la Landing Page:\n\n🛒 *CARRITO:*\n${itemsText}\n\n⚙️ *DESGLOSE:*\n• *Subtotal:* $${subtotal.toLocaleString()} COP${discountText}${prepayText}${referralText}\n🚚 *Envío:* ¡COMPLETAMENTE GRATIS! 🇨🇴\n💰 *TOTAL:* $${finalTotal.toLocaleString()} COP\n\n💳 *PAGO:* ${modeLabel}\n\n👤 *DATOS:*\n• *Nombre:* ${formData.customerName || "Por confirmar"}\n• *Celular:* ${formData.customerPhone || "Por confirmar"}\n• *Ciudad:* ${formData.city || "Por confirmar"}\n• *Dirección:* ${formData.address || "Por confirmar"}\n• *Indicaciones:* ${formData.addressIndicator || "Ninguna"}\n\n¡Por favor agendar mi despacho hoy! 🚀`;
     const phone = officialBotNumber || "14155238886";
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
 
@@ -1139,7 +1181,7 @@ export default function LandingPage() {
           >
             <h2 className="text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-black tracking-tight leading-[1.05]">
               <span className="text-white">Los</span>{" "}
-              <span className="text-gradient-gold">15 Productos</span>
+              <span className="text-gradient-gold">{TRENDING_PRODUCTS.length} Productos</span>
               <br />
               <span className="text-white">Más Deseados</span>{" "}
               <span className="relative inline-block">
@@ -1289,7 +1331,7 @@ export default function LandingPage() {
             <span className="text-[10px] font-mono tracking-[0.25em] text-amber-400 uppercase">✦ Selección Premium</span>
             <h2 className="text-2xl sm:text-3xl font-black uppercase tracking-tight mt-1 flex items-center gap-3">
               <ShoppingBag className="text-amber-400" size={28} />
-              Nuestros 15 Más Vendidos
+              Nuestros {TRENDING_PRODUCTS.length} Más Vendidos
             </h2>
             <p className="text-slate-500 text-xs mt-1.5">
               🔴 {ordersToday} pedidos despachados hoy · Stock limitado
@@ -1488,10 +1530,118 @@ export default function LandingPage() {
                       </button>
                     </div>
                   )}
+                  <Link
+                    to={"/producto/" + p.id}
+                    className="mt-2 block text-center text-[10px] font-bold uppercase tracking-wider text-slate-400 hover:text-amber-400 transition-colors py-1.5"
+                  >
+                    Ver mas detalles →
+                  </Link>
                 </div>
               </motion.div>
             );
           })}
+        </div>
+      </section>
+
+
+      {/* ════════════════════════════════════════════
+          COMBOS — AHORRO POR LLEVAR MÁS
+      ════════════════════════════════════════════ */}
+      <section id="combos" className="py-16 px-4 relative">
+        <div className="max-w-7xl mx-auto">
+          <div className="text-center mb-10 space-y-2">
+            <span className="text-[10px] font-mono tracking-[0.25em] text-amber-400 uppercase">✦ Arma tu combo</span>
+            <h2 className="text-3xl sm:text-4xl md:text-5xl font-black uppercase tracking-tight">
+              <span className="text-white">Combos que</span>{" "}
+              <span className="text-gradient-gold">Ahorran de Verdad</span>
+            </h2>
+            <p className="text-slate-400 text-sm sm:text-base max-w-2xl mx-auto">
+              Llevando el combo pagas menos que comprando los productos por separado. Envío gratis y pago contra entrega.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {ACTIVE_PROMOTIONS.map((combo, idx) => {
+              const items = combo.productIds
+                .map((pid) => TRENDING_PRODUCTS.find((p) => p.id === pid))
+                .filter(Boolean) as typeof TRENDING_PRODUCTS;
+              if (items.length === 0) return null;
+              const ahorro = combo.originalPrice - combo.promoPrice;
+              return (
+                <motion.div
+                  key={combo.id}
+                  initial={{ opacity: 0, y: 24 }}
+                  whileInView={{ opacity: 1, y: 0 }}
+                  viewport={{ once: true, margin: "-60px" }}
+                  transition={{ delay: Math.min(idx * 0.06, 0.3) }}
+                  className="glass-card rounded-3xl border border-amber-500/20 overflow-hidden flex flex-col hover:border-amber-400/40 transition-colors"
+                >
+                  <div className="flex items-center justify-between px-5 pt-5">
+                    <span className="text-[10px] font-black uppercase tracking-wider bg-amber-500/15 text-amber-300 px-3 py-1.5 rounded-full">
+                      {combo.badge}
+                    </span>
+                    <span className="text-[10px] font-black uppercase bg-red-500/15 text-red-400 px-2.5 py-1 rounded-full">
+                      -{combo.discountPercentage}%
+                    </span>
+                  </div>
+
+                  <div className="flex items-center justify-center gap-1 px-5 py-4">
+                    {items.map((p, i) => (
+                      <React.Fragment key={p.id}>
+                        {i > 0 && <span className="text-amber-400/60 font-black text-lg shrink-0">+</span>}
+                        <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-xl bg-white/5 border border-white/10 overflow-hidden shrink-0">
+                          <img
+                            src={getProxiedImageUrl(p.imageUrl)}
+                            alt={p.name}
+                            loading="lazy"
+                            className="w-full h-full object-cover"
+                            onError={(e) => { e.currentTarget.src = "/images/logo.jpeg"; }}
+                          />
+                        </div>
+                      </React.Fragment>
+                    ))}
+                  </div>
+
+                  <div className="px-5 pb-5 flex flex-col flex-1 gap-3">
+                    <div>
+                      <h3 className="text-lg font-black leading-tight">{combo.name}</h3>
+                      <p className="text-amber-400/90 text-xs font-bold mt-0.5">{combo.tagline}</p>
+                    </div>
+
+                    <ul className="space-y-1">
+                      {items.map((p) => (
+                        <li key={p.id} className="text-slate-400 text-xs flex items-start gap-1.5">
+                          <span className="text-emerald-400 mt-0.5 shrink-0">✓</span>
+                          <span className="leading-snug">{p.name}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <div className="mt-auto pt-2">
+                      <div className="flex items-baseline gap-2 flex-wrap">
+                        <span className="text-slate-500 line-through text-sm">
+                          ${combo.originalPrice.toLocaleString()}
+                        </span>
+                        <span className="text-2xl font-black text-gradient-gold">
+                          ${combo.promoPrice.toLocaleString()}
+                        </span>
+                      </div>
+                      <p className="text-emerald-400 text-xs font-bold mt-0.5">
+                        Ahorras ${ahorro.toLocaleString()} COP
+                      </p>
+
+                      <button
+                        onClick={() => addComboToCart(combo)}
+                        className="w-full mt-3 bg-gradient-to-r from-amber-400 to-orange-500 text-black font-black text-xs uppercase tracking-widest py-3.5 rounded-2xl hover:scale-[1.02] active:scale-95 transition-transform"
+                      >
+                        Llevar combo 🛒
+                      </button>
+                    </div>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
         </div>
       </section>
 
@@ -1924,6 +2074,12 @@ export default function LandingPage() {
                       <span className="font-black font-mono">-${quantityDiscount.toLocaleString()}</span>
                     </div>
                   )}
+                  {referralDiscount > 0 && (
+                    <div className="flex justify-between text-amber-300 bg-amber-500/5 px-3 py-2 rounded-xl border border-amber-500/10">
+                      <span>Dto. por Invitar</span>
+                      <span className="font-black font-mono">-${referralDiscount.toLocaleString()}</span>
+                    </div>
+                  )}
                   {prepaymentDiscount > 0 && (
                     <div className="flex justify-between text-amber-400 bg-amber-400/5 px-3 py-2 rounded-xl border border-amber-400/10">
                       <span>Dto. Anticipado</span>
@@ -2318,6 +2474,12 @@ export default function LandingPage() {
                       <div className="flex justify-between text-slate-400"><span>Subtotal ({totalQty} und.):</span><span className="text-white font-mono font-bold">${subtotal.toLocaleString()}</span></div>
                       {quantityDiscount > 0 && (
                         <div className="flex justify-between text-emerald-400"><span>Dto. Cantidad:</span><span className="font-bold">-${quantityDiscount.toLocaleString()}</span></div>
+                      )}
+                      {referralDiscount > 0 && (
+                        <div className="flex justify-between text-amber-300 bg-amber-500/5 px-3 py-2 rounded-xl border border-amber-500/10">
+                          <span>Dto. por Invitar</span>
+                          <span className="font-black font-mono">-${referralDiscount.toLocaleString()}</span>
+                        </div>
                       )}
                       <div className="flex justify-between text-slate-400"><span>Envío:</span><span className="text-emerald-400 font-black">¡GRATIS! 🚚</span></div>
                       <div className="h-px bg-white/5 my-2" />
@@ -2846,6 +3008,12 @@ export default function LandingPage() {
           </span>
         </button>
       </div>
+      <ReferralChallenge
+        open={showReferral}
+        onClose={() => setShowReferral(false)}
+        onUnlock={(pct) => setReferralPct(pct)}
+      />
+      {joinCode && <ReferralJoin code={joinCode} onDone={() => setJoinCode(null)} />}
     </div>
   );
 }

@@ -4810,6 +4810,7 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
 
 import Storefront from "./components/Storefront";
 import LandingPage from "./components/LandingPage";
+import ProductDetail from "./components/ProductDetail";
 
 // Global App component with Routing
 export default function App() {
@@ -4819,6 +4820,7 @@ export default function App() {
         <Route path="/tienda/:slug" element={<Storefront />} />
         <Route path="/catalog" element={<Navigate to="/landing" replace />} />
         <Route path="/landing" element={<LandingPage />} />
+        <Route path="/producto/:id" element={<ProductDetail />} />
         <Route path="/" element={<JanAdmin />} />
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

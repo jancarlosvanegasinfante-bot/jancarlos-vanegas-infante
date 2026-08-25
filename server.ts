@@ -5556,6 +5556,129 @@ async function startServer() {
     }
   });
 
+  // ─── Sistema de referidos (mecánica estilo Temu) ────────────────────────────
+  // Las reglas del reto viven aquí y en ningún otro sitio: para pasar de 1 hora
+  // a 24, o de 3 invitados a 5, se cambia solo esta constante.
+  const REFERRAL_GOAL = 3;                     // invitados válidos para desbloquear
+  const REFERRAL_WINDOW_MS = 60 * 60 * 1000;   // 1 hora, contada desde que ACEPTA el reto
+  const REFERRAL_DISCOUNT_PCT = 15;            // % de descuento al completar la meta
+
+  const newReferralCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
+
+  // Estado derivado: nunca confiamos en un "unlocked" guardado, se recalcula
+  // siempre contra el reloj para que un reto vencido no siga dando descuento.
+  const referralState = (d: any) => {
+    const invited: string[] = Array.isArray(d?.invited) ? d.invited : [];
+    const expiresAt = Number(d?.expiresAt) || 0;
+    const expired = Date.now() > expiresAt;
+    const unlocked = invited.length >= REFERRAL_GOAL && !expired;
+    return {
+      code: d?.code || "",
+      invited: invited.length,
+      goal: REFERRAL_GOAL,
+      expiresAt,
+      msLeft: Math.max(0, expiresAt - Date.now()),
+      expired,
+      unlocked,
+      discountPct: unlocked ? REFERRAL_DISCOUNT_PCT : 0,
+    };
+  };
+
+  const findReferral = async (code: string) => {
+    if (!code) return null;
+    const snap = await getDocs(query(collection(db, "referrals"), where("code", "==", code)));
+    return snap.empty ? null : snap.docs[0];
+  };
+
+  // Arranca el reto. El reloj empieza AQUÍ y no al cargar la página: es lo que
+  // convierte un banner en un compromiso, que es de donde sale la urgencia real.
+  app.post("/api/referral/start", async (req, res) => {
+    try {
+      const { deviceId } = req.body || {};
+      if (!deviceId || typeof deviceId !== "string") {
+        return res.status(400).json({ error: "deviceId requerido" });
+      }
+      const code = newReferralCode();
+      const expiresAt = Date.now() + REFERRAL_WINDOW_MS;
+      await setDoc(doc(db, "referrals", code), {
+        code,
+        ownerDeviceId: deviceId,
+        invited: [],
+        startedAt: Date.now(),
+        expiresAt,
+      }, { merge: false });
+      console.log(`[Referral] Reto iniciado: ${code} (meta ${REFERRAL_GOAL} en ${REFERRAL_WINDOW_MS / 60000} min)`);
+      res.json(referralState({ code, invited: [], expiresAt }));
+    } catch (e: any) {
+      console.error("[Referral Start] Error:", e?.message);
+      res.status(500).json({ error: e?.message || "Error iniciando el reto" });
+    }
+  });
+
+  // Un invitado deja su WhatsApp. Contamos personas, no aperturas: por eso pedimos
+  // el número y deduplicamos. Así el reto no se infla con pestañas de incógnito.
+  app.post("/api/referral/join", async (req, res) => {
+    try {
+      const { code, phone, deviceId } = req.body || {};
+      if (!code || !phone) return res.status(400).json({ error: "code y phone requeridos" });
+
+      const clean = String(phone).replace(/\D/g, "");
+      if (clean.length < 10) return res.status(400).json({ error: "Número de WhatsApp inválido" });
+
+      const snap = await findReferral(String(code).toUpperCase());
+      if (!snap) return res.status(404).json({ error: "Ese reto no existe" });
+
+      const d: any = snap.data();
+      const state = referralState(d);
+      if (state.expired) return res.status(410).json({ ...state, error: "El reto ya vencío" });
+
+      // El dueño no puede autoinvitarse.
+      if (deviceId && d.ownerDeviceId && deviceId === d.ownerDeviceId) {
+        return res.status(400).json({ ...state, error: "No puedes contarte a ti mismo" });
+      }
+
+      const invited: string[] = Array.isArray(d.invited) ? d.invited : [];
+      if (invited.includes(clean)) {
+        return res.json({ ...referralState(d), already: true });
+      }
+
+      const next = [...invited, clean];
+      await setDoc(doc(db, "referrals", snap.id), { invited: next }, { merge: true });
+
+      // Cada invitado es además un lead real para el bot.
+      try {
+        await setDoc(doc(db, "customers", clean), {
+          phone: clean,
+          source: "referido",
+          referralCode: d.code,
+          createdAt: new Date().toISOString(),
+        }, { merge: true });
+      } catch (e: any) {
+        console.warn("[Referral] No se pudo guardar el lead:", e?.message);
+      }
+
+      console.log(`[Referral] ${d.code}: ${next.length}/${REFERRAL_GOAL} invitados`);
+      res.json(referralState({ ...d, invited: next }));
+    } catch (e: any) {
+      console.error("[Referral Join] Error:", e?.message);
+      res.status(500).json({ error: e?.message || "Error registrando el invitado" });
+    }
+  });
+
+  // Progreso del reto. El front lo consulta para pintar el contador y el 0/3.
+  app.get("/api/referral/status", async (req, res) => {
+    try {
+      const code = String(req.query.code || "").toUpperCase();
+      const snap = await findReferral(code);
+      if (!snap) return res.status(404).json({ error: "Ese reto no existe" });
+      res.json(referralState(snap.data()));
+    } catch (e: any) {
+      console.error("[Referral Status] Error:", e?.message);
+      res.status(500).json({ error: e?.message || "Error consultando el reto" });
+    }
+  });
+
+
   // Sincronización manual de imágenes/catálogo desde Google Sheets (o consultar el último estado)
   app.post("/api/admin/sync-catalog-images", async (req, res) => {
     try {
