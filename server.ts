@@ -2736,8 +2736,12 @@ async function ensureTrendOfferTemplate(): Promise<string | null> {
           subtitle: "{{2}}",
           media: ["{{3}}"],
           actions: [
-            { type: "QUICK_REPLY", title: "Sí, la quiero 🛒", id: TREND_YES_ID },
-            { type: "QUICK_REPLY", title: "No, gracias ❌", id: TREND_NO_ID }
+            // Sin emojis: Twilio rechaza el template con "Button Title text cannot
+            // contain emojis". Al fallar nunca se guardaba el SID, asi que se
+            // reintentaba en bucle en cada oferta de tendencia y el mensaje con
+            // imagen nunca llegaba a salir.
+            { type: "QUICK_REPLY", title: "Si, la quiero", id: TREND_YES_ID },
+            { type: "QUICK_REPLY", title: "No, gracias", id: TREND_NO_ID }
           ]
         },
         "twilio/text": {

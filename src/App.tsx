@@ -580,6 +580,18 @@ function JanAdmin() {
       setIsLoggingIn(false);
     }
   };
+  // La sesion de admin dura 12h. Cuando vence, el servidor rechaza las consultas
+  // con 403 y el panel se quedaba en blanco sin decir nada: parecia que se habian
+  // borrado los pedidos y las conversaciones. Ahora avisamos y mandamos al login.
+  useEffect(() => {
+    const onExpired = () => {
+      toast.error("Tu sesion expiro. Vuelve a iniciar sesion para ver tus datos.", { duration: 6000 });
+      setTimeout(() => signOut(auth), 1200);
+    };
+    window.addEventListener("jansel:session-expired", onExpired);
+    return () => window.removeEventListener("jansel:session-expired", onExpired);
+  }, []);
+
   const logout = () => signOut(auth);
 
   const clearTransactions = async () => {

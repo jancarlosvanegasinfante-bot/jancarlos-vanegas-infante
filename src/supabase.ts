@@ -463,6 +463,19 @@ export function serverTimestamp() {
 
 // Headers con el token de sesión de admin (si existe), para las operaciones
 // que no son de solo-lectura del catálogo público.
+// Se dispara cuando el servidor rechaza por sesion vencida. Limpia el token y
+// avisa a la interfaz una sola vez, para que muestre el login en lugar de
+// dejar al usuario mirando un panel vacio sin explicacion.
+let sessionExpiredNotified = false;
+function notifySessionExpired() {
+  clearAdminSessionToken();
+  if (sessionExpiredNotified) return;
+  sessionExpiredNotified = true;
+  try {
+    window.dispatchEvent(new CustomEvent("jansel:session-expired"));
+  } catch { /* entorno sin window */ }
+}
+
 function adminAuthHeaders(): Record<string, string> {
   return adminSessionToken ? { Authorization: `Bearer ${adminSessionToken}` } : {};
 }
@@ -472,6 +485,7 @@ export async function getDoc(docRef: any): Promise<any> {
   const url = `/api/db/getDoc?collection=${docRef.collection}&id=${docRef.id}`;
   const response = await fetch(url, { headers: { ...adminAuthHeaders() } });
   if (!response.ok) {
+    if (response.status === 403) notifySessionExpired();
     throw new Error(`Failed to fetch doc: ${response.statusText}`);
   }
   const result = await response.json();
@@ -496,6 +510,10 @@ export async function getDocs(queryObj: any): Promise<any> {
   });
 
   if (!response.ok) {
+    // La sesion de admin dura 12h. Al vencer, el servidor responde 403 y antes
+    // el panel se quedaba MUDO: se veia todo vacio y parecia que se habian
+    // borrado los datos. Ahora se limpia el token y se avisa a la interfaz.
+    if (response.status === 403) notifySessionExpired();
     throw new Error(`Failed to fetch docs: ${response.statusText}`);
   }
 
