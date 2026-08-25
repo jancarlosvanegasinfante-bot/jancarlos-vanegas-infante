@@ -93,6 +93,10 @@ async function exchangeAdminSessionToken(phone: string, opts: { password?: strin
     if (data?.token) {
       adminSessionToken = data.token;
       localStorage.setItem("jansel_admin_session_token", data.token);
+      // Sesion nueva y valida: se rearma el aviso y se suelta el cerrojo de
+      // recarga, para que dentro de 12h el mecanismo vuelva a funcionar.
+      sessionExpiredNotified = false;
+      try { sessionStorage.removeItem("jansel_reload_login"); } catch { /* noop */ }
     }
   } catch (err) {
     console.warn("[Admin Session] Error obteniendo token de sesión:", err);
@@ -467,7 +471,14 @@ export function serverTimestamp() {
 // avisa a la interfaz una sola vez, para que muestre el login en lugar de
 // dejar al usuario mirando un panel vacio sin explicacion.
 let sessionExpiredNotified = false;
-function notifySessionExpired() {
+// `tokenUsado` es el token con el que salio la peticion que fallo. Es
+// imprescindible: al iniciar sesion quedan peticiones EN VUELO con el token
+// viejo, y sus 403 llegan justo despues de que el login ya entrego uno nuevo.
+// Sin esta comparacion, esos 403 tardios borraban el token recien creado y
+// recargaban la pagina, dejando al usuario en un bucle de "sesion expirada"
+// aunque su login fuera correcto.
+function notifySessionExpired(tokenUsado?: string | null) {
+  if (tokenUsado && tokenUsado !== adminSessionToken) return;  // token ya renovado
   const habiaToken = !!adminSessionToken;
   clearAdminSessionToken();
   if (sessionExpiredNotified) return;
@@ -483,6 +494,10 @@ function notifySessionExpired() {
   // app muestra el login, que es lo unico que resuelve la situacion.
   if (!habiaToken) return;
   try {
+    // Cerrojo: una sola recarga por pestana. Pase lo que pase, esto no puede
+    // convertirse en un bucle de recargas delante del usuario.
+    if (sessionStorage.getItem("jansel_reload_login") === "1") return;
+    sessionStorage.setItem("jansel_reload_login", "1");
     localStorage.removeItem("jansel_supabase_user");
     currentAuthUser = null;
     setTimeout(() => window.location.reload(), 600);
@@ -496,9 +511,10 @@ function adminAuthHeaders(): Record<string, string> {
 // Fetch single document
 export async function getDoc(docRef: any): Promise<any> {
   const url = `/api/db/getDoc?collection=${docRef.collection}&id=${docRef.id}`;
+  const tokenUsado = adminSessionToken;
   const response = await fetch(url, { headers: { ...adminAuthHeaders() } });
   if (!response.ok) {
-    if (response.status === 403) notifySessionExpired();
+    if (response.status === 403) notifySessionExpired(tokenUsado);
     throw new Error(`Failed to fetch doc: ${response.statusText}`);
   }
   const result = await response.json();
@@ -516,6 +532,7 @@ export async function getDocs(queryObj: any): Promise<any> {
   const collectionName = isQuery ? queryObj.collection : queryObj.name;
   const constraints = isQuery ? queryObj.constraints : [];
 
+  const tokenUsado = adminSessionToken;
   const response = await fetch("/api/db/getDocs", {
     method: "POST",
     headers: { "Content-Type": "application/json", ...adminAuthHeaders() },
@@ -526,7 +543,7 @@ export async function getDocs(queryObj: any): Promise<any> {
     // La sesion de admin dura 12h. Al vencer, el servidor responde 403 y antes
     // el panel se quedaba MUDO: se veia todo vacio y parecia que se habian
     // borrado los datos. Ahora se limpia el token y se avisa a la interfaz.
-    if (response.status === 403) notifySessionExpired();
+    if (response.status === 403) notifySessionExpired(tokenUsado);
     throw new Error(`Failed to fetch docs: ${response.statusText}`);
   }
 
