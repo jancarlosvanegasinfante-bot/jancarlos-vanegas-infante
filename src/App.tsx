@@ -4043,9 +4043,7 @@ function RecoveryTab({ activities, onSelectUser }: { activities: Activity[], onS
           {leads.map((l) => (
             <div key={l.id} className="p-6 flex items-center justify-between group hover:bg-white/5 transition-all">
                <div className="flex items-center gap-4">
-                  <div className="w-10 h-10 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center text-neutral-500 group-hover:border-dark-accent transition-colors">
-                     <User size={16} />
-                  </div>
+                  <Avatar name={l.customerName} phone={(l.from || "").replace('whatsapp:', '')} size={40} />
                   <div>
                      <p className="text-xs font-bold text-white uppercase">{(l.from || "unknown").replace('whatsapp:', '')}</p>
                      <p className="text-[10px] text-neutral-500 line-clamp-1 italic">"{(l.message || "").substring(0, 300)}..."</p>
@@ -4071,6 +4069,35 @@ function RecoveryTab({ activities, onSelectUser }: { activities: Activity[], onS
         </div>
       </div>
     </motion.div>
+  );
+}
+
+// WhatsApp no entrega la foto de perfil del cliente (la API de WhatsApp Business
+// no la expone), asi que identificamos a cada persona con sus iniciales y un color
+// derivado de su telefono: siempre el mismo para el mismo cliente.
+const AVATAR_COLORS = [
+  "from-amber-400 to-orange-500", "from-emerald-400 to-teal-500",
+  "from-sky-400 to-blue-500", "from-fuchsia-400 to-purple-500",
+  "from-rose-400 to-red-500", "from-lime-400 to-green-500",
+];
+
+function Avatar({ name, phone, size = 32 }: { name?: string; phone?: string; size?: number }) {
+  const key = String(phone || name || "?");
+  let hash = 0;
+  for (let n = 0; n < key.length; n++) hash = (hash * 31 + key.charCodeAt(n)) >>> 0;
+  const color = AVATAR_COLORS[hash % AVATAR_COLORS.length];
+  const limpio = (name || "").trim();
+  const iniciales = limpio
+    ? limpio.split(/s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase()
+    : String(phone || "").replace(/D/g, "").slice(-2);
+  return (
+    <div
+      className={cn("rounded-full bg-gradient-to-br flex items-center justify-center font-black text-black shrink-0", color)}
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.36) }}
+      title={limpio || phone}
+    >
+      {iniciales || "?"}
+    </div>
   );
 }
 
@@ -4129,9 +4156,7 @@ function CRMTab({ customers, selectedUser, onSelectUser }: { customers: any[], s
                 return (
                   <tr key={c.id} className="hover:bg-neutral-900/50 transition-colors group cursor-pointer" onClick={() => onSelectUser(c.id)}>
                     <td className="p-4 text-neutral-400">
-                      <div className="w-8 h-8 rounded-full bg-neutral-800 flex justify-center items-center">
-                        <User size={14} />
-                      </div>
+                      <Avatar name={c.name} phone={c.phone || c.id} size={36} />
                     </td>
                     <td className="p-4">
                       <div className="font-bold text-sm text-white">{c.name || c.id}</div>
