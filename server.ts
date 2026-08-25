@@ -1831,10 +1831,12 @@ Asegúrate de que la propiedad "mensaje" contenga tu respuesta real dirigida al 
     // Para modelos de visión metemos las imágenes como image_url (base64 data URI).
     // NOTA: Meta exige que con imágenes NO se use mensaje "system" aparte, así que
     // en ese caso el system prompt se antepone dentro del propio mensaje de usuario.
+    // Se le pasa el catalogo real que acabamos de leer de la base, para que la
+    // lista de productos del prompt no pueda quedar desfasada del inventario.
     const systemInst = getSystemInstruction({
       ...storeConfig,
       storeUrl: currentAppUrl || process.env.APP_URL || "https://jansel-shop.com"
-    });
+    }, products);
     const buildMessages = (isVision: boolean) => {
       if (isVision && imageParts.length > 0) {
         const userContent: any[] = [
