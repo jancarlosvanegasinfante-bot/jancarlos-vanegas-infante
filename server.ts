@@ -5562,6 +5562,10 @@ async function startServer() {
   const REFERRAL_GOAL = 3;                     // invitados válidos para desbloquear
   const REFERRAL_WINDOW_MS = 60 * 60 * 1000;   // 1 hora, contada desde que ACEPTA el reto
   const REFERRAL_DISCOUNT_PCT = 15;            // % de descuento al completar la meta
+  const GUEST_DISCOUNT_PCT = 15;               // cupón que gana el invitado por dejar su WhatsApp
+  const GUEST_DISCOUNT_HOURS = 24;             // vigencia de ese cupón
+  const DISCOUNT_MIN_ITEMS = 2;                // ambos descuentos exigen 2+ productos: asi el
+                                               // margen absoluto del pedido los absorbe sin perdida
 
   const newReferralCode = () => Math.random().toString(36).slice(2, 8).toUpperCase();
 
@@ -5645,20 +5649,59 @@ async function startServer() {
       const next = [...invited, clean];
       await setDoc(doc(db, "referrals", snap.id), { invited: next }, { merge: true });
 
-      // Cada invitado es además un lead real para el bot.
+      // Cada invitado es además un lead real para el bot, y se lleva su propio
+      // cupón. Guardamos la vigencia para poder validarla después contra el reloj.
+      const guestExpires = Date.now() + GUEST_DISCOUNT_HOURS * 60 * 60 * 1000;
       try {
         await setDoc(doc(db, "customers", clean), {
           phone: clean,
           source: "referido",
           referralCode: d.code,
+          discountPct: GUEST_DISCOUNT_PCT,
+          discountMinItems: DISCOUNT_MIN_ITEMS,
+          discountExpiresAt: guestExpires,
           createdAt: new Date().toISOString(),
         }, { merge: true });
       } catch (e: any) {
         console.warn("[Referral] No se pudo guardar el lead:", e?.message);
       }
 
+      // Mensaje de bienvenida con el cupón. Ojo: Twilio solo permite escribir
+      // primero dentro de la ventana de 24h o con plantilla aprobada, así que
+      // esto llega si ese número ya habló con el bot antes. Para el resto, el
+      // front muestra un botón que abre WhatsApp y así el propio invitado abre
+      // la ventana — por eso devolvemos también el texto ya armado.
+      const guestMsg = [
+        "🎁 *¡Ganaste 15% de descuento!*",
+        "",
+        "Gracias por ayudar a tu amigo. Te activamos un *" + GUEST_DISCOUNT_PCT + "% OFF* en Jan Sel Shop.",
+        "",
+        "✅ Válido por " + GUEST_DISCOUNT_HOURS + " horas",
+        "✅ En el producto que quieras del catálogo",
+        "✅ Aplica llevando " + DISCOUNT_MIN_ITEMS + " productos o más",
+        "🚚 Envío gratis y pagas al recibir",
+        "",
+        "Escríbeme *QUIERO* y te muestro el catálogo 👇",
+      ].join(String.fromCharCode(10));
+
+      try {
+        await sendWhatsApp("whatsapp:+" + clean, guestMsg);
+        console.log(`[Referral] Cupón enviado por WhatsApp a ${clean}`);
+      } catch (e: any) {
+        console.warn(`[Referral] No se pudo escribir primero a ${clean} (ventana de 24h):`, e?.message);
+      }
+
       console.log(`[Referral] ${d.code}: ${next.length}/${REFERRAL_GOAL} invitados`);
-      res.json(referralState({ ...d, invited: next }));
+      res.json({
+        ...referralState({ ...d, invited: next }),
+        guest: {
+          discountPct: GUEST_DISCOUNT_PCT,
+          hours: GUEST_DISCOUNT_HOURS,
+          minItems: DISCOUNT_MIN_ITEMS,
+          expiresAt: guestExpires,
+          waText: guestMsg,
+        },
+      });
     } catch (e: any) {
       console.error("[Referral Join] Error:", e?.message);
       res.status(500).json({ error: e?.message || "Error registrando el invitado" });

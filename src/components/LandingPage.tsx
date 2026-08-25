@@ -29,7 +29,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { Link } from "react-router-dom";
-import ReferralChallenge, { ReferralJoin } from "./ReferralChallenge";
+import ReferralChallenge, { ReferralJoin, Confetti } from "./ReferralChallenge";
 import { getProxiedImageUrl } from "../lib/utils";
 import toast from "react-hot-toast";
 import PromoFlow from "./PromoFlow";
@@ -168,6 +168,11 @@ export const TRENDING_PRODUCTS = [
     badge: "🔋 ARRANQUE RÁPIDO",
   },
 ];
+
+// El descuento por invitar exige llevar 2+ productos: en un pedido de dos el
+// margen absoluto es bastante mayor, asi que el 15% sale de ahi sin comerse
+// la ganancia de una venta suelta.
+const REFERRAL_MIN_ITEMS = 2;
 
 const CATEGORIES = ["Todos", "Motos", "Autos", "Tecnología"];
 
@@ -814,7 +819,9 @@ export default function LandingPage() {
       });
     }
 
-    const referralDiscount = Math.round((intermediateTotal * referralPct) / 100);
+    const referralDiscount = totalQty >= REFERRAL_MIN_ITEMS
+      ? Math.round((intermediateTotal * referralPct) / 100)
+      : 0;
     const finalTotal = Math.max(0, intermediateTotal - prepaymentDiscount - referralDiscount);
     return { subtotal, originalSubtotal, totalQty, quantityDiscount, prepaymentDiscount, referralDiscount, finalTotal, savings: originalSubtotal - finalTotal };
   };
@@ -2080,6 +2087,14 @@ export default function LandingPage() {
                       <span className="font-black font-mono">-${referralDiscount.toLocaleString()}</span>
                     </div>
                   )}
+                  {referralPct > 0 && totalQty < REFERRAL_MIN_ITEMS && (
+                    <div className="flex items-center gap-2 text-amber-300 bg-amber-500/10 px-3 py-2 rounded-xl border border-amber-500/20">
+                      <span className="text-base">🎁</span>
+                      <span className="text-[11px] leading-snug">
+                        Tienes <strong>{referralPct}% OFF</strong> esperando. Agrega {REFERRAL_MIN_ITEMS - totalQty} producto mas para aplicarlo.
+                      </span>
+                    </div>
+                  )}
                   {prepaymentDiscount > 0 && (
                     <div className="flex justify-between text-amber-400 bg-amber-400/5 px-3 py-2 rounded-xl border border-amber-400/10">
                       <span>Dto. Anticipado</span>
@@ -2481,6 +2496,14 @@ export default function LandingPage() {
                           <span className="font-black font-mono">-${referralDiscount.toLocaleString()}</span>
                         </div>
                       )}
+                      {referralPct > 0 && totalQty < REFERRAL_MIN_ITEMS && (
+                        <div className="flex items-center gap-2 text-amber-300 bg-amber-500/10 px-3 py-2 rounded-xl border border-amber-500/20">
+                          <span className="text-base">🎁</span>
+                          <span className="text-[11px] leading-snug">
+                            Tienes <strong>{referralPct}% OFF</strong> esperando. Agrega {REFERRAL_MIN_ITEMS - totalQty} producto mas para aplicarlo.
+                          </span>
+                        </div>
+                      )}
                       <div className="flex justify-between text-slate-400"><span>Envío:</span><span className="text-emerald-400 font-black">¡GRATIS! 🚚</span></div>
                       <div className="h-px bg-white/5 my-2" />
                       <div className="flex justify-between items-baseline">
@@ -2580,6 +2603,23 @@ export default function LandingPage() {
                       <div className="absolute inset-[-6px] rounded-full bg-gradient-to-br from-amber-300 via-amber-500 to-amber-700 shadow-[0_8px_30px_-8px_rgba(245,158,11,0.5)]" />
                       <div className="absolute inset-0 rounded-full bg-neutral-950" />
 
+                      {/* Bombillas del aro: el detalle que hace que se sienta feria/casino */}
+                      {Array.from({ length: 16 }).map((_, b) => {
+                        const a = (b / 16) * Math.PI * 2;
+                        return (
+                          <motion.span
+                            key={b}
+                            className="absolute w-1.5 h-1.5 rounded-full bg-amber-200 z-10"
+                            style={{
+                              left: "calc(50% + " + (Math.cos(a) * 50).toFixed(2) + "% - 3px)",
+                              top: "calc(50% + " + (Math.sin(a) * 50).toFixed(2) + "% - 3px)",
+                            }}
+                            animate={{ opacity: [0.25, 1, 0.25], scale: [0.8, 1.25, 0.8] }}
+                            transition={{ duration: 1.1, repeat: Infinity, delay: b * 0.07 }}
+                          />
+                        );
+                      })}
+
                       {/* Puntero */}
                       <div className="absolute top-[-14px] left-1/2 -translate-x-1/2 z-20 drop-shadow-lg">
                         <div className="w-0 h-0 border-l-[11px] border-l-transparent border-r-[11px] border-r-transparent border-t-[22px] border-t-amber-400" />
@@ -2655,6 +2695,7 @@ export default function LandingPage() {
                     <h3 className="text-xl font-black text-white uppercase tracking-tight mb-1">¡Felicidades!</h3>
                     <p className="text-xs text-neutral-400 mb-4">Ganaste un premio exclusivo por hoy:</p>
                     <div className="bg-gradient-to-r from-amber-500/15 to-orange-500/10 border border-amber-400/30 rounded-2xl py-4 px-4 mb-6">
+                      <Confetti />
                       <span className="text-lg font-black text-amber-300">{wheelPrize}</span>
                     </div>
                     <button
@@ -3012,6 +3053,7 @@ export default function LandingPage() {
         open={showReferral}
         onClose={() => setShowReferral(false)}
         onUnlock={(pct) => setReferralPct(pct)}
+        minItems={REFERRAL_MIN_ITEMS}
       />
       {joinCode && <ReferralJoin code={joinCode} onDone={() => setJoinCode(null)} />}
     </div>

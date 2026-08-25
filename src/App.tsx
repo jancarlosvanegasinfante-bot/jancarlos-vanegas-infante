@@ -4816,6 +4816,23 @@ import ProductDetail from "./components/ProductDetail";
 export default function App() {
   return (
     <BrowserRouter>
+      {/* Toaster global: estaba importado pero nunca montado, asi que NINGUN
+          toast de la app se veia — ni los de exito ni los de error. Por eso
+          acciones que si funcionaban parecian "no hacer nada". */}
+      <Toaster
+        position="top-center"
+        toastOptions={{
+          duration: 3500,
+          style: {
+            background: "#0b0f1a",
+            color: "#fff",
+            border: "1px solid rgba(251,191,36,0.25)",
+            borderRadius: "16px",
+            fontSize: "13px",
+            fontWeight: 600,
+          },
+        }}
+      />
       <Routes>
         <Route path="/tienda/:slug" element={<Storefront />} />
         <Route path="/catalog" element={<Navigate to="/landing" replace />} />
