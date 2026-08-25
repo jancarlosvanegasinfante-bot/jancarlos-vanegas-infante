@@ -2178,6 +2178,7 @@ function ReportsTab({
                   timestamp: any;
                   whatsappStatus?: string;
                   manualAgent?: string;
+                  buttons?: any[];
                 }> = [];
 
                 activeUserConv.messages.forEach((msg, idx) => {

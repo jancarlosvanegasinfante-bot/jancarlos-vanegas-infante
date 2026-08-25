@@ -2969,7 +2969,6 @@ async function ensureAllTemplates(): Promise<{
   mainMenuSid: string | null;
   categoriesSid: string | null;
   otherCategoriesSid: string | null;
-  otherCategories2Sid: string | null;
   keepChatSid: string | null;
 }> {
   const result = {
@@ -2977,7 +2976,6 @@ async function ensureAllTemplates(): Promise<{
     mainMenuSid: null as string | null,
     categoriesSid: null as string | null,
     otherCategoriesSid: null as string | null,
-    otherCategories2Sid: null as string | null,
     keepChatSid: null as string | null
   };
 
@@ -3071,58 +3069,30 @@ async function ensureAllTemplates(): Promise<{
     }
 
     // 4. Other Categories Menu
-    if (d?.otherCategoriesTemplateSidV3) {
-      result.otherCategoriesSid = d.otherCategoriesTemplateSidV3;
+    if (d?.otherCategoriesTemplateSidV4) {
+      result.otherCategoriesSid = d.otherCategoriesTemplateSidV4;
     } else {
-      console.log("[WhatsApp Buttons] Creando template de otras categorías v3...");
+      console.log("[WhatsApp Buttons] Creando template de otras categorías v4...");
       const content = await (twilioClient as any).content.v1.contents.create({
-        friendlyName: `jan_other_cats_v3_${Date.now()}`,
+        friendlyName: `jan_other_cats_v4_${Date.now()}`,
         language: "es",
         variables: {},
         types: {
           "twilio/quick-reply": {
             body: "También contamos con estas increíbles secciones. Selecciona una opción 👇",
             actions: [
-              { title: "Autos y Herram. 🚗", id: "CAT_AUTOS" },
-              { title: "Hogar y Aseo 🧼", id: "CAT_HOME" },
-              { title: "Más Secciones ➡️", id: "CAT_OTHER2" }
-            ]
-          },
-          "twilio/text": {
-            body: "Otras secciones disponibles:\n\n- Autos y Herram. 🚗\n- Hogar y Aseo 🧼\n- Más Secciones ➡️"
-          }
-        }
-      });
-      result.otherCategoriesSid = content.sid;
-      await setDoc(doc(db, "config", "system"), { otherCategoriesTemplateSidV3: content.sid }, { merge: true });
-    }
-
-
-    // 4b. Other Categories Menu (nivel 3)
-    if (d?.otherCategories2TemplateSidV2) {
-      result.otherCategories2Sid = d.otherCategories2TemplateSidV2;
-    } else {
-      console.log("[WhatsApp Buttons] Creando template de otras categorías v2 (nivel 3)...");
-      const content = await (twilioClient as any).content.v1.contents.create({
-        friendlyName: `jan_other_cats2_v2_${Date.now()}`,
-        language: "es",
-        variables: {},
-        types: {
-          "twilio/quick-reply": {
-            body: "¡Todavía hay más! Selecciona una opción 👇",
-            actions: [
-              { title: "Salud y Belleza 🧴", id: "CAT_BEAUTY" },
-              { title: "Moda y Variedades 👗", id: "CAT_MODAPETS" },
+              { title: "Motos 🏍️", id: "CAT_MOTOS" },
+              { title: "Autos 🚗", id: "CAT_AUTOS" },
               { title: "Menú Principal 🔙", id: "MENU_BACK" }
             ]
           },
           "twilio/text": {
-            body: "Más secciones disponibles:\n\n- Salud y Belleza 🧴\n- Moda y Variedades 👗\n- Menú Principal 🔙"
+            body: "Otras secciones disponibles:\n\n- Motos 🏍️\n- Autos 🚗\n- Menú Principal 🔙"
           }
         }
       });
-      result.otherCategories2Sid = content.sid;
-      await setDoc(doc(db, "config", "system"), { otherCategories2TemplateSidV2: content.sid }, { merge: true });
+      result.otherCategoriesSid = content.sid;
+      await setDoc(doc(db, "config", "system"), { otherCategoriesTemplateSidV4: content.sid }, { merge: true });
     }
 
     // 5. Keep Chatting Menu
@@ -3255,25 +3225,6 @@ async function sendOtherCategoriesMenu(to: string, from: string): Promise<boolea
     return false;
   }
 }
-
-async function sendOtherCategoriesMenu2(to: string, from: string): Promise<boolean> {
-  if (!twilioClient) return false;
-  const templates = await ensureAllTemplates();
-  if (!templates.otherCategories2Sid) return false;
-  try {
-    await (twilioClient as any).messages.create({
-      from: normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886"),
-      to: normalizePhone(to),
-      contentSid: templates.otherCategories2Sid
-    });
-    console.log(`[WhatsApp Buttons] Menú de otras categorías (nivel 3) enviado a ${to}`);
-    return true;
-  } catch (e: any) {
-    console.error("[WhatsApp Buttons] Error enviando Menú de Otras Categorías (nivel 3):", e.message);
-    return false;
-  }
-}
-
 async function sendKeepChatPrompt(to: string, from: string): Promise<boolean> {
   if (!twilioClient) return false;
   const templates = await ensureAllTemplates();
@@ -3524,22 +3475,16 @@ async function sendTrendingProducts(to: string, from: string, assignedStoreId: s
     const products = await loadProductsForStore(assignedStoreId);
     
     const TRENDING_IDS = [
-      "carplay-para-moto",
-      "modem-wifi-portatil",
-      "camara-dvr-25",
-      "inter-comunicador-y10",
-      "holder-cargador-inalambr",
-      "funda-protectora-para-moto",
-      "destornillador-atornillador-electrico",
-      "volante-seguro-pro",
-      "cargador-bateria-inteligente",
-      "kit-renovacion-veh",
-      "lampara-led-sensor",
-      "candado-alarma-grande",
-      "compresor-portatil-digital",
-      "hidro-lavadora-48v",
-      "mini-aspiradora-portatil",
-      "kit-saca-golpes"
+      "game-stick-retro-m8",
+      "mini-pulidora-inalambrica",
+      "soporte-de-carga-magnetica",
+      "selfie-stick-tripode",
+      "iniciador-de-bateria",
+      "aspiradora-de-mano",
+      "carpa-cobertor-carro",
+      "candado-moto-manubrio",
+      "cargador-celular-moto",
+      "soporte-holder-moto"
     ];
 
     const matched = products.filter((p: any) => {
@@ -5092,24 +5037,31 @@ Genera la recomendación en JSON respetando la estructura solicitada.`;
   }
 
   // PROCEDURAL RULES FALLBACK (Master fallback if no keys or API failed)
-  let customerProfile = "Interés en optimizar el tiempo, practicidad y soluciones eficientes en el hogar.";
-  let recommendedProductId = "aspiradora-portatil";
-  let recommendedProductName = "Aspiradora Portátil Inalámbrica de Alta Succión";
-  let reasoning = "Se detectó que el cliente valora la limpieza y la practicidad por su compra anterior. La aspiradora inalámbrica ofrece excelente versatilidad tanto para el hogar como para el carro.";
-  let suggestedMessage = `Hola *${customerName}* 👋\n\nHace unos días recibiste tu *${productName}* de Jansel Shop. Esperamos que te haya encantado y esté facilitando tu rutina. ¡Muchas gracias por tu confianza! 🏠✨\n\nComo eres parte de nuestro selecto grupo de *Clientes VIP*, quería contarte que acabamos de recibir pocas unidades en preventa de la nueva *Aspiradora Portátil Inalámbrica de Alta Succión*. 🔋🧹\n\nEstá diseñada tanto para el hogar como para limpiar rincones difíciles del carro sin cables molestos. Por ser VIP, te la ofrecemos hoy con un *15% de descuento especial* y envío gratis con Pago Contra Entrega.\n\n¿Te gustaría que te la despachemos hoy mismo para aprovechar la promoción? ¡Avísame si te aseguro una unidad! 😉`;
+  // Recomendaciones ancladas al catálogo real de 10 productos.
+  let customerProfile = "Cliente práctico que valora la tecnología útil en su día a día.";
+  let recommendedProductId = "soporte-de-carga-magnetica";
+  let recommendedProductName = "Soporte de Carga Magnética 3 en 1";
+  let reasoning = "Sin señal clara de categoría, se recomienda el producto más transversal del catálogo: sirve en casa, oficina y carro, y resuelve el problema universal de la batería.";
+  let suggestedMessage = `Hola *${customerName}* 👋\n\nHace unos días recibiste tu *${productName}* de Jansel Shop. ¡Esperamos que te haya encantado! 🙌\n\nComo *Cliente VIP*, quiero contarte del *Soporte de Carga Magnética 3 en 1*: carga celular, audífonos y reloj al mismo tiempo con 15W, es plegable y te lo llevas a donde sea.\n\nHoy con *envío gratis* y Pago Contra Entrega. ¿Te lo despacho? 😊`;
 
-  if (normalizedProduct.includes("hidro") || normalizedProduct.includes("lava") || normalizedProduct.includes("car") || normalizedProduct.includes("moto") || normalizedProduct.includes("bateria")) {
-    customerProfile = "Apasionado del cuidado automotriz, le gusta mantener su carro impecable y seguro.";
-    recommendedProductId = "seguro-volante-pro";
-    recommendedProductName = "Seguro para Volante Pro Premium";
-    reasoning = "El cliente compró un artículo para cuidado vehicular. Se deduce que tiene carro y valora su protección. El Seguro para Volante complementa perfectamente ofreciendo máxima seguridad física en sus viajes.";
-    suggestedMessage = `Hola *${customerName}* 👋\n\nHace unos días recibiste tu *${productName}* de Jansel Shop. ¡Esperamos que dejes tu máquina impecable! 🧼🚗💨\n\nComo eres uno de nuestros *Clientes VIP*, queremos consentirte. Hoy nos llegó un lote exclusivo y muy limitado del *Seguro para Volante Antirrobo Pro Premium*.\n\nEs ultra resistente, fácil de instalar en segundos y es la mayor protección física para tu carro. Por ser cliente VIP, te lo ofrecemos hoy con un *precio preferencial de preventa* y envío gratis Contra Entrega. 🔒✨\n\n¿Dime si te lo despachamos hoy mismo para que llegue directo a tu casa? ¡Quedan muy pocas unidades en stock!`;
-  } else if (normalizedProduct.includes("facial") || normalizedProduct.includes("belleza") || normalizedProduct.includes("crema") || normalizedProduct.includes("pelo") || normalizedProduct.includes("cabello") || normalizedProduct.includes("makeup") || normalizedProduct.includes("maquillaje")) {
-    customerProfile = "Persona enfocada en el cuidado personal, belleza y estética de primer nivel.";
-    recommendedProductId = "serum-acido-hialuronico";
-    recommendedProductName = "Sérum Facial de Ácido Hialurónico Anti-Edad";
-    reasoning = "El cliente muestra preferencia por productos cosméticos y de bienestar. Se sugiere complementar su rutina diaria con un Sérum de Ácido Hialurónico de rápida absorción para una hidratación profunda.";
-    suggestedMessage = `Hola *${customerName}* 👋\n\nHace unos días recibiste tu *${productName}* de Jansel Shop. ¡Esperamos que esté transformando tu rutina diaria de cuidado! 🧴✨\n\nComo eres parte de nuestros *Clientes VIP*, hoy te escribimos con un beneficio súper especial. Acabamos de ingresar una edición limitada de nuestro *Sérum Facial de Ácido Hialurónico y Vitamina C*.\n\nEs ideal para rejuvenecer, iluminar y darle una hidratación ultra profunda a tu piel. Por ser VIP, tienes envío gratis hoy y un *descuento exclusivo del 20%*.\n\n¿Dime si te gustaría que te despachemos uno hoy mismo para sumarlo a tu kit? ¡Avísame antes de que se agote! 🌸`;
+  if (normalizedProduct.includes("moto") || normalizedProduct.includes("holder") || normalizedProduct.includes("candado") || normalizedProduct.includes("casco")) {
+    customerProfile = "Motociclista que invierte en seguridad y comodidad para su moto.";
+    recommendedProductId = "candado-moto-manubrio";
+    recommendedProductName = "Candado para Moto Manubrio Seguridad RC";
+    reasoning = "El cliente compró un accesorio de moto. La preocupación número uno de todo motero es el robo, y el candado de manubrio es la compra complementaria natural.";
+    suggestedMessage = `Hola *${customerName}* 👋\n\nHace unos días recibiste tu *${productName}* de Jansel Shop. ¡Esperamos que la estés disfrutando en cada rodada! 🏍\n\nComo *Cliente VIP*, te cuento del *Candado de Manubrio Antirrobo*: bloquea el freno o el manubrio con acero de alta resistencia, y se pone en segundos.\n\nHoy con *envío gratis* Contra Entrega. ¿Te aseguro uno? 🔒`;
+  } else if (normalizedProduct.includes("carpa") || normalizedProduct.includes("carro") || normalizedProduct.includes("auto") || normalizedProduct.includes("aspirador") || normalizedProduct.includes("pulidora") || normalizedProduct.includes("bateria")) {
+    customerProfile = "Dueño de vehículo que cuida su carro y quiere evitar imprevistos.";
+    recommendedProductId = "iniciador-de-bateria";
+    recommendedProductName = "Iniciador de Batería TC 12V";
+    reasoning = "El cliente compró algo para su vehículo. Quedarse varado por la batería es el miedo más común, y el iniciador con Pulse Repair resuelve ese dolor puntual.";
+    suggestedMessage = `Hola *${customerName}* 👋\n\nHace unos días recibiste tu *${productName}* de Jansel Shop. ¡Esperamos que tu carro esté impecable! 🚗\n\nComo *Cliente VIP*, te cuento del *Iniciador de Batería 12V con Pulse Repair*: carga, repara y arranca tu carro o moto sin depender de nadie.\n\nHoy con *envío gratis* Contra Entrega. ¿Te lo despacho? 🔋`;
+  } else if (normalizedProduct.includes("game") || normalizedProduct.includes("consola") || normalizedProduct.includes("selfie") || normalizedProduct.includes("tripode") || normalizedProduct.includes("carga")) {
+    customerProfile = "Perfil tecnológico: entretenimiento, gadgets y creación de contenido.";
+    recommendedProductId = "game-stick-retro-m8";
+    recommendedProductName = "Game Stick Retro M8 4K";
+    reasoning = "El cliente compró tecnología. La consola retro es el producto de mayor atractivo emocional del catálogo y encaja con un perfil de entretenimiento en casa.";
+    suggestedMessage = `Hola *${customerName}* 👋\n\nHace unos días recibiste tu *${productName}* de Jansel Shop. ¡Esperamos que le estés sacando provecho! 🎮\n\nComo *Cliente VIP*, te cuento del *Game Stick Retro M8*: salida 4K, 64GB, más de 10.000 juegos clásicos y 2 controles inalámbricos incluidos. Conectas el HDMI y listo.\n\nHoy con *envío gratis* Contra Entrega. ¿Te lo aparto? 🔥`;
   }
 
   return { customerProfile, recommendedProductId, recommendedProductName, suggestedMessage, reasoning };
@@ -5482,7 +5434,7 @@ async function startServer() {
         console.log(`[Admin Send Message] Oferta pendiente guardada para ${cleanPhone}: ${offeredProduct} @ ${offeredPrice}`);
       }
 
-      let sendResult = false;
+      let sendResult: any = false;
       if (targetPlatform === "whatsapp" || formattedPhone.startsWith("whatsapp:")) {
         sendResult = await sendWhatsApp(formattedPhone, message || "", mediaUrl || undefined, undefined, botNumber);
       } else {
@@ -7570,12 +7522,12 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
               respondedAt: serverTimestamp()
             });
           }
-        } else if (buttonPayload === "CAT_HOME") {
-          await sendCategoryFeaturedProducts(from, to, ["hogar", "cocina", "aseo"], "Hogar, Cocina y Aseo 🧼", assignedStoreId);
+        } else if (buttonPayload === "CAT_MOTOS") {
+          await sendCategoryFeaturedProducts(from, to, ["motos"], "Motos 🏍️", assignedStoreId);
           if (activityRefId) {
             await updateDoc(doc(db, "activities", activityRefId), {
               status: "respondido",
-              response: "[Productos enviados: Hogar, Cocina y Aseo 🧼]",
+              response: "[Productos enviados: Motos 🏍️]",
               respondedAt: serverTimestamp()
             });
           }
@@ -7589,56 +7541,11 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
             });
           }
         } else if (buttonPayload === "CAT_AUTOS") {
-          await sendCategoryFeaturedProducts(from, to, ["autos", "herramientas"], "Autos y Herramientas 🚗", assignedStoreId);
+          await sendCategoryFeaturedProducts(from, to, ["autos"], "Autos 🚗", assignedStoreId);
           if (activityRefId) {
             await updateDoc(doc(db, "activities", activityRefId), {
               status: "respondido",
-              response: "[Productos enviados: Autos y Herramientas 🚗]",
-              respondedAt: serverTimestamp()
-            });
-          }
-        } else if (buttonPayload === "CAT_BEAUTY") {
-          await sendCategoryFeaturedProducts(from, to, ["belleza", "salud"], "Salud y Belleza 🧴", assignedStoreId);
-          if (activityRefId) {
-            await updateDoc(doc(db, "activities", activityRefId), {
-              status: "respondido",
-              response: "[Productos enviados: Salud y Belleza 🧴]",
-              respondedAt: serverTimestamp()
-            });
-          }
-        } else if (buttonPayload === "CAT_OTHER2") {
-          await sendOtherCategoriesMenu2(from, to);
-          if (activityRefId) {
-            await updateDoc(doc(db, "activities", activityRefId), {
-              status: "respondido",
-              response: "[Menú de otras categorías 2 enviado]",
-              respondedAt: serverTimestamp()
-            });
-          }
-        } else if (buttonPayload === "CAT_MODA") {
-          await sendCategoryFeaturedProducts(from, to, ["moda"], "Moda 👗", assignedStoreId);
-          if (activityRefId) {
-            await updateDoc(doc(db, "activities", activityRefId), {
-              status: "respondido",
-              response: "[Productos enviados: Moda 👗]",
-              respondedAt: serverTimestamp()
-            });
-          }
-        } else if (buttonPayload === "CAT_PETS") {
-          await sendCategoryFeaturedProducts(from, to, ["mascotas", "bebe", "jugueteria"], "Mascotas, Bebés y Juguetería 🐾🍼", assignedStoreId);
-          if (activityRefId) {
-            await updateDoc(doc(db, "activities", activityRefId), {
-              status: "respondido",
-              response: "[Productos enviados: Mascotas, Bebés y Juguetería]",
-              respondedAt: serverTimestamp()
-            });
-          }
-        } else if (buttonPayload === "CAT_MODAPETS") {
-          await sendCategoryFeaturedProducts(from, to, ["moda", "mascotas", "bebe", "jugueteria"], "Moda, Mascotas y Juguetería 👗🐾", assignedStoreId);
-          if (activityRefId) {
-            await updateDoc(doc(db, "activities", activityRefId), {
-              status: "respondido",
-              response: "[Productos enviados: Moda, Mascotas y Juguetería]",
+              response: "[Productos enviados: Autos 🚗]",
               respondedAt: serverTimestamp()
             });
           }

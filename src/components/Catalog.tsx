@@ -272,11 +272,11 @@ export default function Catalog() {
             className="mb-8"
           >
             <img 
-              src="/images/logo.jpg" 
+              src="/images/logo.jpeg" 
               alt="Jansel Shop Logo" 
               className="w-24 h-24 object-contain rounded-2xl shadow-[0_0_30px_rgba(0,180,255,0.4)] mx-auto hover:scale-105 transition-transform"
               onError={(e) => {
-                e.currentTarget.src = "/images/logo.png";
+                e.currentTarget.src = "/images/logo.jpeg";
                 e.currentTarget.onerror = null;
               }}
             />
