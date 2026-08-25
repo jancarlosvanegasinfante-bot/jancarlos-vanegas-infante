@@ -376,7 +376,24 @@ export async function dbGetDocs(collectionName: string, constraints: any[] = [])
 
   if (supabaseServer) {
     try {
-      const { data, error } = await supabaseServer.from(collectionName).select("*");
+      // Empujamos orden, limite e igualdades a Postgres en vez de traer la tabla
+      // entera y filtrar en memoria. Antes, cada consulta del panel descargaba
+      // TODAS las actividades (520 kB con 818 registros) y el panel las pide cada
+      // 3.5s por pestana: con el volumen creciendo eso se vuelve insostenible.
+      let q: any = supabaseServer.from(collectionName).select("*");
+      for (const c of constraints) {
+        if (c.type === "where" && c.op === "==" && c.field) {
+          // Los documentos guardan sus campos dentro de la columna jsonb "data".
+          q = q.eq("data->>" + c.field, String(c.value));
+        } else if (c.type === "orderBy" && c.field) {
+          const asc = (c.direction || c.op) !== "desc";
+          q = q.order("data->>" + c.field, { ascending: asc, nullsFirst: false });
+        } else if (c.type === "limit") {
+          const n = Number(c.value ?? c.limit);
+          if (Number.isFinite(n) && n > 0) q = q.limit(n);
+        }
+      }
+      const { data, error } = await q;
       if (!error && data && data.length > 0) {
         if (!localDbCache[collectionName]) {
           localDbCache[collectionName] = {};
