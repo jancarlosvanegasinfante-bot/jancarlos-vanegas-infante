@@ -412,6 +412,36 @@ export async function dbGetDocs(collectionName: string, constraints: any[] = [])
         return true;
       });
     }
+
+  // orderBy y limit se creaban en el cliente pero NUNCA se aplicaban aqui, asi
+  // que toda consulta volvia en el orden arbitrario de Postgres y con la coleccion
+  // entera. Por eso el panel mostraba los mensajes desordenados y los recientes
+  // quedaban enterrados entre cientos de registros viejos.
+  const orderConstraints = constraints.filter((c: any) => c.type === "orderBy");
+  for (const c of orderConstraints) {
+    const field = c.field;
+    const desc = (c.direction || c.op) === "desc";
+    list.sort((a: any, b: any) => {
+      const av = a.data?.[field];
+      const bv = b.data?.[field];
+      // Los documentos sin ese campo van siempre al final, en ambos sentidos.
+      const aEmpty = av === undefined || av === null;
+      const bEmpty = bv === undefined || bv === null;
+      if (aEmpty && bEmpty) return 0;
+      if (aEmpty) return 1;
+      if (bEmpty) return -1;
+      let cmp: number;
+      if (typeof av === "number" && typeof bv === "number") cmp = av - bv;
+      else cmp = String(av).localeCompare(String(bv));
+      return desc ? -cmp : cmp;
+    });
+  }
+
+  const limitConstraint = constraints.find((c: any) => c.type === "limit");
+  if (limitConstraint) {
+    const n = Number(limitConstraint.value ?? limitConstraint.limit);
+    if (Number.isFinite(n) && n > 0) list = list.slice(0, n);
+  }
   }
 
   // Order in-memory
@@ -1335,7 +1365,7 @@ async function setCustomerAiPauseState(cleanFrom: string, storeId: string = "def
   for (const sId of storeIds) {
     for (const key of phoneKeys) {
       try {
-        await setDoc(doc(db, "customers", `${sId}_${key}`), {
+        await setDoc(doc(db, "customers", customerDocId(sId, key)), {
           aiPaused: !!pause,
           ...(pause ? { etapa: "asesoria_solicitada" } : { etapa: "interesado" }),
           lastInteractionAt: serverTimestamp()
@@ -1388,7 +1418,7 @@ async function processInferenceOnServer(activityId: string, data: any) {
     // mensaje del cliente suena a un "sí". Si es así, mandamos los botones de
     // confirmación exactos de una vez, sin pasar por el modelo de IA.
     try {
-      const customerProfileIdForOffer = `${assignedStoreId}_${fromPhone}`;
+      const customerProfileIdForOffer = customerDocId(assignedStoreId, fromPhone);
       const custSnapForOffer = await getDoc(doc(db, "customers", customerProfileIdForOffer));
       const pendingOffer = custSnapForOffer.exists() ? custSnapForOffer.data()?.pendingManualOffer : null;
 
@@ -1459,7 +1489,7 @@ async function processInferenceOnServer(activityId: string, data: any) {
     }
 
     // Unique customer profile per store to prevent mixing CRM states
-    const customerProfileId = `${assignedStoreId}_${fromPhone}`;
+    const customerProfileId = customerDocId(assignedStoreId, fromPhone);
     const cxSnap = await getDoc(doc(db, "customers", customerProfileId));
     const customerProfile = cxSnap.exists() ? cxSnap.data() : null;
 
@@ -3320,7 +3350,7 @@ async function triggerTrendCampaign(product: any, storeId: string): Promise<void
     // una hace poco, NI si pidió explícitamente no recibir más mensajes de marketing.
     const eligible: { phone: string; name: string; orders: any[] }[] = [];
     for (const c of categoryCandidates) {
-      const custId = `${storeId}_${c.phone}`;
+      const custId = customerDocId(storeId, c.phone);
       const custSnap = await getDoc(doc(db, "customers", custId));
       const custData = custSnap.exists() ? custSnap.data() : null;
       if (custData?.marketingOptOut) continue;
@@ -3452,7 +3482,7 @@ async function dispatchTrendQueue(): Promise<void> {
       await updateDoc(d.ref, { status: sent ? "sent" : "failed", sentAt: Date.now() });
 
       if (sent) {
-        await setDoc(doc(db, "customers", `${item.storeId}_${item.phone}`), { lastTrendOfferAt: Date.now() }, { merge: true });
+        await setDoc(doc(db, "customers", customerDocId(item.storeId, item.phone)), { lastTrendOfferAt: Date.now() }, { merge: true });
         await addDoc(collection(db, "activities"), {
           from: normalizePhone(TWILIO_FROM_NUMBER || ""),
           to: `+${item.phone}`,
@@ -3461,7 +3491,8 @@ async function dispatchTrendQueue(): Promise<void> {
           whatsappStatus: "sent",
           manualAgent: "AI Trend Campaign",
           createdAt: serverTimestamp(),
-          storeId: item.storeId
+          storeId: item.storeId,
+          timestamp: serverTimestamp(),
         });
       }
     }
@@ -3538,7 +3569,7 @@ async function sendTrendingProducts(to: string, from: string, assignedStoreId: s
     if (matched.length === 0) return;
 
     const cleanClientPhone = to.replace('whatsapp:', '').trim();
-    const customerProfileId = `${assignedStoreId}_${cleanClientPhone}`;
+    const customerProfileId = customerDocId(assignedStoreId, cleanClientPhone);
 
     await setDoc(doc(db, "customers", customerProfileId), {
       lastCategorySearch: { categories: ["trends"], categoryLabel: "Tendencias 🔥", nextOffset: offset + CATEGORY_PAGE_SIZE, isTrends: true }
@@ -3602,7 +3633,7 @@ async function sendCategoryFeaturedProducts(to: string, from: string, category: 
     if (matched.length === 0) return;
 
     const cleanClientPhone = to.replace('whatsapp:', '').trim();
-    const customerProfileId = `${assignedStoreId}_${cleanClientPhone}`;
+    const customerProfileId = customerDocId(assignedStoreId, cleanClientPhone);
 
     // Guardamos la búsqueda activa (categorías + próximo offset) para poder
     // resolver el tap en "➡️ Ver más productos" sin tener que codificar todo
@@ -3878,7 +3909,7 @@ async function sendCartActionButtons(to: string, from: string, cartSummary: stri
 // armado (varios productos), en vez de un solo producto suelto.
 async function startCheckoutFlowFromCart(from: string, cleanFrom: string, to: string, assignedStoreId: string, productoTexto: string, valorTotal: number, activityId?: string) {
   try {
-    const customerProfileId = `${assignedStoreId}_${cleanFrom}`;
+    const customerProfileId = customerDocId(assignedStoreId, cleanFrom);
     const checkoutData = {
       producto: productoTexto,
       nombre: "",
@@ -3914,7 +3945,7 @@ async function startCheckoutFlowFromCart(from: string, cleanFrom: string, to: st
 
 async function startCheckoutFlow(from: string, cleanFrom: string, to: string, assignedStoreId: string, initialProduct: string = "", activityId?: string) {
   try {
-    const customerProfileId = `${assignedStoreId}_${cleanFrom}`;
+    const customerProfileId = customerDocId(assignedStoreId, cleanFrom);
     const step = initialProduct ? "nombre" : "producto";
     const checkoutData = {
       producto: initialProduct,
@@ -4274,6 +4305,19 @@ function normalizePhone(phone: string): string {
   }
   // 4. Return with the correct Twilio prefix
   return `whatsapp:+${clean}`;
+}
+
+// Clave canonica de un telefono: solo digitos y siempre con indicativo de pais.
+// Sin esto el mismo cliente se guardaba como "+573001112233", "573001112233" y
+// "3001112233" a la vez, creando hasta tres fichas del mismo numero.
+function customerKey(phone: string): string {
+  return normalizePhone(phone).replace("whatsapp:+", "");
+}
+
+// Id estable de la ficha de cliente dentro de una tienda. Todo el codigo debe
+// construir el id por aqui para que un numero tenga UNA sola ficha, para siempre.
+function customerDocId(storeId: string, phone: string): string {
+  return (storeId || "default") + "_" + customerKey(phone);
 }
 
 function getAdminNumbers(storeConfig?: any): string[] {
@@ -5422,7 +5466,7 @@ async function startServer() {
       // reconozca EXACTAMENTE en qué quedaron y mande los botones de
       // confirmación correctos — sin depender de que la IA "adivine" bien.
       if (offeredProduct && offeredPrice) {
-        const customerProfileId = `${assignedStoreId}_${cleanPhone}`;
+        const customerProfileId = customerDocId(assignedStoreId, cleanPhone);
         await setDoc(doc(db, "customers", customerProfileId), {
           pendingManualOffer: {
             producto: offeredProduct,
@@ -5905,7 +5949,7 @@ async function startServer() {
 
       const cleanPhone = String(phone).replace("whatsapp:", "").trim();
       const storeId = "default";
-      const customerProfileId = `${storeId}_${cleanPhone}`;
+      const customerProfileId = customerDocId(storeId, cleanPhone);
 
       // Traemos cualquier dato que ya tengamos del cliente (nombre, ciudad,
       // dirección) para no pedirle de nuevo lo que ya sabemos.
@@ -6535,7 +6579,8 @@ _El pedido ya se guardó y está listo en tu tablero._`;
             orderId,
             newStatus: status,
             text: `📱 Notificación WhatsApp enviada (${status.toUpperCase()}) a ${customerName} (${customerPhone})`,
-            createdAt: new Date().toISOString()
+            createdAt: new Date().toISOString(),
+            timestamp: serverTimestamp(),
           });
           console.log(`[Order Status WhatsApp] Notification sent to ${customerPhone} for order ${orderId} (${status})`);
         } catch (sendErr: any) {
@@ -6875,7 +6920,8 @@ _El pedido ya se guardó y está listo en tu tablero._`;
         whatsappStatus: "sent",
         manualAgent: "AI Post-Purchase Followup",
         createdAt: serverTimestamp(),
-        storeId: order.storeId || ""
+        storeId: order.storeId || "",
+        timestamp: serverTimestamp(),
       });
 
       // Update order status
@@ -7370,7 +7416,7 @@ _El pedido ya se guardó y está listo en tu tablero._`;
       console.error("[WhatsApp Webhook] Error registering initial activity:", e.message);
     }
 
-    const customerProfileId = `${assignedStoreId}_${cleanFrom}`;
+    const customerProfileId = customerDocId(assignedStoreId, cleanFrom);
     const cxSnap = await getDoc(doc(db, "customers", customerProfileId));
     const customerData = cxSnap.exists() ? cxSnap.data() : null;
     const pending = customerData?.pendingConfirmation;
@@ -9044,7 +9090,7 @@ Responde directamente con el número de tu opción:
           const botGoal = storeConfig.botGoal || "reactivar ventas";
 
           // 2. Generate nudge with IA
-          const customerProfileId = `${storeId}_${cleanPhone}`;
+          const customerProfileId = customerDocId(storeId, cleanPhone);
           const cxSnap = await getDoc(doc(db, "customers", customerProfileId));
           const profile = cxSnap.exists() ? cxSnap.data() : null;
           const history = await getCrmContext(formattedPhone, storeId);

@@ -402,8 +402,14 @@ function JanAdmin() {
           snapshot.docChanges().forEach((change) => {
             if (change.type === 'added') {
               const act = change.doc.data();
-              const actTime = act.timestamp || Date.now();
-              if (actTime >= appStartTimeRef.current - 10000) {
+              // El timestamp llega como string ISO ("2026-08-04T16:34:58.870Z").
+              // Antes se comparaba tal cual contra un numero, y JS lo convertia a
+              // NaN: la condicion daba false SIEMPRE y no saltaba ninguna alerta.
+              const raw = act.timestamp ?? act.createdAt;
+              const actTime = typeof raw === "number"
+                ? raw
+                : (raw ? Date.parse(String(raw)) : Date.now());
+              if (!Number.isNaN(actTime) && actTime >= appStartTimeRef.current - 10000) {
                 if (act.type === 'add_to_cart') {
                   triggerNativeEventAlert({
                     title: "🛒 Producto en Carrito",
@@ -428,7 +434,10 @@ function JanAdmin() {
                     type: "alert",
                     enabled: nativeNotificationsEnabledRef.current
                   });
-                } else if (act.type === 'incoming_message' || act.type === 'chat' || act.whatsappStatus === 'received') {
+                  // 'recibido' es el valor que realmente escribe el servidor para un
+                  // mensaje entrante. Las otras tres condiciones no se cumplian NUNCA
+                  // (0 registros de 792), por eso los mensajes nuevos jamas avisaban.
+                } else if (act.status === 'recibido' || act.type === 'incoming_message' || act.type === 'chat' || act.whatsappStatus === 'received') {
                   triggerNativeEventAlert({
                     title: `💬 Mensaje de ${act.customerName || 'Cliente'}`,
                     body: act.message || "Nuevo mensaje recibido",
