@@ -5212,6 +5212,31 @@ async function startServer() {
   // 🗄️ SUPABASE / LOCAL DB REST API FOR CLIENT-FRONTEND PROXY
   // -------------------------------------------------------------
   
+  // DIAGNOSTICO TEMPORAL: emite un token de prueba y lo verifica en el acto.
+  // Sirve para saber si la cadena emitir->verificar esta rota, sin exponer el
+  // secreto ni entregar un token utilizable. Se retira cuando el fallo este cerrado.
+  app.get("/api/admin/selftest", (_req, res) => {
+    try {
+      const token = issueAdminSessionToken(ADMIN_PHONE_SERVER);
+      const decoded = Buffer.from(token, "base64url").toString("utf8");
+      const parts = decoded.split(".");
+      res.json({
+        secretoConfigurado: !!ADMIN_SESSION_SECRET,
+        longitudSecreto: ADMIN_SESSION_SECRET ? ADMIN_SESSION_SECRET.length : 0,
+        telefonoAdminTieneEspacios: /s/.test(process.env.ADMIN_PHONE || ""),
+        telefonoAdminLargo: ADMIN_PHONE_SERVER.length,
+        telefonoAdminEmpiezaConMas: ADMIN_PHONE_SERVER.startsWith("+"),
+        puntosEnElTelefono: (ADMIN_PHONE_SERVER.match(/./g) || []).length,
+        partesDelToken: parts.length,
+        telefonoDelTokenCoincide: parts[0] === ADMIN_PHONE_SERVER,
+        seVerificaASiMismo: verifyAdminSessionToken(token),
+        modoNube: IS_CLOUD_DB_MODE,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e?.message });
+    }
+  });
+
   app.post("/api/admin/login", async (req: express.Request, res: express.Response) => {
     try {
       const { phone, password, supabaseAccessToken } = req.body || {};
