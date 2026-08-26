@@ -1791,7 +1791,7 @@ REGLA DE CONTEXTO DE CHECKOUT: Si el cliente está enviando un mensaje libre, fo
 
     const isAwaitingHuman = customerProfile?.etapa === "asesoria_solicitada";
     const asesoriaContext = isAwaitingHuman
-      ? `\n📌 CONTEXTO DE ASESORÍA HUMANA SOLICITADA: El cliente solicitó hablar con un asesor humano y está en cola de espera. Mientras el asesor humano ingresa al chat, tu tarea es acompañarlo, charlar con él de forma súper natural, cercana, cálida e interactiva. Mantén tus mensajes un poco más cortos, escúchalo de manera muy comprensiva, aclara sus dudas con amabilidad, ofrece o filtra productos de nuestro catálogo que se ajusten a su interés actual de manera prudente, pero sin presionarlo. Mantén viva la conversación y haz que la espera sea agradable, sin dejar el chat en silencio.`
+      ? `\n📌 ATENCION PERSONALIZADA (el cliente pidio hablar con un asesor):\nA partir de aqui TU ERES el asesor. No estas haciendo tiempo ni cubriendo a nadie:\natiendes tu, de principio a fin, como lo haria el dueño de la tienda.\nREGLAS:\n1. NUNCA digas que lo transferiste, que un asesor va a entrar, que esta en cola ni\n   que espere a alguien. Nadie mas va a entrar. Prometer eso y no cumplirlo es la\n   forma mas rapida de perder al cliente.\n2. Respondele lo que sea que pregunte, con calma y en frases cortas, como escribe\n   una persona por WhatsApp. Nada de parrafos largos ni lenguaje de robot.\n3. Si es algo del catalogo, precios, envios, garantia o su pedido: resuelvelo tu,\n   tienes toda la informacion.\n4. Si de verdad es algo que no puedes resolver (un reclamo serio, un problema con\n   una entrega ya hecha, algo delicado), recien ahi di que lo vas a consultar con\n   el equipo y usa accion = "notificar_admin". Solo en ese caso.\n5. Manten viva la conversacion y no la dejes en silencio nunca.`
       : "";
 
     const colombianTimeStr = getColombiaLocalTimeFormatted();
@@ -8424,19 +8424,19 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         (cleanMsg.includes("asesor") && !cleanMsg.includes("no quiero"));
 
       if (wantsAdvisor && from.startsWith("whatsapp:")) {
-        await setDoc(doc(db, "customers", customerProfileId), { etapa: "asesoria_solicitada", aiPaused: true }, { merge: true });
-        await setDoc(doc(db, "conversations", cleanFrom), { aiPaused: true, updatedAt: serverTimestamp() }, { merge: true });
+        // ANTES: aqui se ponia aiPaused=true en customers Y en conversations, se
+        // mandaba "ya le transferi tu chat a un asesor" y se cortaba el flujo. El
+        // bot quedaba mudo para siempre hasta que alguien lo despausara a mano: el
+        // cliente escribia y no le contestaba nadie. Un lead pagado perdido cada vez.
+        //
+        // AHORA: no se pausa nada. Solo se marca la etapa, que activa el contexto de
+        // acompañamiento del prompt, y se avisa al equipo. La IA sigue atendiendo como
+        // lo haria una persona y filtra la conversacion. La pausa real ocurre unicamente
+        // cuando un asesor responde de verdad por el panel (ver /api/admin/send-message),
+        // que es el unico momento en que tiene sentido que el bot se aparte.
+        await setDoc(doc(db, "customers", customerProfileId), { etapa: "asesoria_solicitada" }, { merge: true });
 
-        const advisorMsg = "¡Claro que sí! 🙌 Ya le transferí tu chat a uno de nuestros asesores humanos. En unos minutos se contactará contigo para atenderte personalmente. Por favor dame un momento.";
-        await sendWhatsApp(from, advisorMsg, undefined, activityRefId, to);
-        if (activityRefId) {
-          await updateDoc(doc(db, "activities", activityRefId), {
-            status: "respondido",
-            response: advisorMsg,
-            respondedAt: serverTimestamp()
-          });
-        }
-
+        // El equipo se entera igual, para poder entrar si el caso lo amerita.
         try {
           let storeConfig: any = {};
           const storeSnap = await getDoc(doc(db, "stores", assignedStoreId));
@@ -8451,7 +8451,9 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
           console.error("[Advisor Interceptor] Error notificando asesoría:", e);
         }
 
-        return res.status(200).send("");
+        // Sin return a proposito: el mensaje sigue su curso normal y lo responde la
+        // IA con el contexto de asesoria, en vez de dejar al cliente esperando.
+        console.log(`[Advisor] ${cleanFrom} pidio asesor. La IA sigue atendiendo; el equipo fue notificado.`);
       }
 
       // ==============================================
