@@ -305,6 +305,17 @@ export default function LandingPage() {
   const [joinCode, setJoinCode] = useState<string | null>(null);
   const referralPrompted = useRef(false);
 
+  // Combos que el cliente agrego. Sin esto el carrito veia productos sueltos y
+  // les aplicaba el descuento por cantidad en vez del precio del combo: el
+  // Kit Motero Completo se anunciaba en $155.900 y terminaba cobrandose $176.700.
+  const [combosAplicados, setCombosAplicados] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem("jan_sel_shop_combos");
+      const parsed = saved ? JSON.parse(saved) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch { return []; }
+  });
+
   const [cart, setCart] = useState<{ product: typeof TRENDING_PRODUCTS[0]; quantity: number }[]>(() => {
     try {
       const saved = localStorage.getItem("jan_sel_shop_cart");
@@ -643,6 +654,26 @@ export default function LandingPage() {
     }
   }, [cart]);
 
+  // Los combos se guardan junto al carrito para que sobrevivan a un refresco:
+  // si se perdieran, el pedido volveria a cobrarse a precio suelto.
+  useEffect(() => {
+    try {
+      localStorage.setItem("jan_sel_shop_combos", JSON.stringify(combosAplicados));
+    } catch { /* almacenamiento no disponible */ }
+  }, [combosAplicados]);
+
+  // Si el cliente saca del carrito un producto del combo, ese combo deja de
+  // aplicar: se limpia solo para no cobrar precio de combo por algo incompleto.
+  useEffect(() => {
+    setCombosAplicados((prev) => {
+      const vigentes = prev.filter((id) => {
+        const c = ACTIVE_PROMOTIONS.find((x) => x.id === id);
+        return c && c.productIds.every((pid) => cart.some((it) => it.product.id === pid));
+      });
+      return vigentes.length === prev.length ? prev : vigentes;
+    });
+  }, [cart]);
+
   useEffect(() => {
     fetch("/api/public/config")
       .then((res) => res.json())
@@ -743,6 +774,7 @@ export default function LandingPage() {
       return;
     }
     items.forEach((p) => addToCart(p, true));
+    setCombosAplicados((prev) => (prev.includes(combo.id) ? prev : [...prev, combo.id]));
     toast.success("Combo " + combo.name + " agregado!");
     setIsCartOpen(true);
   };
@@ -760,6 +792,7 @@ export default function LandingPage() {
       return;
     }
     items.forEach((p) => addToCart(p, true));
+    setCombosAplicados((prev) => (prev.includes(combo.id) ? prev : [...prev, combo.id]));
     toast.success("¡" + combo.name + " listo! Completa tus datos 👇");
     setIsCartOpen(false);
     setCheckoutMode("formulario");
@@ -832,7 +865,28 @@ export default function LandingPage() {
       }
     }
 
-    const intermediateTotal = subtotal - quantityDiscount;
+    // Un combo solo cuenta si TODOS sus productos siguen en el carrito. Si el
+    // cliente saco uno, deja de ser el combo y vuelve a precio suelto.
+    const combosVigentes = ACTIVE_PROMOTIONS.filter(
+      (c) =>
+        combosAplicados.includes(c.id) &&
+        c.productIds.every((pid) => cart.some((it) => it.product.id === pid))
+    );
+
+    // Lo que hay que bajar para que el combo cueste lo que se anuncio.
+    const descuentoCombos = combosVigentes.reduce((total, c) => {
+      const sumaSuelta = c.productIds.reduce((s, pid) => {
+        const p = TRENDING_PRODUCTS.find((x) => x.id === pid);
+        return s + (p ? p.price : 0);
+      }, 0);
+      return total + Math.max(0, sumaSuelta - c.promoPrice);
+    }, 0);
+
+    // Se aplica el MEJOR de los dos, nunca los dos sumados: el descuento por
+    // cantidad y el del combo cubren el mismo carrito, y encimarlos regalaria
+    // margen dos veces sobre los mismos productos.
+    const descuentoAplicado = Math.max(quantityDiscount, descuentoCombos);
+    const intermediateTotal = subtotal - descuentoAplicado;
 
     // Calculate prepayment discount progressively over all units
     let prepaymentDiscount = 0;
@@ -847,10 +901,10 @@ export default function LandingPage() {
       ? Math.round((intermediateTotal * referralPct) / 100)
       : 0;
     const finalTotal = Math.max(0, intermediateTotal - prepaymentDiscount - referralDiscount);
-    return { subtotal, originalSubtotal, totalQty, quantityDiscount, prepaymentDiscount, referralDiscount, finalTotal, savings: originalSubtotal - finalTotal };
+    return { subtotal, originalSubtotal, totalQty, quantityDiscount: descuentoAplicado, combosVigentes, prepaymentDiscount, referralDiscount, finalTotal, savings: originalSubtotal - finalTotal };
   };
 
-  const { subtotal, totalQty, quantityDiscount, prepaymentDiscount, referralDiscount, finalTotal, savings } = calculateTotals();
+  const { subtotal, totalQty, quantityDiscount, combosVigentes, prepaymentDiscount, referralDiscount, finalTotal, savings } = calculateTotals();
 
   const handleProceedToForm = () => {
     setIsCartOpen(false);
@@ -932,7 +986,13 @@ export default function LandingPage() {
   const handleWhatsAppOrder = (directPaymentMode?: "contraentrega" | "anticipado") => {
     if (cart.length === 0) return toast.error("El carrito está vacío.");
     const selectedMode = directPaymentMode || paymentMethod;
-    const itemsText = cart.map((item) => `• *${item.product.name}* (x${item.quantity}) - $${item.product.price.toLocaleString()} COP c/u`).join("\n");
+    // Si el pedido viene de un combo hay que nombrarlo: antes el bot solo recibia
+    // los productos sueltos y confirmaba otro total, asi que el cliente pedia el
+    // "Kit Motero Completo" a $155.900 y le cobraban $176.700.
+    const combosText = combosVigentes.length > 0
+      ? combosVigentes.map((c: any) => `🎁 *COMBO: ${c.name}* — $${c.promoPrice.toLocaleString()} COP`).join("\n") + "\n"
+      : "";
+    const itemsText = combosText + cart.map((item) => `• *${item.product.name}* (x${item.quantity}) - $${item.product.price.toLocaleString()} COP c/u`).join("\n");
     const discountText = quantityDiscount > 0 ? `\n🎁 *Descuento Combo:* -$${quantityDiscount.toLocaleString()} COP` : "";
     const prepayText = selectedMode === "anticipado" ? `\n🌟 *Descuento Anticipado:* -$${prepaymentDiscount.toLocaleString()} COP` : "";
     const referralText = referralDiscount > 0 ? `\n🎁 *Descuento por Invitar:* -$${referralDiscount.toLocaleString()} COP` : "";
