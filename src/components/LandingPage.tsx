@@ -747,6 +747,25 @@ export default function LandingPage() {
     setIsCartOpen(true);
   };
 
+  // Camino corto del combo: agrega y baja directo al formulario de datos. Cada
+  // paso intermedio entre "lo quiero" y "escribo mi direccion" pierde pedidos, y
+  // cerrar en la propia pagina evita depender de que el cliente siga la
+  // conversacion en WhatsApp.
+  const pedirComboAhora = (combo: typeof ACTIVE_PROMOTIONS[0]) => {
+    const items = combo.productIds
+      .map((pid) => TRENDING_PRODUCTS.find((p) => p.id === pid))
+      .filter(Boolean) as typeof TRENDING_PRODUCTS;
+    if (items.length === 0) {
+      toast.error("Ese combo no esta disponible por ahora");
+      return;
+    }
+    items.forEach((p) => addToCart(p, true));
+    toast.success("¡" + combo.name + " listo! Completa tus datos 👇");
+    setIsCartOpen(false);
+    setCheckoutMode("formulario");
+    setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 200);
+  };
+
   const removeFromCart = (productId: string) => {
     setCart((prev) => prev.filter((item) => item.product.id !== productId));
     toast.success("Producto removido");
@@ -1645,11 +1664,20 @@ export default function LandingPage() {
                         Ahorras ${ahorro.toLocaleString()} COP
                       </p>
 
+                      {/* El principal lleva DIRECTO al formulario: cada paso extra
+                          entre "lo quiero" y los datos de envio pierde pedidos, y
+                          el formulario cierra la venta sin depender de WhatsApp. */}
                       <button
-                        onClick={() => addComboToCart(combo)}
+                        onClick={() => pedirComboAhora(combo)}
                         className="w-full mt-3 bg-gradient-to-r from-amber-400 to-orange-500 text-black font-black text-xs uppercase tracking-widest py-3.5 rounded-2xl hover:scale-[1.02] active:scale-95 transition-transform"
                       >
-                        Llevar combo 🛒
+                        Pedir este combo ⚡
+                      </button>
+                      <button
+                        onClick={() => addComboToCart(combo)}
+                        className="w-full mt-2 glass-card border border-white/10 text-slate-300 font-bold text-[10px] uppercase tracking-widest py-2.5 rounded-2xl hover:border-amber-400/40 transition-colors"
+                      >
+                        Agregar al carrito 🛒
                       </button>
                     </div>
                   </div>
