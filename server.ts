@@ -4270,7 +4270,12 @@ interface MetaCapiParams {
 }
 
 async function sendMetaCapiEvent(params: MetaCapiParams): Promise<void> {
-  const { pixelId, accessToken, eventName, eventId, eventSourceUrl, customerPhone, fbp, fbc, clientIp, userAgent, customData } = params;
+  const { eventName, eventId, eventSourceUrl, customerPhone, fbp, fbc, clientIp, userAgent, customData } = params;
+  // Se limpian espacios: el id del pixel llego a estar guardado como
+  // " 841277818494170", y con un id mal formado Meta descarta los eventos, que
+  // es justo lo que la campana necesita para optimizar.
+  const pixelId = String(params.pixelId || "").trim();
+  const accessToken = String(params.accessToken || "").trim();
   if (!pixelId || !accessToken) {
     console.warn(`[Meta CAPI] Faltan pixelId o accessToken, se omite el evento server-side "${eventName}".`);
     return;

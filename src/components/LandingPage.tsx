@@ -484,7 +484,12 @@ export default function LandingPage() {
   const [tiktokPixelId, setTiktokPixelId] = useState("");
 
   // --- Pixel Initialization and Tracking Functions ---
-  const initMetaPixel = (pixelId: string) => {
+  const initMetaPixel = (rawPixelId: string) => {
+    // El id llegaba con un espacio delante (" 841277818494170") por como se pego
+    // en la configuracion. Un id mal formado hace que Meta no registre eventos, y
+    // sin eventos la campana no puede optimizar: se paga sin que el algoritmo
+    // aprenda. Se limpia siempre, venga de donde venga.
+    const pixelId = String(rawPixelId || "").trim();
     if (!pixelId) return;
     const w = window as any;
     if (w.fbq) {
