@@ -478,7 +478,12 @@ let sessionExpiredNotified = false;
 // recargaban la pagina, dejando al usuario en un bucle de "sesion expirada"
 // aunque su login fuera correcto.
 function notifySessionExpired(tokenUsado?: string | null) {
-  if (tokenUsado && tokenUsado !== adminSessionToken) return;  // token ya renovado
+  // Sin token en la peticion no hubo sesion que expirar: es simplemente una
+  // consulta lanzada antes de iniciar sesion (el panel sondea cada 3.5s desde
+  // que carga). Tratar esos 403 como "sesion vencida" borraba el token que el
+  // login acababa de entregar y devolvia al usuario al login una y otra vez.
+  if (!tokenUsado) return;
+  if (tokenUsado !== adminSessionToken) return;  // token ya renovado
   const habiaToken = !!adminSessionToken;
   clearAdminSessionToken();
   if (sessionExpiredNotified) return;
