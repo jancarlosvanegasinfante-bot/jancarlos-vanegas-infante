@@ -1394,7 +1394,14 @@ async function checkIsCustomerAiPaused(cleanFrom: string, storeId: string = "def
           const d = snap.data();
           if (d) {
             if (!customerData) customerData = d;
-            if (d.aiPaused === true || d.etapa === "asesoria_solicitada") {
+            // Solo la pausa MANUAL calla al bot. Antes tambien lo callaba la etapa
+            // "asesoria_solicitada", lo que contradecia el diseño documentado dos
+            // pasos mas abajo ("solo pausamos la IA cuando el asesor responda
+            // manualmente por primera vez") y dejaba al cliente hablando solo: pedia
+            // asesor de madrugada, nadie contestaba y el bot enmudecia. Encima volvia
+            // inalcanzable el contexto de acompañamiento que ya existe (asesoriaContext).
+            // Cuando el asesor toma el chat se marca aiPaused, y ahi si el bot calla.
+            if (d.aiPaused === true) {
               return { isPaused: true, reason: `customers key=${custRefId}`, customerData: d };
             }
           }
@@ -1800,7 +1807,7 @@ ${history}
 
 MENSAJE ACTUAL: ${safeMessage}${imageParts.length > 0 ? ` (El cliente también envió una imagen que adjunto para tu análisis.${imageMatchedProducts.length > 0 ? ` Ya identificamos posibles coincidencias reales en el inventario, marcadas abajo con ⭐ — si la foto se parece a alguno de esos, ofrécelo con seguridad usando su nombre y precio EXACTOS del inventario, no inventes uno nuevo.` : ` No encontramos una coincidencia exacta en el inventario para esta foto — descríbele lo que ves y pregúntale qué necesita para poder ayudarlo mejor, sin inventar un producto que no existe.`}` : ""}
 
-INVENTARIO ACTUAL (Vista curada de los más vendidos y productos relevantes para esta consulta. Tenemos más de 150 productos en total, si piden algo diferente pregúntale a tu jefe o usa "notificar_admin"):
+INVENTARIO ACTUAL (Vista curada de los más vendidos y productos relevantes para esta consulta. Este es TODO el catalogo disponible; si piden algo que no esta aqui NO lo inventes, usa "notificar_admin"):
 ${compactProductsString}
 
 🧠 ROL DE VENDEDOR EXPERTO (aumento de ticket):
@@ -8774,7 +8781,7 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         console.log(`[WhatsApp Interceptor] Catalog request detected from ${from}. Replying deterministically with trending products first...`);
 
         const greeting = getTimeGreeting();
-        const CATALOG_SHORT_MESSAGE = `${greeting} 👋 Te doy la bienvenida a *Jan Sel Shop*! 💎\n\nTenemos un catálogo gigante con *más de 150 productos espectaculares*. Cualquier cosa que busques o te imagines, ¡te la conseguimos de una! 🚀\n\n🔥 *ENVÍO GRATIS A TODA COLOMBIA* 🇨🇴\n🚛 *PAGO CONTRA ENTREGA*\n\n👇 ¡Abajo te dejo nuestros *Productos en Tendencia* más vendidos de hoy para que los mires de una!`;
+        const CATALOG_SHORT_MESSAGE = `${greeting} 👋 Bienvenido a *Jan Sel Shop*! 💎\n\nTrabajamos una *selección corta de productos que sí funcionan*, no un catálogo interminable. Si buscas algo puntual pregúntame y te digo de una si te lo conseguimos 🚀\n\n🔥 *ENVÍO GRATIS A TODA COLOMBIA* 🇨🇴\n🚛 *PAGAS CUANDO LO RECIBAS* — no mandas un peso por adelantado\n\n👇 Mira lo más vendido de hoy:`;
 
         await sendWhatsApp(from, CATALOG_SHORT_MESSAGE, undefined, activityRef.id, to);
         await new Promise(resolve => setTimeout(resolve, 1200));
