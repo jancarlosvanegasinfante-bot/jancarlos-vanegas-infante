@@ -803,6 +803,60 @@ async function cancelPendingFollowUps(phone: string, storeId: string = "default"
   }
 }
 
+// ── Cierre limpio de la conversacion por inactividad ────────────────────────
+// Minutos sin que el cliente escriba antes de avisarle, y margen que se le da
+// tras el aviso. Estan juntos para poder ajustarlos sin rastrear el archivo.
+const INACTIVIDAD_AVISO_MIN = 20;
+const INACTIVIDAD_CIERRE_MIN = 10;
+
+// Cancela solo los cierres pendientes, sin tocar los seguimientos comerciales.
+async function cancelInactivityClose(phone: string, storeId: string = "default") {
+  const cleanPhone = phone.replace('whatsapp:', '');
+  try {
+    const snap = await getDocs(query(
+      collection(db, "followups"),
+      where("phone", "==", cleanPhone),
+      where("storeId", "==", storeId),
+      where("status", "==", "pending")
+    ));
+    const cierres = snap.docs.filter((d: any) => String(d.data()?.tipo || "").startsWith("cierre_"));
+    if (cierres.length === 0) return;
+    const batch = writeBatch(db);
+    cierres.forEach((d: any) => batch.update(d.ref, { status: "cancelled", updatedAt: serverTimestamp() }));
+    await batch.commit();
+  } catch (e: any) {
+    console.warn("[Cierre] No se pudieron cancelar cierres previos:", e?.message);
+  }
+}
+
+// Programa el aviso (fase 'cierre_aviso') o la despedida (fase 'cierre_final').
+// Se reprograma en cada mensaje del cliente, asi que solo se dispara cuando de
+// verdad dejo de escribir.
+async function scheduleInactivityClose(
+  phone: string,
+  storeId: string = "default",
+  fase: "cierre_aviso" | "cierre_final" = "cierre_aviso"
+) {
+  const cleanPhone = phone.replace('whatsapp:', '');
+  await cancelInactivityClose(phone, storeId);
+  const minutos = fase === "cierre_aviso" ? INACTIVIDAD_AVISO_MIN : INACTIVIDAD_CIERRE_MIN;
+  try {
+    await addDoc(collection(db, "followups"), {
+      phone: cleanPhone,
+      storeId,
+      tipo: fase,
+      scheduledAt: new Date(Date.now() + minutos * 60 * 1000).toISOString(),
+      status: "pending",
+      reason: fase === "cierre_aviso" ? "Inactividad del cliente" : "Cierre tras aviso",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp()
+    });
+    console.log(`[Cierre] ${fase} programado para ${cleanPhone} en ${minutos} min`);
+  } catch (e: any) {
+    console.warn("[Cierre] No se pudo programar:", e?.message);
+  }
+}
+
 async function scheduleFollowUp(phone: string, score: number, reason: string, storeId: string = "default") {
   const cleanPhone = phone.replace('whatsapp:', '');
   
@@ -2345,6 +2399,17 @@ Jan (IA) respondió: "${jsonResponse.mensaje}"
     if (jsonResponse.accion !== "confirmar_pedido" && score > 20) {
       // Solo si el score es relevante (interesado de verdad)
       await scheduleFollowUp(fromPhone, score, jsonResponse.intencion || "Interés general", assignedStoreId);
+    }
+
+    // 8. CIERRE LIMPIO POR INACTIVIDAD
+    // Se reprograma en CADA respuesta, asi que el reloj siempre cuenta desde el
+    // ultimo mensaje. Va despues del seguimiento comercial a proposito: aquel
+    // cancela los pendientes al programarse, y este debe sobrevivir a esa
+    // cancelacion. Si el pedido ya se confirmo no hay nada que cerrar.
+    if (jsonResponse.accion !== "confirmar_pedido" && jsonResponse.accion !== "finalizar_chat") {
+      await scheduleInactivityClose(fromPhone, assignedStoreId, "cierre_aviso");
+    } else {
+      await cancelInactivityClose(fromPhone, assignedStoreId);
     }
 
   } catch (err: any) {
@@ -9106,6 +9171,55 @@ Responde directamente con el número de tu opción:
         }
 
         if (shouldExecute) {
+          // ── Cierre por inactividad ──────────────────────────────────────
+          // Mensajes fijos a proposito: no pasan por la IA, asi que no pueden
+          // fallar ni salir raros, y se leen cortos y claros. Si el cliente
+          // respondio en el intervalo, la verificacion de arriba ya descarto
+          // este followup, de modo que estos mensajes solo salen cuando de
+          // verdad dejo la conversacion abierta.
+          const tipoCierre = String(fu.tipo || "");
+          if (tipoCierre === "cierre_aviso" || tipoCierre === "cierre_final") {
+            const storeIdC = fu.storeId || "default";
+            const NL = String.fromCharCode(10);
+            const texto = tipoCierre === "cierre_aviso"
+              ? [
+                  "¿Sigues por ahí? 👀",
+                  "",
+                  `Si no me escribes en ${INACTIVIDAD_CIERRE_MIN} minutos voy a cerrar esta conversación, pero no te preocupes: puedes escribirme cuando quieras y seguimos donde la dejamos.`,
+                  "",
+                  "¿Te quedó alguna duda o te ayudo con tu pedido? 🙌"
+                ].join(NL)
+              : [
+                  "Cierro por ahora para no seguir molestándote 😊",
+                  "",
+                  "Cuando quieras retomar solo escríbeme y seguimos. Aquí estaré.",
+                  "",
+                  "¡Que tengas un buen día! 🚀"
+                ].join(NL);
+            try {
+              await sendWhatsApp(formattedPhone, texto);
+              await addDoc(collection(db, "activities"), {
+                from: normalizePhone(TWILIO_FROM_NUMBER || ""),
+                to: formattedPhone,
+                customerPhone: cleanPhone,
+                storeId: storeIdC,
+                message: tipoCierre === "cierre_aviso" ? "[Aviso de cierre por inactividad]" : "[Conversación cerrada por inactividad]",
+                status: "respondido",
+                senderType: "bot",
+                timestamp: serverTimestamp()
+              });
+              if (tipoCierre === "cierre_aviso") {
+                // Se le da el margen prometido antes de despedirse.
+                await scheduleInactivityClose(cleanPhone, storeIdC, "cierre_final");
+              }
+              console.log(`[Cierre] ${tipoCierre} enviado a ${cleanPhone}`);
+            } catch (e: any) {
+              console.error(`[Cierre] Error enviando ${tipoCierre} a ${cleanPhone}:`, e?.message);
+            }
+            await updateDoc(docSnap.ref, { status: "completed", updatedAt: serverTimestamp() });
+            continue;
+          }
+
           const storeId = fu.storeId || "default";
 
           let storeConfig: any = {};
