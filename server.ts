@@ -3823,6 +3823,121 @@ async function ensureProductListTemplate(categoryKey: string, items: any[], hasM
 
 // Envía la lista interactiva y guarda en el perfil del cliente qué productos se
 // le mostraron (índice -> producto), para poder resolver cuál tocó.
+
+// ── Menú de combos por WhatsApp ─────────────────────────────────────────────
+// Se apoya en el mismo mecanismo de listas que ya se usa para productos (hasta
+// 10 opciones, con la plantilla cacheada por hash para no recrearla en cada
+// envío). Los combos son lo que mejor margen deja, así que merecen su propia
+// entrada y no quedar solo como sugerencia suelta dentro de una conversación.
+async function ensureCombosListTemplate(items: typeof ACTIVE_PROMOTIONS): Promise<string | null> {
+  if (!twilioClient) return null;
+  try {
+    const hashSource = items.map(c => `${c.id}|${c.promoPrice}`).join(";") + "|combos_v1";
+    const hash = crypto.createHash("md5").update(hashSource).digest("hex").slice(0, 12);
+
+    const cfgSnap = await getDoc(doc(db, "config", "system"));
+    const d = cfgSnap.exists() ? cfgSnap.data() : {};
+    if (d?.combosListSid && d?.combosListHash === hash) return d.combosListSid;
+
+    const listItems = items.map((c, idx) => ({
+      // Twilio corta los títulos de lista en 24 caracteres y rechaza emojis en
+      // los botones, así que el nombre va limpio y el gancho en la descripción.
+      item: String(c.name).slice(0, 24),
+      id: `COMBO_${idx}`,
+      description: `$${c.promoPrice.toLocaleString("es-CO")} — ahorras $${(c.originalPrice - c.promoPrice).toLocaleString("es-CO")}`.slice(0, 72)
+    }));
+
+    const textFallback = items
+      .map((c, idx) => `${idx + 1}. ${c.name} - $${c.promoPrice.toLocaleString("es-CO")} (ahorras $${(c.originalPrice - c.promoPrice).toLocaleString("es-CO")})`)
+      .join(String.fromCharCode(10));
+
+    const content = await (twilioClient as any).content.v1.contents.create({
+      friendlyName: `jan_combos_list_${Date.now()}`,
+      language: "es",
+      variables: {},
+      types: {
+        "twilio/list-picker": {
+          body: "🎁 Estos son nuestros combos. Llevando el combo pagas menos que comprando por separado 👇",
+          button: "Ver combos",
+          items: listItems
+        },
+        "twilio/text": {
+          body: `🎁 *NUESTROS COMBOS*${String.fromCharCode(10)}${String.fromCharCode(10)}${textFallback}${String.fromCharCode(10)}${String.fromCharCode(10)}Respóndeme con el número del que te interese.`
+        }
+      }
+    });
+
+    await setDoc(doc(db, "config", "system"), { combosListSid: content.sid, combosListHash: hash }, { merge: true });
+    return content.sid;
+  } catch (e: any) {
+    console.error("[WhatsApp Combos] Error creando la lista de combos:", e.message);
+    return null;
+  }
+}
+
+async function sendCombosList(to: string, from: string, customerProfileId: string): Promise<boolean> {
+  if (!twilioClient) return false;
+  const combos = ACTIVE_PROMOTIONS.slice(0, 10);
+  if (combos.length === 0) return false;
+
+  const contentSid = await ensureCombosListTemplate(combos as any);
+  if (!contentSid) {
+    // Sin plantilla (Twilio caído o en revisión) igual se responde en texto: es
+    // preferible un mensaje plano a dejar al cliente sin respuesta.
+    const NL = String.fromCharCode(10);
+    const texto = "🎁 *NUESTROS COMBOS*" + NL + NL +
+      combos.map((c, i) => `${i + 1}. *${c.name}* — $${c.promoPrice.toLocaleString("es-CO")} (ahorras $${(c.originalPrice - c.promoPrice).toLocaleString("es-CO")})`).join(NL) +
+      NL + NL + "Dime el número del que quieras y te cuento qué trae 🙌";
+    await sendWhatsApp(to, texto, undefined, undefined, from);
+    return true;
+  }
+
+  try {
+    // Se guarda la lista mostrada para poder resolver después qué eligió.
+    await setDoc(doc(db, "customers", customerProfileId), {
+      lastCombosList: combos.map(c => ({ id: c.id, name: c.name, promoPrice: c.promoPrice }))
+    }, { merge: true });
+
+    await (twilioClient as any).messages.create({
+      from: normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886"),
+      to: normalizePhone(to),
+      contentSid
+    });
+    console.log(`[WhatsApp Combos] Lista de combos enviada a ${to}`);
+    return true;
+  } catch (e: any) {
+    console.error("[WhatsApp Combos] Error enviando la lista:", e.message);
+    return false;
+  }
+}
+
+// Detalle de un combo con todo lo que el cliente necesita para decidir, y un
+// cierre por elección en vez de un "¿lo quieres?" que invita al no.
+function textoDetalleCombo(combo: typeof ACTIVE_PROMOTIONS[0], productos: any[]): string {
+  const NL = String.fromCharCode(10);
+  const incluidos = combo.productIds
+    .map(pid => productos.find((p: any) => {
+      const origId = String(p.id).includes("_") ? String(p.id).split("_").slice(1).join("_") : String(p.id);
+      return origId === pid;
+    }))
+    .filter(Boolean)
+    .map((p: any) => `✅ ${p.name}`)
+    .join(NL);
+
+  const ahorro = combo.originalPrice - combo.promoPrice;
+  return [
+    `🎁 *${combo.name}*`,
+    "",
+    incluidos || combo.tagline,
+    "",
+    `~~$${combo.originalPrice.toLocaleString("es-CO")}~~  →  *$${combo.promoPrice.toLocaleString("es-CO")}*`,
+    `💰 Te ahorras $${ahorro.toLocaleString("es-CO")}`,
+    "",
+    "🚛 Envío gratis y pagas cuando lo recibas",
+    "",
+    "¿Te lo despacho hoy o prefieres mañana?"
+  ].join(NL);
+}
 async function sendProductListPicker(to: string, from: string, products: any[], categoryKey: string, customerProfileId: string, hasMore: boolean = false): Promise<boolean> {
   if (!twilioClient) return false;
   // `products` ya viene paginado (máx 9) por sendCategoryFeaturedProducts; si se
@@ -7911,6 +8026,36 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
               respondedAt: serverTimestamp()
             });
           }
+        } else if (buttonPayload.startsWith("COMBO_")) {
+          // El cliente eligio un combo de la lista. Se le manda el detalle con
+          // lo que incluye, el ahorro en pesos y un cierre por eleccion.
+          const cIdx = parseInt(buttonPayload.replace("COMBO_", ""), 10);
+          const guardados = customerData?.lastCombosList || [];
+          const elegido = guardados[cIdx];
+          const combo = elegido
+            ? ACTIVE_PROMOTIONS.find(c => c.id === elegido.id)
+            : ACTIVE_PROMOTIONS[cIdx];
+
+          if (!combo) {
+            await sendWhatsApp(from, "Uy, ese combo ya no esta disponible 😅. Mira los que tenemos:", undefined, activityRefId, to);
+            await sendCombosList(from, to, customerProfileId);
+          } else {
+            const productos = await loadProductsForStore(assignedStoreId);
+            await sendWhatsApp(from, textoDetalleCombo(combo, productos), undefined, activityRefId, to);
+            // Queda registrado como la oferta viva de esta conversacion, para que
+            // al confirmar se cobre el precio del combo y no la suma suelta.
+            await setDoc(doc(db, "customers", customerProfileId), {
+              comboOfrecido: { id: combo.id, name: combo.name, precio: combo.promoPrice },
+              etapa: "negociando"
+            }, { merge: true });
+          }
+          if (activityRefId) {
+            await updateDoc(doc(db, "activities", activityRefId), {
+              status: "respondido",
+              response: `[Combo enviado: ${combo?.name || buttonPayload}]`,
+              respondedAt: serverTimestamp()
+            });
+          }
         } else if (buttonPayload.startsWith("PROD_")) {
           const idx = parseInt(buttonPayload.replace("PROD_", ""), 10);
           const lastList = customerData?.lastProductList || [];
@@ -8777,6 +8922,35 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
       ].some(k => cleanMsg.includes(k)) || 
       (cleanMsg.includes("producto") && (cleanMsg.includes("que") || cleanMsg.includes("cual") || cleanMsg.includes("ver") || cleanMsg.includes("mostrar") || cleanMsg.includes("tienen") || cleanMsg.includes("tienes")));
 
+      // Pedido explicito de combos. Va ANTES del interceptor de catalogo porque
+      // "que combos tienen" tambien contiene "que tienen" y caeria en el catalogo
+      // general, que no es lo que el cliente pidio.
+      const isCombosRequest = [
+        "combo", "combos", "promo", "promos", "promocion", "promociones",
+        "paquete", "paquetes", "oferta especial", "ofertas especiales"
+      ].some(k => (cleanMsg || "").includes(k));
+      
+      if (isCombosRequest && from.startsWith("whatsapp:")) {
+        console.log(`[WhatsApp Interceptor] Pedido de combos detectado desde ${from}`);
+        const enviado = await sendCombosList(from, to, customerProfileId);
+        if (enviado) {
+          await updateDoc(doc(db, "activities", activityRef.id), {
+            status: "respondido",
+            response: "[Lista de combos enviada]",
+            respondedAt: serverTimestamp()
+          });
+          await setDoc(doc(db, "customers", customerProfileId), {
+            etapa: "interesado",
+            intencion: "ver_combos",
+            score: 45,
+            lastInteractionAt: serverTimestamp()
+          }, { merge: true });
+          return res.status(200).send("");
+        }
+        // Si la lista no pudo salir, se deja seguir el flujo normal de la IA en vez
+        // de dejar al cliente sin respuesta.
+      }
+      
       if (isCatalogRequest && from.startsWith("whatsapp:")) {
         console.log(`[WhatsApp Interceptor] Catalog request detected from ${from}. Replying deterministically with trending products first...`);
 
