@@ -1217,7 +1217,7 @@ export default function LandingPage() {
               <img
                 src="/images/logo.jpeg"
                 alt="Jansel Shop Logo"
-                className="relative w-12 h-12 object-contain rounded-2xl border border-amber-400/20 shadow-lg"
+                className="relative w-14 h-14 sm:w-16 sm:h-16 object-contain rounded-2xl border border-amber-400/20 shadow-lg"
                 onError={(e) => { e.currentTarget.style.display = "none"; }}
               />
             </div>
@@ -1285,6 +1285,18 @@ export default function LandingPage() {
           style={{ background: "rgba(251,191,36,0.06)", animationDelay: "-3s" }} />
 
         <div className="max-w-5xl mx-auto text-center space-y-8 relative z-10">
+
+          {/* Logo grande: lo primero que ve quien llega de un anuncio. Da identidad
+              antes de leer nada, que es lo que genera confianza en trafico frio. */}
+          <motion.img
+            src="/images/logo.jpeg"
+            alt="Jansel Shop"
+            initial={{ opacity: 0, scale: 0.85, y: -12 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ duration: 0.6, ease: "easeOut" }}
+            className="mx-auto mb-5 w-40 h-40 sm:w-52 sm:h-52 object-contain rounded-3xl border border-amber-400/25 shadow-[0_0_50px_-12px_rgba(251,191,36,0.5)]"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
+          />
 
           {/* Live badge */}
           <motion.div
