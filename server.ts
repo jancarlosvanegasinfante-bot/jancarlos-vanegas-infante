@@ -8453,7 +8453,32 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
 
         // Sin return a proposito: el mensaje sigue su curso normal y lo responde la
         // IA con el contexto de asesoria, en vez de dejar al cliente esperando.
+        // Saludo de traspaso: el cliente pidio una persona, asi que lo primero que
+        // recibe es una presentacion con nombre. Es un mensaje fijo a proposito
+        // (no pasa por la IA) para que salga siempre igual, al instante y sin
+        // riesgo de que el modelo lo enrede. De aqui en adelante contesta la IA
+        // con el contexto de atencion personalizada.
+        const nombreAsesor = "Jan Vanegas";
+        const saludoAsesor = [
+          "¡Hola! 👋 Hablas con *" + nombreAsesor + "*, asesor de ventas de Jan Sel Shop.",
+          "",
+          "Ya tomé tu conversación personalmente 🙌",
+          "",
+          "Cuéntame, ¿en qué te puedo ayudar hoy?"
+        ].join(String.fromCharCode(10));
+        await sendWhatsApp(from, saludoAsesor, undefined, activityRefId, to);
+        if (activityRefId) {
+          await updateDoc(doc(db, "activities", activityRefId), {
+            status: "respondido",
+            response: saludoAsesor,
+            respondedAt: serverTimestamp()
+          });
+        }
+
         console.log(`[Advisor] ${cleanFrom} pidio asesor. La IA sigue atendiendo; el equipo fue notificado.`);
+        // Se corta solo este mensaje para no responder dos veces (el saludo y la IA).
+        // La IA NO queda pausada: el proximo mensaje del cliente lo atiende ella.
+        return res.status(200).send("");
       }
 
       // ==============================================
