@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import { Crown, Gift, X, Zap, ChevronRight, Clock, Sparkles, MessageCircle, Truck } from "lucide-react";
+import { ACTIVE_PROMOTIONS } from "../lib/promotions";
 
 /* ──────────────────────────────────────────────────────────────────────────
    PromoFlow — Gatillos mentales de Jansel Shop
@@ -12,32 +13,54 @@ const cop = (n: number) => "$" + n.toLocaleString("es-CO");
 
 type ComboKey = "moto" | "carro" | "tech";
 
-const COMBOS: Record<ComboKey, { label: string; emoji: string; list: number; combo: number; items: { name: string; img: string }[] }> = {
+// Los precios y nombres salen de ACTIVE_PROMOTIONS, la unica fuente que leen
+// tambien la landing, el bot de WhatsApp y las fichas de producto. Antes este
+// popup tenia su propia copia con otros precios: el cliente veia "Combo Motero
+// $149.900" aqui y "Kit Motero Completo $155.900" en la seccion de abajo, y al
+// pedirlo por WhatsApp el bot no reconocia ese nombre y le ofrecia otros.
+// Las imagenes se mantienen aqui porque son decorativas de este flujo.
+const IMAGENES: Record<ComboKey, { id: string; emoji: string; imgs: { img: string; name: string }[] }> = {
   moto: {
-    label: "Combo Motero", emoji: "🏍️", list: 185700, combo: 149900,
-    items: [
-      { name: "Cargador de Celular Moto", img: "/images/cargador-celular-moto.png" },
-      { name: "Candado Antirrobo", img: "/images/candado-moto-manubrio.png" },
-      { name: "Soporte Holder Moto", img: "/images/soporte-holder-moto.png" },
+    id: "combo-kit-motero-completo", emoji: "🏍️",
+    imgs: [
+      { img: "/images/soporte-holder-moto.png", name: "Soporte Holder Moto" },
+      { img: "/images/cargador-celular-moto.png", name: "Cargador Celular Moto" },
+      { img: "/images/candado-moto-manubrio.png", name: "Candado Antirrobo" },
     ],
   },
   carro: {
-    label: "Combo Carro", emoji: "🚗", list: 280700, combo: 229900,
-    items: [
-      { name: "Soporte de Carga Magnética", img: "/images/soporte-de-carga-magnetica.png" },
-      { name: "Iniciador de Batería", img: "/images/iniciador-de-bateria.png" },
-      { name: "Carpa Cobertor Carro", img: "/images/carpa-cobertor-carro.png" },
+    id: "combo-carro-completo", emoji: "🚗",
+    imgs: [
+      { img: "/images/soporte-de-carga-magnetica.png", name: "Carga Magnética 3 en 1" },
+      { img: "/images/iniciador-de-bateria.png", name: "Iniciador de Batería" },
+      { img: "/images/carpa-cobertor-carro.png", name: "Carpa Cobertor" },
     ],
   },
   tech: {
-    label: "Combo Tecnología", emoji: "📱", list: 381700, combo: 299900,
-    items: [
-      { name: "Game Stick Retro M8", img: "/images/game-stick-retro-m8.png" },
-      { name: "Aspiradora de Mano", img: "/images/aspiradora-de-mano.png" },
-      { name: "Mini Pulidora", img: "/images/mini-pulidora-inalambrica.png" },
+    id: "combo-tecnologia-completo", emoji: "📱",
+    imgs: [
+      { img: "/images/game-stick-retro-m8.png", name: "Game Stick Retro 4K" },
+      { img: "/images/aspiradora-de-mano.png", name: "Aspiradora de Mano" },
+      { img: "/images/mini-pulidora-inalambrica.png", name: "Mini Pulidora" },
     ],
   },
 };
+
+const COMBOS: Record<ComboKey, { label: string; emoji: string; list: number; combo: number; items: { name: string; img: string }[] }> =
+  (Object.keys(IMAGENES) as ComboKey[]).reduce((acc, k) => {
+    const meta = IMAGENES[k];
+    const oficial = ACTIVE_PROMOTIONS.find(c => c.id === meta.id);
+    acc[k] = oficial
+      ? {
+          label: oficial.name,
+          emoji: meta.emoji,
+          list: oficial.originalPrice,
+          combo: oficial.promoPrice,
+          items: oficial.productIds.map((_, i) => meta.imgs[i] || meta.imgs[0]),
+        }
+      : { label: "Combo", emoji: meta.emoji, list: 0, combo: 0, items: [] };
+    return acc;
+  }, {} as Record<ComboKey, { label: string; emoji: string; list: number; combo: number; items: { name: string; img: string }[] }>);
 
 const GOLD = "linear-gradient(100deg,#B8860B,#F4D77B 50%,#C8971F)";
 
@@ -114,7 +137,7 @@ const shell = "relative w-full max-w-md rounded-3xl border border-amber-500/20 b
 const title = "text-2xl font-black text-white leading-tight";
 const sub = "mt-2 text-sm text-slate-400";
 
-export default function PromoFlow({ officialBotNumber }: { officialBotNumber?: string }) {
+export default function PromoFlow({ officialBotNumber, onPedirFormulario }: { officialBotNumber?: string; onPedirFormulario?: (comboId: string) => void }) {
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"entry" | "gifts" | "vehicle" | "wheel" | "combo">("entry");
   const [cat, setCat] = useState<ComboKey>("moto");
@@ -228,7 +251,7 @@ export default function PromoFlow({ officialBotNumber }: { officialBotNumber?: s
             )}
 
             {/* COMBO */}
-            {step === "combo" && <ComboReveal cat={cat} wa={wa} />}
+            {step === "combo" && <ComboReveal cat={cat} wa={wa} onPedirFormulario={onPedirFormulario} onCerrar={close} />}
           </motion.div>
         </motion.div>
       )}
@@ -236,7 +259,7 @@ export default function PromoFlow({ officialBotNumber }: { officialBotNumber?: s
   );
 }
 
-function ComboReveal({ cat, wa }: { cat: ComboKey; wa: (m: string) => string }) {
+function ComboReveal({ cat, wa, onPedirFormulario, onCerrar }: { cat: ComboKey; wa: (m: string) => string; onPedirFormulario?: (comboId: string) => void; onCerrar?: () => void }) {
   const c = COMBOS[cat];
   const time = useCountdown(10 * 60);
   const ahorro = c.list - c.combo;
@@ -269,8 +292,17 @@ function ComboReveal({ cat, wa }: { cat: ComboKey; wa: (m: string) => string }) 
         <Clock size={16} /> Reservado por <b className="text-white">{time}</b> — luego se pierde
       </div>
 
+      {onPedirFormulario && (
+        <button
+          onClick={() => { onPedirFormulario(IMAGENES[cat].id); onCerrar?.(); }}
+          className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 py-4 text-base font-black uppercase tracking-wider text-black active:scale-95 transition-transform"
+        >
+          <Zap size={18} /> Pedirlo aquí mismo
+        </button>
+      )}
+
       <a href={wa(msg)} target="_blank" rel="noreferrer"
-        className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-[#25D366] py-4 text-base font-black uppercase tracking-wider text-white">
+        className="mt-2 flex w-full items-center justify-center gap-2 rounded-2xl border border-[#25D366]/50 bg-[#25D366]/10 py-3 text-sm font-black uppercase tracking-wider text-[#25D366]">
         <MessageCircle size={18} /> Reclamar mi combo por WhatsApp
       </a>
       <p className="mt-2 flex items-center justify-center gap-1.5 text-xs text-slate-400"><Truck size={13} /> No pagas nada ahora. Pagas cuando lo recibas. 🇨🇴</p>

@@ -1111,7 +1111,15 @@ export default function LandingPage() {
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
     <div className="landing-container min-h-screen bg-[#070810] text-white font-sans overflow-x-hidden selection:bg-amber-400 selection:text-black">
-      <PromoFlow officialBotNumber={officialBotNumber} />
+      {/* El popup ahora puede cerrar la venta en la propia pagina: agrega el combo
+          al carrito y baja al formulario, sin obligar a salir a WhatsApp. */}
+      <PromoFlow
+        officialBotNumber={officialBotNumber}
+        onPedirFormulario={(comboId: string) => {
+          const c = ACTIVE_PROMOTIONS.find((x) => x.id === comboId);
+          if (c) pedirComboAhora(c);
+        }}
+      />
 
       {/* ════════════════════════════════════════════
           BARRA DE URGENCIA PREMIUM (STICKY TOP)

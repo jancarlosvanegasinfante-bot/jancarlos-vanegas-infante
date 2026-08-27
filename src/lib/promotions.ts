@@ -87,5 +87,31 @@ export const ACTIVE_PROMOTIONS: PromotionCombo[] = [
     promoPrice: 234900,
     discountPercentage: 16,
     badge: "Nostalgia en 4K 🎮🔥"
+  },
+  // Los dos que siguen venian sueltos dentro del popup de entrada (PromoFlow) con
+  // sus propios precios, sin existir en esta lista. El cliente los pedia por
+  // WhatsApp y el bot no los reconocia, asi que le ofrecia otros. Ahora viven aqui,
+  // que es la unica fuente que leen la landing, el bot y las fichas de producto.
+  {
+    id: "combo-carro-completo",
+    name: "Combo Carro Completo",
+    tagline: "¡Carga Magnética + Iniciador de Batería + Carpa Cobertor!",
+    description: "Todo lo que tu carro necesita en un solo pedido. Soporte de carga magnética 3 en 1 de 15W para que nunca manejes sin batería ni GPS, iniciador inteligente 12V con Pulse Repair para que no te deje tirado un lunes por la mañana, y carpa cobertor impermeable que lo protege del sol que le quema la pintura y de cada aguacero. Los tres esenciales que todo dueño de carro termina comprando por separado y más caro.",
+    productIds: ["soporte-de-carga-magnetica", "iniciador-de-bateria", "carpa-cobertor-carro"],
+    originalPrice: 280700,
+    promoPrice: 229900,
+    discountPercentage: 18,
+    badge: "Tu Carro Cubierto 🚗🔋"
+  },
+  {
+    id: "combo-tecnologia-completo",
+    name: "Combo Tecnología",
+    tagline: "¡Game Stick 4K + Aspiradora + Mini Pulidora!",
+    description: "El combo para la casa completa. Consola Game Stick Retro M8 con salida 4K y más de 10.000 juegos clásicos para las noches en familia, aspiradora de mano inalámbrica que saca la arena y las migas donde el trapo no llega, y mini pulidora de 19.000 RPM para los arreglos que siempre quedan pendientes. Tres aparatos que se usan todas las semanas.",
+    productIds: ["game-stick-retro-m8", "aspiradora-de-mano", "mini-pulidora-inalambrica"],
+    originalPrice: 381700,
+    promoPrice: 299900,
+    discountPercentage: 21,
+    badge: "El Más Completo 📱🔥"
   }
 ];
