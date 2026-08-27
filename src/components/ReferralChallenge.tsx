@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { X, Gift, Users, Clock, Copy, Check, Share2, ShoppingCart, AlertCircle, MessageCircle } from "lucide-react";
+import { X, Gift, Users, Clock, Copy, Check, Share2, ShoppingCart, AlertCircle, MessageCircle, Zap } from "lucide-react";
 import toast from "react-hot-toast";
 
 const LS_CODE = "jansel_referral_code";
@@ -428,18 +428,25 @@ export function ReferralJoin({ code, onDone }: { code: string; onDone: () => voi
               <p className="text-slate-400 text-sm leading-relaxed">
                 Válido por {reward.hours} horas en lo que quieras del catálogo, llevando {reward.minItems} productos o más.
               </p>
+              {/* El formulario primero, igual que en el resto de la tienda: cerrar
+                  aqui no obliga al cliente a cambiar de app ni a esperar respuesta.
+                  WhatsApp queda como alternativa para quien prefiera escribir. */}
               <motion.button
-                onClick={claim}
+                onClick={onDone}
                 whileTap={{ scale: 0.96 }}
-                animate={{ boxShadow: ["0 0 0 rgba(52,211,153,0)", "0 0 24px rgba(52,211,153,0.4)", "0 0 0 rgba(52,211,153,0)"] }}
+                animate={{ boxShadow: ["0 0 0 rgba(251,191,36,0)", "0 0 24px rgba(251,191,36,0.4)", "0 0 0 rgba(251,191,36,0)"] }}
                 transition={{ duration: 1.8, repeat: Infinity }}
-                className="w-full bg-gradient-to-r from-emerald-400 to-green-500 text-black font-black text-xs uppercase tracking-widest py-4 rounded-2xl flex items-center justify-center gap-2"
+                className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-black font-black text-xs uppercase tracking-widest py-4 rounded-2xl flex items-center justify-center gap-2"
               >
-                <MessageCircle size={16} />
-                Reclamar por WhatsApp
+                <Zap size={16} />
+                Ver ofertas y pedir aquí
               </motion.button>
-              <button onClick={onDone} className="w-full text-slate-500 text-xs hover:text-slate-300 transition-colors">
-                Ver las ofertas primero
+              <button
+                onClick={claim}
+                className="w-full border border-[#25D366]/50 bg-[#25D366]/10 text-[#25D366] font-black text-[11px] uppercase tracking-widest py-3 rounded-2xl flex items-center justify-center gap-2"
+              >
+                <MessageCircle size={15} />
+                O reclamar por WhatsApp
               </button>
             </div>
           </>

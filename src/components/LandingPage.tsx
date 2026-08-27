@@ -828,6 +828,37 @@ export default function LandingPage() {
     } catch { /* ignore */ }
   }, []);
 
+  // Recibe pedidos que llegan desde otras paginas (la ficha de producto, por
+  // ejemplo) con ?add=<idProducto> o ?combo=<idCombo>. Mete lo pedido al carrito
+  // y baja directo al formulario, para que cerrar por formulario sea posible
+  // desde cualquier punto de la tienda y no solo desde esta pagina.
+  const pedidoExternoHecho = useRef(false);
+  useEffect(() => {
+    if (pedidoExternoHecho.current) return;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const addId = params.get("add");
+      const comboId = params.get("combo");
+      if (!addId && !comboId) return;
+      pedidoExternoHecho.current = true;
+
+      if (comboId) {
+        const c = ACTIVE_PROMOTIONS.find((x) => x.id === comboId);
+        if (c) { pedirComboAhora(c); return; }
+      }
+      if (addId) {
+        const p = TRENDING_PRODUCTS.find((x) => x.id === addId);
+        if (p) {
+          addToCart(p, true);
+          toast.success("¡" + p.name + " listo! Completa tus datos 👇");
+          setIsCartOpen(false);
+          setCheckoutMode("formulario");
+          setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 350);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   // El reto se ofrece cuando ya decidio comprar (abrio el carrito), no al entrar:
   // antes de eso no tiene ningun motivo para invitar a nadie.
   useEffect(() => {
@@ -3087,6 +3118,24 @@ export default function LandingPage() {
 
               <div className="flex flex-col gap-2">
                 {/* Option 1: Quiero Pedir */}
+                {/* El formulario primero: es el camino que mejor cierra y el que se quiere
+                    potenciar. WhatsApp queda como alternativa para quien prefiera escribir. */}
+                <button
+                  onClick={() => {
+                    setIsWaMenuOpen(false);
+                    if (cart.length === 0 && TRENDING_PRODUCTS.length > 0) addToCart(TRENDING_PRODUCTS[0], true);
+                    setIsCartOpen(false);
+                    setCheckoutMode("formulario");
+                    setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 200);
+                  }}
+                  className="flex items-center gap-3 rounded-2xl border border-amber-400/40 bg-gradient-to-r from-amber-400/15 to-orange-500/10 p-3 text-left transition hover:border-amber-400 cursor-pointer"
+                >
+                  <span className="text-lg">⚡</span>
+                  <span>
+                    <span className="block text-xs font-black text-amber-300">Pedir con formulario</span>
+                    <span className="block text-[10px] text-slate-400">Sin salir de la página · 1 minuto</span>
+                  </span>
+                </button>
                 <button
                   onClick={() => {
                     const waNumber = officialBotNumber || "15072233213";

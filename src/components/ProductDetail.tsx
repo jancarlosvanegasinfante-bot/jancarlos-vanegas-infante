@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
-import { ArrowLeft, Star, Shield, Truck, Check, MessageCircle, Package, RotateCcw, Flame } from "lucide-react";
+import { ArrowLeft, Star, Shield, Truck, Check, MessageCircle, Package, RotateCcw, Flame, Zap } from "lucide-react";
 import { TRENDING_PRODUCTS } from "./LandingPage";
 import { ACTIVE_PROMOTIONS } from "../lib/promotions";
 import { getProxiedImageUrl } from "../lib/utils";
@@ -75,6 +75,13 @@ export default function ProductDetail() {
   const bullets = toBullets(product.description);
   // Barra de existencias: comunica escasez con el dato real, sin inventarlo.
   const stockPct = Math.max(8, Math.min(100, Math.round((product.stock / 60) * 100)));
+
+  // Pedir por formulario: se manda a la landing con el producto ya cargado, que
+  // lo mete al carrito y baja a los datos de envio. Es el camino que mejor cierra,
+  // porque el cliente no cambia de app ni depende de que le contesten.
+  const pedirPorFormulario = () => {
+    navigate("/landing?add=" + encodeURIComponent(product.id));
+  };
 
   const comprar = () => {
     const msg = [
@@ -170,15 +177,23 @@ export default function ProductDetail() {
 
             {/* CTA principal, arriba del pliegue en móvil */}
             <motion.button
-              onClick={comprar}
+              onClick={pedirPorFormulario}
               whileTap={{ scale: 0.97 }}
               animate={{ boxShadow: ["0 0 0 rgba(251,191,36,0)", "0 0 26px rgba(251,191,36,0.4)", "0 0 0 rgba(251,191,36,0)"] }}
               transition={{ duration: 2.2, repeat: Infinity }}
               className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-black font-black text-sm sm:text-base uppercase tracking-widest py-4 sm:py-5 rounded-2xl flex items-center justify-center gap-2"
             >
-              <MessageCircle size={19} />
+              <Zap size={19} />
               Lo quiero — Pedir ahora
             </motion.button>
+
+            <button
+              onClick={comprar}
+              className="w-full border border-[#25D366]/50 bg-[#25D366]/10 text-[#25D366] font-black text-xs uppercase tracking-widest py-3.5 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
+            >
+              <MessageCircle size={17} />
+              O pedir por WhatsApp
+            </button>
             <p className="text-center text-slate-500 text-[11px] -mt-1">
               Te responde una persona en minutos · Sin pagar nada por adelantado
             </p>
@@ -323,11 +338,18 @@ export default function ProductDetail() {
             </p>
           </div>
           <button
-            onClick={comprar}
+            onClick={pedirPorFormulario}
             className="flex-1 bg-gradient-to-r from-amber-400 to-orange-500 text-black font-black text-xs uppercase tracking-widest py-3.5 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
           >
-            <MessageCircle size={16} />
+            <Zap size={16} />
             Lo quiero
+          </button>
+          <button
+            onClick={comprar}
+            aria-label="Pedir por WhatsApp"
+            className="shrink-0 w-12 h-12 rounded-2xl border border-[#25D366]/50 bg-[#25D366]/10 text-[#25D366] flex items-center justify-center active:scale-95 transition-transform"
+          >
+            <MessageCircle size={20} />
           </button>
         </div>
       </motion.div>
