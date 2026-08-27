@@ -73,7 +73,7 @@ export default function Storefront() {
     } else {
       msg += `Quisiera más información sobre lo que ofrecen.`;
     }
-    const phone = officialBotNumber || store.phone || "14155238886";
+    const phone = officialBotNumber || store.phone || "15072233213";
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
   };
 

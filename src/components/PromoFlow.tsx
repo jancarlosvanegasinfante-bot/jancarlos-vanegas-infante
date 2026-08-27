@@ -160,7 +160,7 @@ export default function PromoFlow({ officialBotNumber, onPedirFormulario }: { of
     document.getElementById("productos")?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const phone = officialBotNumber || "14155238886";
+  const phone = officialBotNumber || "15072233213";
   const c = COMBOS[cat];
   const wa = (msg: string) => `https://wa.me/${phone}?text=${encodeURIComponent(msg)}`;
 

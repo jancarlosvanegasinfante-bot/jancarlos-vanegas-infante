@@ -1000,7 +1000,7 @@ export default function LandingPage() {
       ? "🔴 *Pago Anticipado (Nequi / Daviplata / Bancolombia) - ¡Descuento aplicado!*"
       : "🟢 *Pago Contraentrega (Pagas al recibir en efectivo)*";
     const msg = `¡Hola Jan Sel Shop! 👋 Quiero realizar el siguiente pedido desde la Landing Page:\n\n🛒 *CARRITO:*\n${itemsText}\n\n⚙️ *DESGLOSE:*\n• *Subtotal:* $${subtotal.toLocaleString()} COP${discountText}${prepayText}${referralText}\n🚚 *Envío:* ¡COMPLETAMENTE GRATIS! 🇨🇴\n💰 *TOTAL:* $${finalTotal.toLocaleString()} COP\n\n💳 *PAGO:* ${modeLabel}\n\n👤 *DATOS:*\n• *Nombre:* ${formData.customerName || "Por confirmar"}\n• *Celular:* ${formData.customerPhone || "Por confirmar"}\n• *Ciudad:* ${formData.city || "Por confirmar"}\n• *Dirección:* ${formData.address || "Por confirmar"}\n• *Indicaciones:* ${formData.addressIndicator || "Ninguna"}\n\n¡Por favor agendar mi despacho hoy! 🚀`;
-    const phone = officialBotNumber || "14155238886";
+    const phone = officialBotNumber || "15072233213";
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
 
     // Track Contact Event — mismo eventId en el pixel del navegador y en el CAPI del backend
@@ -2880,7 +2880,7 @@ export default function LandingPage() {
                   <button
                     key={idx}
                     onClick={() => {
-                      const phone = officialBotNumber || "14155238886";
+                      const phone = officialBotNumber || "15072233213";
                       const url = `https://wa.me/${phone}?text=${encodeURIComponent(opt.text)}`;
                       window.open(url, "_blank");
                       setIsSupportOpen(false);
@@ -3089,7 +3089,7 @@ export default function LandingPage() {
                 {/* Option 1: Quiero Pedir */}
                 <button
                   onClick={() => {
-                    const waNumber = officialBotNumber || "14155238886";
+                    const waNumber = officialBotNumber || "15072233213";
                     const msg = "¡Hola! 👋 Quisiera realizar un pedido de los productos del catálogo de Jansel Shop.";
                     window.open(`https://wa.me/${waNumber}?text=${encodeURIComponent(msg)}`, "_blank");
                     setIsWaMenuOpen(false);
@@ -3106,7 +3106,7 @@ export default function LandingPage() {
                 {/* Option 2: Dudas / Asesoría */}
                 <button
                   onClick={() => {
-                    const waNumber = officialBotNumber || "14155238886";
+                    const waNumber = officialBotNumber || "15072233213";
                     const msg = "¡Hola! 👋 Necesito asesoría con algunas dudas que tengo sobre los productos de Jansel Shop.";
                     window.open(`https://wa.me/${waNumber}?text=${encodeURIComponent(msg)}`, "_blank");
                     setIsWaMenuOpen(false);
@@ -3123,7 +3123,7 @@ export default function LandingPage() {
                 {/* Option 3: Seguimiento de Pedido */}
                 <button
                   onClick={() => {
-                    const waNumber = officialBotNumber || "14155238886";
+                    const waNumber = officialBotNumber || "15072233213";
                     const msg = "¡Hola! 👋 Quisiera hacerle seguimiento a mi pedido realizado en Jansel Shop.";
                     window.open(`https://wa.me/${waNumber}?text=${encodeURIComponent(msg)}`, "_blank");
                     setIsWaMenuOpen(false);

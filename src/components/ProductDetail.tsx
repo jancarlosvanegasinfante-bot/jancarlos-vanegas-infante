@@ -7,7 +7,10 @@ import { ACTIVE_PROMOTIONS } from "../lib/promotions";
 import { getProxiedImageUrl } from "../lib/utils";
 
 const NL = String.fromCharCode(10);
-const WA_FALLBACK = "14155238886";
+// Numero de respaldo: el REAL del negocio, no el sandbox de Twilio. Antes aqui
+// habia un 14155238886 fijo (numero de pruebas), asi que todo cliente que tocaba
+// "Lo quiero" desde la ficha del producto le escribia a un numero que no atiende.
+const WA_FALLBACK = "15072233213";
 
 // Convierte la descripcion en vinetas de beneficio: cada frase es un punto.
 const toBullets = (description: string): string[] =>
@@ -24,6 +27,16 @@ export default function ProductDetail() {
 
   // La barra fija de compra aparece al pasar el primer CTA, para no taparlo
   // cuando ya esta a la vista.
+  // El numero se lee de la configuracion de la tienda, igual que hace la landing,
+  // para que cambiarlo en un solo sitio valga para toda la web.
+  const [waNumber, setWaNumber] = useState(WA_FALLBACK);
+  useEffect(() => {
+    fetch("/api/public/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (d?.whatsappNumber) setWaNumber(String(d.whatsappNumber).replace(/\D/g, "")); })
+      .catch(() => { /* se queda el de respaldo */ });
+  }, []);
+
   const [mostrarBarra, setMostrarBarra] = useState(false);
   useEffect(() => {
     const onScroll = () => setMostrarBarra(window.scrollY > 420);
@@ -72,7 +85,7 @@ export default function ProductDetail() {
       "",
       "¿Tienen disponible para envío hoy?",
     ].join(NL);
-    window.open("https://wa.me/" + WA_FALLBACK + "?text=" + encodeURIComponent(msg), "_blank");
+    window.open("https://wa.me/" + waNumber + "?text=" + encodeURIComponent(msg), "_blank");
   };
 
   return (

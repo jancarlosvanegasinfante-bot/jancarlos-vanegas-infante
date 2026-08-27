@@ -5,7 +5,9 @@ import toast from "react-hot-toast";
 
 const LS_CODE = "jansel_referral_code";
 const LS_DEVICE = "jansel_device_id";
-const WA_NUMBER = "14155238886";
+// Igual que en la ficha de producto: el respaldo es el numero REAL, no el
+// sandbox de Twilio, y si la configuracion responde se usa el que este alli.
+const WA_NUMBER = "15072233213";
 
 // Productos que "caen" al carrito en la animacion del encabezado.
 const FALLING = [
