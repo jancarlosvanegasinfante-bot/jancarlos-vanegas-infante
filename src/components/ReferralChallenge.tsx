@@ -122,6 +122,11 @@ export default function ReferralChallenge({
 }) {
   const [state, setState] = useState<State | null>(null);
   const [loading, setLoading] = useState(false);
+  // Mientras se consulta el reto guardado no se puede mostrar "Acepto el reto":
+  // si el usuario lo pulsaba en ese instante se creaba un codigo NUEVO y el link
+  // que ya habia compartido quedaba huerfano, con sus invitados contando para un
+  // reto que el ya no estaba mirando.
+  const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -132,7 +137,7 @@ export default function ReferralChallenge({
     return () => clearInterval(t);
   }, []);
 
-  const refresh = useCallback(async (code: string) => {
+  const refresh = useCallback(async (code: string): Promise<void> => {
     try {
       const r = await fetch("/api/referral/status?code=" + encodeURIComponent(code));
       if (!r.ok) return;
@@ -146,7 +151,9 @@ export default function ReferralChallenge({
     if (!open) return;
     let saved = "";
     try { saved = localStorage.getItem(LS_CODE) || ""; } catch { /* ignore */ }
-    if (saved) refresh(saved);
+    if (!saved) { setCargando(false); return; }
+    setCargando(true);
+    refresh(saved).finally(() => setCargando(false));
   }, [open, refresh]);
 
   useEffect(() => {
@@ -166,6 +173,17 @@ export default function ReferralChallenge({
     setLoading(true);
     setError("");
     try {
+      // Si ya hay un reto vigente guardado, se retoma en vez de crear otro: crear
+      // uno nuevo invalidaria el link que el cliente ya compartio con sus amigos.
+      let guardado = "";
+      try { guardado = localStorage.getItem(LS_CODE) || ""; } catch { /* ignore */ }
+      if (guardado) {
+        const prev = await fetch("/api/referral/status?code=" + encodeURIComponent(guardado));
+        if (prev.ok) {
+          const est = await prev.json();
+          if (est && !est.expired) { setState(est); return; }
+        }
+      }
       const r = await fetch("/api/referral/start", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -266,7 +284,9 @@ export default function ReferralChallenge({
               </div>
             )}
 
-            {!state ? (
+            {cargando ? (
+              <p className="text-center text-slate-400 text-sm py-6">Cargando tu reto…</p>
+            ) : !state ? (
               <>
                 <div className="glass-card rounded-2xl border border-white/10 p-4 mb-4">
                   <div className="flex items-center gap-2 text-amber-400 mb-1">
