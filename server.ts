@@ -3601,6 +3601,7 @@ async function sendTrendingProducts(to: string, from: string, assignedStoreId: s
     const products = await loadProductsForStore(assignedStoreId);
     
     const TRENDING_IDS = [
+      "cargador-aromatizante-carro",
       "game-stick-retro-m8",
       "mini-pulidora-inalambrica",
       "soporte-de-carga-magnetica",

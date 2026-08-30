@@ -38,6 +38,19 @@ import { ACTIVE_PROMOTIONS } from "../lib/promotions";
 // ─── Products ────────────────────────────────────────────────────────────────
 export const TRENDING_PRODUCTS = [
   {
+    id: "cargador-aromatizante-carro",
+    name: "Modulador Cargador Aromatizante 4 en 1",
+    category: "Autos",
+    description: "Cables enredados y olor a encierro, resueltos de una. Carga 4 dispositivos con cables que se recogen solos, aromatiza y da luces RGB. Incluye 3 esencias.",
+    price: 99900,
+    originalPrice: 159900,
+    imageUrl: "/images/cargador-aromatizante-carro.jpg",
+    rating: 4.9,
+    reviews: 87,
+    stock: 40,
+    badge: "🆕 NUEVO",
+  },
+  {
     id: "soporte-de-carga-magnetica",
     name: "Soporte de Carga Magnética",
     category: "Autos",

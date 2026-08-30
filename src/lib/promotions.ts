@@ -113,5 +113,16 @@ export const ACTIVE_PROMOTIONS: PromotionCombo[] = [
     promoPrice: 299900,
     discountPercentage: 21,
     badge: "El Más Completo 📱🔥"
+  },
+  {
+    id: "combo-interior-impecable",
+    name: "Interior Impecable",
+    tagline: "¡Cargador Aromatizante 4 en 1 + Aspiradora Inalámbrica!",
+    description: "Deja el interior de tu carro como recién salido del concesionario. La aspiradora de mano saca la arena de entre los asientos y las migas que el trapo no alcanza, y el cargador aromatizante se encarga de lo demás: mantiene el aire fresco con su difusor, ordena los cables con sus dos cables retráctiles y le pone luces LED al tablero. Limpio, con buen olor y sin un solo cable suelto. El cargador incluye además 3 esencias de regalo.",
+    productIds: ["cargador-aromatizante-carro", "aspiradora-de-mano"],
+    originalPrice: 197800,
+    promoPrice: 164900,
+    discountPercentage: 17,
+    badge: "Interior de Lujo 🚗✨"
   }
 ];

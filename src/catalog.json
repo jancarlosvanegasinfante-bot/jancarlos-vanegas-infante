@@ -159,6 +159,22 @@
       "videoUrl": "",
       "dropiId": "2236372",
       "originalPrice": 149900
+    },
+    {
+      "id": "cargador-aromatizante-carro",
+      "name": "Modulador Cargador Aromatizante Carro TC",
+      "category": "autos",
+      "cost": 47000,
+      "stock": 40,
+      "freight": 20000,
+      "imageUrl": "/images/cargador-aromatizante-carro.jpg",
+      "currency": "COP",
+      "provider": "DTS IMPORTADORES",
+      "description": "El carro con cables enredados por toda la consola y ese olor a encierro que no se va. Este cargador 4 en 1 resuelve las dos cosas de una: dos cables retráctiles que se recogen solos (Tipo-C de 100W y Lightning de 20W) más un puerto USB-A y otro USB-C, así cargas hasta cuatro dispositivos sin un solo cable suelto. Y mientras carga, el difusor aromático mantiene el interior fresco, con luces LED RGB que le dan un aire premium al tablero. Entrega 120W totales con protección contra sobrecargas y sobrecalentamiento, funciona en 12V-24V (autos, camionetas y SUV) y es compacto: 8.5 cm de alto por 4.2 de ancho, en PC+ABS resistente. Incluye 3 esencias de regalo para que lo estrenes el mismo día.",
+      "price": 99900,
+      "originalPrice": 159900,
+      "videoUrl": "",
+      "dropiId": "2210256"
     }
   ]
 }
