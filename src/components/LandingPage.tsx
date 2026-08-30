@@ -881,6 +881,22 @@ export default function LandingPage() {
     return () => clearTimeout(t);
   }, [isCartOpen, referralPct, joinCode]);
 
+  // El premio de la ruleta se limita a MOSTRARSE: decia "menciónalo al confirmar
+  // tu pedido y te lo aplicamos", asi que dependia de que el cliente se acordara
+  // y de que alguien lo aplicara a mano. Aqui se traduce a un descuento real que
+  // el carrito calcula solo.
+  const premioRuleta = (() => {
+    if (!wheelPrize) return { pct: 0, minItems: 1 };
+    const p = wheelPrize.toLowerCase();
+    if (p.includes("20%")) return { pct: 20, minItems: 1 };
+    if (p.includes("15%")) return { pct: 15, minItems: 2 };  // "x2 articulos"
+    if (p.includes("10%")) return { pct: 10, minItems: 2 };  // "2do producto"
+    if (p.includes("5%")) return { pct: 5, minItems: 1 };
+    // "Envio gratis" y "Combo sorpresa" no son porcentaje: el envio ya es gratis
+    // siempre y el combo lo entrega el asesor al confirmar.
+    return { pct: 0, minItems: 1 };
+  })();
+
   const calculateTotals = () => {
     const subtotal = cart.reduce((sum, item) => sum + item.product.price * item.quantity, 0);
     const originalSubtotal = cart.reduce((sum, item) => sum + item.product.originalPrice * item.quantity, 0);
@@ -929,7 +945,15 @@ export default function LandingPage() {
     // Se aplica el MEJOR de los dos, nunca los dos sumados: el descuento por
     // cantidad y el del combo cubren el mismo carrito, y encimarlos regalaria
     // margen dos veces sobre los mismos productos.
-    const descuentoAplicado = Math.max(quantityDiscount, descuentoCombos);
+    // El premio solo cuenta si el carrito cumple su condicion (los de 10% y 15%
+    // exigen dos articulos, tal como los anuncia la ruleta).
+    const descuentoRuleta = totalQty >= premioRuleta.minItems
+      ? Math.round((subtotal * premioRuleta.pct) / 100)
+      : 0;
+
+    // Se aplica el MEJOR de los tres, nunca la suma: cantidad, combo y ruleta
+    // cubren el mismo carrito, y encimarlos regalaria margen varias veces.
+    const descuentoAplicado = Math.max(quantityDiscount, descuentoCombos, descuentoRuleta);
     const intermediateTotal = subtotal - descuentoAplicado;
 
     // Calculate prepayment discount progressively over all units
@@ -945,10 +969,10 @@ export default function LandingPage() {
       ? Math.round((intermediateTotal * referralPct) / 100)
       : 0;
     const finalTotal = Math.max(0, intermediateTotal - prepaymentDiscount - referralDiscount);
-    return { subtotal, originalSubtotal, totalQty, quantityDiscount: descuentoAplicado, combosVigentes, prepaymentDiscount, referralDiscount, finalTotal, savings: originalSubtotal - finalTotal };
+    return { subtotal, originalSubtotal, totalQty, quantityDiscount: descuentoAplicado, descuentoRuleta, combosVigentes, prepaymentDiscount, referralDiscount, finalTotal, savings: originalSubtotal - finalTotal };
   };
 
-  const { subtotal, totalQty, quantityDiscount, combosVigentes, prepaymentDiscount, referralDiscount, finalTotal, savings } = calculateTotals();
+  const { subtotal, totalQty, quantityDiscount, descuentoRuleta, combosVigentes, prepaymentDiscount, referralDiscount, finalTotal, savings } = calculateTotals();
 
   const handleProceedToForm = () => {
     setIsCartOpen(false);
@@ -1040,10 +1064,11 @@ export default function LandingPage() {
     const discountText = quantityDiscount > 0 ? `\n🎁 *Descuento Combo:* -$${quantityDiscount.toLocaleString()} COP` : "";
     const prepayText = selectedMode === "anticipado" ? `\n🌟 *Descuento Anticipado:* -$${prepaymentDiscount.toLocaleString()} COP` : "";
     const referralText = referralDiscount > 0 ? `\n🎁 *Descuento por Invitar:* -$${referralDiscount.toLocaleString()} COP` : "";
+    const ruletaText = descuentoRuleta > 0 ? `\n🎡 *Premio Ruleta:* -$${descuentoRuleta.toLocaleString()} COP` : "";
     const modeLabel = selectedMode === "anticipado"
       ? "🔴 *Pago Anticipado (Nequi / Daviplata / Bancolombia) - ¡Descuento aplicado!*"
       : "🟢 *Pago Contraentrega (Pagas al recibir en efectivo)*";
-    const msg = `¡Hola Jan Sel Shop! 👋 Quiero realizar el siguiente pedido desde la Landing Page:\n\n🛒 *CARRITO:*\n${itemsText}\n\n⚙️ *DESGLOSE:*\n• *Subtotal:* $${subtotal.toLocaleString()} COP${discountText}${prepayText}${referralText}\n🚚 *Envío:* ¡COMPLETAMENTE GRATIS! 🇨🇴\n💰 *TOTAL:* $${finalTotal.toLocaleString()} COP\n\n💳 *PAGO:* ${modeLabel}\n\n👤 *DATOS:*\n• *Nombre:* ${formData.customerName || "Por confirmar"}\n• *Celular:* ${formData.customerPhone || "Por confirmar"}\n• *Ciudad:* ${formData.city || "Por confirmar"}\n• *Dirección:* ${formData.address || "Por confirmar"}\n• *Indicaciones:* ${formData.addressIndicator || "Ninguna"}\n\n¡Por favor agendar mi despacho hoy! 🚀`;
+    const msg = `¡Hola Jan Sel Shop! 👋 Quiero realizar el siguiente pedido desde la Landing Page:\n\n🛒 *CARRITO:*\n${itemsText}\n\n⚙️ *DESGLOSE:*\n• *Subtotal:* $${subtotal.toLocaleString()} COP${discountText}${prepayText}${referralText}${ruletaText}\n🚚 *Envío:* ¡COMPLETAMENTE GRATIS! 🇨🇴\n💰 *TOTAL:* $${finalTotal.toLocaleString()} COP\n\n💳 *PAGO:* ${modeLabel}\n\n👤 *DATOS:*\n• *Nombre:* ${formData.customerName || "Por confirmar"}\n• *Celular:* ${formData.customerPhone || "Por confirmar"}\n• *Ciudad:* ${formData.city || "Por confirmar"}\n• *Dirección:* ${formData.address || "Por confirmar"}\n• *Indicaciones:* ${formData.addressIndicator || "Ninguna"}\n\n¡Por favor agendar mi despacho hoy! 🚀`;
     const phone = officialBotNumber || "15072233213";
     window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
 
@@ -1885,7 +1910,7 @@ export default function LandingPage() {
               <span className="text-3xl">🎉</span>
               <div>
                 <p className="text-amber-300 font-black text-sm uppercase tracking-wide">¡Premio de tu ruleta activo!</p>
-                <p className="text-white text-sm">Ganaste: <span className="font-bold">{wheelPrize}</span> — menciónalo al confirmar tu pedido y te lo aplicamos 🙌</p>
+                <p className="text-white text-sm">Ganaste: <span className="font-bold">{wheelPrize}</span> — ya quedó aplicado en tu carrito ✅</p>
               </div>
             </div>
           )}
@@ -2245,6 +2270,12 @@ export default function LandingPage() {
                     <div className="flex justify-between text-amber-300 bg-amber-500/5 px-3 py-2 rounded-xl border border-amber-500/10">
                       <span>Dto. por Invitar</span>
                       <span className="font-black font-mono">-${referralDiscount.toLocaleString()}</span>
+                    </div>
+                  )}
+                  {descuentoRuleta > 0 && (
+                    <div className="flex justify-between text-fuchsia-300 bg-fuchsia-500/5 px-3 py-2 rounded-xl border border-fuchsia-500/15">
+                      <span>🎡 Premio de la ruleta</span>
+                      <span className="font-black font-mono">-${descuentoRuleta.toLocaleString()}</span>
                     </div>
                   )}
                   {referralPct > 0 && totalQty < REFERRAL_MIN_ITEMS && (
@@ -2654,6 +2685,12 @@ export default function LandingPage() {
                         <div className="flex justify-between text-amber-300 bg-amber-500/5 px-3 py-2 rounded-xl border border-amber-500/10">
                           <span>Dto. por Invitar</span>
                           <span className="font-black font-mono">-${referralDiscount.toLocaleString()}</span>
+                        </div>
+                      )}
+                      {descuentoRuleta > 0 && (
+                        <div className="flex justify-between text-fuchsia-300 bg-fuchsia-500/5 px-3 py-2 rounded-xl border border-fuchsia-500/15">
+                          <span>🎡 Premio de la ruleta</span>
+                          <span className="font-black font-mono">-${descuentoRuleta.toLocaleString()}</span>
                         </div>
                       )}
                       {referralPct > 0 && totalQty < REFERRAL_MIN_ITEMS && (
