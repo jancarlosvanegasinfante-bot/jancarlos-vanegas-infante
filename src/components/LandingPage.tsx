@@ -257,7 +257,7 @@ const FAQ_ITEMS = [
   },
   {
     q: "¿Cómo obtengo el descuento del 8%?",
-    a: "Elige 'Pago Anticipado' al hacer tu pedido. Luego recibirás las instrucciones para transferir por Nequi, Daviplata o Bancolombia y el 8% se aplica automáticamente.",
+    a: "Elige 'Pago Anticipado' al hacer tu pedido. Luego recibirás las instrucciones para transferir por Nequi, Daviplata o Banco de Bogotá y el 8% se aplica automáticamente.",
   },
   {
     q: "¿Qué pasa si mi producto llega dañado?",
@@ -1149,7 +1149,7 @@ export default function LandingPage() {
     const referralText = referralDiscount > 0 ? `\n🎁 *Descuento por Invitar:* -$${referralDiscount.toLocaleString()} COP` : "";
     const ruletaText = descuentoRuleta > 0 ? `\n🎡 *Premio Ruleta:* -$${descuentoRuleta.toLocaleString()} COP` : "";
     const modeLabel = selectedMode === "anticipado"
-      ? "🔴 *Pago Anticipado (Nequi / Daviplata / Bancolombia) - ¡Descuento aplicado!*"
+      ? "🔴 *Pago Anticipado (Nequi / Daviplata / Banco de Bogotá) - ¡Descuento aplicado!*"
       : "🟢 *Pago Contraentrega (Pagas al recibir en efectivo)*";
     const msg = `¡Hola Jan Sel Shop! 👋 Quiero realizar el siguiente pedido desde la Landing Page:\n\n🛒 *CARRITO:*\n${itemsText}\n\n⚙️ *DESGLOSE:*\n• *Subtotal:* $${subtotal.toLocaleString()} COP${discountText}${prepayText}${referralText}${ruletaText}\n🚚 *Envío:* ¡COMPLETAMENTE GRATIS! 🇨🇴\n💰 *TOTAL:* $${finalTotal.toLocaleString()} COP\n\n💳 *PAGO:* ${modeLabel}\n\n👤 *DATOS:*\n• *Nombre:* ${formData.customerName || "Por confirmar"}\n• *Celular:* ${formData.customerPhone || "Por confirmar"}\n• *Ciudad:* ${formData.city || "Por confirmar"}\n• *Dirección:* ${formData.address || "Por confirmar"}\n• *Indicaciones:* ${formData.addressIndicator || "Ninguna"}\n\n¡Por favor agendar mi despacho hoy! 🚀`;
     const phone = officialBotNumber || "15072233213";
@@ -2161,7 +2161,7 @@ export default function LandingPage() {
                         {paymentMethod === "anticipado" && <div className="w-1.5 h-1.5 rounded-full bg-black" />}
                       </div>
                     </div>
-                    <p className="text-[10px] text-slate-500 leading-normal">Nequi, Daviplata o Transferencia. Te aplicamos <span className="text-emerald-400 font-extrabold">DESCUENTO EXTRA</span>.</p>
+                    <p className="text-[10px] text-slate-500 leading-normal">Nequi, Daviplata o Banco de Bogotá. Te aplicamos <span className="text-emerald-400 font-extrabold">DESCUENTO EXTRA</span>.</p>
                   </button>
                 </div>
 
@@ -2180,13 +2180,35 @@ export default function LandingPage() {
                       </div>
                       <div className="grid grid-cols-2 gap-3">
                         {[
-                          { owner: "Jan Vanegas", number: "313 364 7176" },
-                          { owner: "Nelsy Tatiana Salcedo", number: "313 361 5984" },
+                          // Las billeteras van por numero de celular; la cuenta de
+                          // banco lleva su propia etiqueta y el tipo de cuenta,
+                          // porque el cliente lo necesita para transferir bien.
+                          { owner: "Jan Vanegas", number: "313 364 7176", tipo: null, marcas: ["NEQUI", "DAVIPLATA"] },
+                          { owner: "Nelsy Tatiana Salcedo", number: "313 361 5984", tipo: null, marcas: ["NEQUI", "DAVIPLATA"] },
+                          { owner: "Nelsy Tatiana Salcedo", number: "632426086", tipo: "Cuenta de Ahorros", marcas: ["BANCO DE BOGOTÁ"] },
                         ].map((m) => (
-                          <div key={m.owner} className="bg-black/40 p-3 rounded-xl border border-white/5 space-y-1.5">
+                          <div
+                            key={m.owner + m.number}
+                            className={`bg-black/40 p-3 rounded-xl border border-white/5 space-y-1.5 ${m.tipo ? "col-span-2" : ""}`}
+                          >
                             <div className="flex flex-wrap gap-1">
-                              <span className="text-[8px] px-1.5 py-0.5 rounded bg-[#E52F86]/25 text-[#FF66B2] font-black tracking-wider">NEQUI</span>
-                              <span className="text-[8px] px-1.5 py-0.5 rounded bg-[#421D83]/40 text-[#9E7BFF] font-black tracking-wider">DAVIPLATA</span>
+                              {m.marcas.map((marca) => (
+                                <span
+                                  key={marca}
+                                  className={`text-[8px] px-1.5 py-0.5 rounded font-black tracking-wider ${
+                                    marca === "NEQUI" ? "bg-[#E52F86]/25 text-[#FF66B2]"
+                                    : marca === "DAVIPLATA" ? "bg-[#421D83]/40 text-[#9E7BFF]"
+                                    : "bg-[#0033A0]/40 text-[#7FA8FF]"
+                                  }`}
+                                >
+                                  {marca}
+                                </span>
+                              ))}
+                              {m.tipo && (
+                                <span className="text-[8px] px-1.5 py-0.5 rounded bg-white/5 text-slate-300 font-black tracking-wider">
+                                  {m.tipo.toUpperCase()}
+                                </span>
+                              )}
                             </div>
                             <span className="block text-xs font-mono font-black text-white select-all">
                               {m.number}
@@ -2686,7 +2708,7 @@ export default function LandingPage() {
               </button>
               <div className="text-xs text-slate-600 space-y-1">
                 <p>🚚 Servientrega, Envía, Coordinadora</p>
-                <p>💳 Nequi, Daviplata, Bancolombia</p>
+                <p>💳 Nequi, Daviplata, Banco de Bogotá</p>
                 <p>🛡️ Garantía 30 días en todos los productos</p>
               </div>
             </div>
