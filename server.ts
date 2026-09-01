@@ -11,6 +11,7 @@ import { createClient } from "@supabase/supabase-js";
 import sgMail from '@sendgrid/mail';
 import { getSystemInstruction } from "./src/lib/janAgent.js";
 import { ACTIVE_PROMOTIONS } from "./src/lib/promotions.js";
+import { recogerDatosInforme, paginaInforme } from "./src/lib/informe.js";
 import crypto from "crypto";
 
 // 1. Initialize Supabase / Local JSON File Storage
@@ -9536,6 +9537,48 @@ Responde directamente con el número de tu opción:
       res.status(404).send("Not found");
     }
   });
+
+  // ── INFORME EN VIVO ──────────────────────────────────────────────────────
+  // Solo lectura: cuenta filas y no escribe nada. Va detrás de un token en la
+  // URL y, si INFORME_TOKEN no está configurado, las rutas NI SE REGISTRAN —
+  // así no queda nada expuesto por descuido. Se declara antes del catch-all
+  // del SPA para que no lo capture el enrutador de React.
+  const INFORME_TOKEN = String(process.env.INFORME_TOKEN || "").trim();
+  if (INFORME_TOKEN.length >= 16) {
+    const tokenValido = (req: any) => {
+      const k = String(req.query?.k || "");
+      // Comparación de longitud constante para no filtrar el token por tiempos.
+      if (k.length !== INFORME_TOKEN.length) return false;
+      let dif = 0;
+      for (let i = 0; i < k.length; i++) dif |= k.charCodeAt(i) ^ INFORME_TOKEN.charCodeAt(i);
+      return dif === 0;
+    };
+
+    app.get("/informe", (req, res) => {
+      if (!tokenValido(req)) return res.status(404).send("No encontrado");
+      res.setHeader("Content-Type", "text/html; charset=utf-8");
+      res.setHeader("Cache-Control", "no-store");
+      res.setHeader("X-Robots-Tag", "noindex, nofollow");
+      res.send(paginaInforme(INFORME_TOKEN));
+    });
+
+    app.get("/api/informe", async (req, res) => {
+      if (!tokenValido(req)) return res.status(404).json({ success: false, error: "No encontrado" });
+      try {
+        const activa = String(process.env.REACTIVACION_AUTOMATICA || "").toLowerCase() === "true";
+        const datos = await recogerDatosInforme(supabaseServer, activa);
+        res.setHeader("Cache-Control", "no-store");
+        res.json({ success: true, datos });
+      } catch (e: any) {
+        console.error("[Informe] Error recogiendo datos:", e?.message);
+        res.status(500).json({ success: false, error: e?.message || "Error interno" });
+      }
+    });
+
+    console.log("[Informe] Disponible en /informe (requiere token).");
+  } else {
+    console.log("[Informe] Desactivado: falta INFORME_TOKEN (mínimo 16 caracteres).");
+  }
 
   // Servir imágenes locales desde src/assets para asegurar que siempre carguen en producción o dev
   app.use("/src/assets", express.static(path.join(process.cwd(), "src/assets")));

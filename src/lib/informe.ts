@@ -1,0 +1,307 @@
+// Página de informe en vivo, servida por el propio servidor de la tienda.
+//
+// El primer intento fue publicarlo como artefacto que consultara los
+// conectores, pero ese camino no funcionó en la cuenta del dueño. Servirlo
+// desde aquí no depende de nada externo: es el mismo dominio y la misma base
+// de datos que ya usa la tienda.
+//
+// Es SOLO LECTURA: consulta conteos y no escribe ni modifica nada. Va detrás de
+// un token en la URL, y si no hay token configurado las rutas ni se registran.
+
+export interface DatosInforme {
+  generadoEn: string;
+  pedidos: number;
+  clientes: number;
+  productos: number;
+  enCheckout: number;
+  vistas24h: number;
+  carritos24h: number;
+  checkouts24h: number;
+  contactos24h: number;
+  mensajesWa24h: number;
+  carritos7d: number;
+  pedidos7d: number;
+  reactivacionActiva: boolean;
+  ultimosPedidos: Array<{ fecha: string; cliente: string; producto: string; estado: string }>;
+  advertencias: string[];
+}
+
+function n(v: any): number {
+  const x = Number(v);
+  return Number.isFinite(x) ? x : 0;
+}
+
+/** Recoge todos los conteos del informe. Nunca lanza: si una consulta falla,
+ *  ese dato queda en 0 y el motivo se acumula en `advertencias`, para que la
+ *  página cargue igual en vez de quedarse en blanco por un solo fallo. */
+export async function recogerDatosInforme(supabase: any, reactivacionActiva: boolean): Promise<DatosInforme> {
+  const advertencias: string[] = [];
+  const ahora = Date.now();
+  const desde24 = new Date(ahora - 24 * 3600 * 1000).toISOString();
+  const desde7d = new Date(ahora - 7 * 24 * 3600 * 1000).toISOString();
+
+  const base: DatosInforme = {
+    generadoEn: new Date().toISOString(),
+    pedidos: 0, clientes: 0, productos: 0, enCheckout: 0,
+    vistas24h: 0, carritos24h: 0, checkouts24h: 0, contactos24h: 0, mensajesWa24h: 0,
+    carritos7d: 0, pedidos7d: 0,
+    reactivacionActiva,
+    ultimosPedidos: [],
+    advertencias
+  };
+
+  if (!supabase) {
+    advertencias.push("Sin conexión a la base de datos.");
+    return base;
+  }
+
+  const contar = async (tabla: string, etiqueta: string, ajustar?: (q: any) => any): Promise<number> => {
+    try {
+      let q = supabase.from(tabla).select("*", { count: "exact", head: true });
+      if (ajustar) q = ajustar(q);
+      const { count, error } = await q;
+      if (error) { advertencias.push(`${etiqueta}: ${error.message}`); return 0; }
+      return n(count);
+    } catch (e: any) {
+      advertencias.push(`${etiqueta}: ${e?.message || "error desconocido"}`);
+      return 0;
+    }
+  };
+
+  const tipoDesde = (tipo: string, desde: string) => (q: any) =>
+    q.eq("data->>type", tipo).gte("data->>timestamp", desde);
+
+  const [
+    pedidos, clientes, productos, enCheckout,
+    vistas24h, carritos24h, checkouts24h, contactos24h, carritos7d
+  ] = await Promise.all([
+    contar("orders", "pedidos"),
+    contar("customers", "clientes"),
+    contar("products", "productos"),
+    contar("customers", "en checkout", (q: any) => q.not("data->>checkoutStep", "is", null)),
+    contar("activities", "visitas 24h", tipoDesde("page_view", desde24)),
+    contar("activities", "carritos 24h", tipoDesde("add_to_cart", desde24)),
+    contar("activities", "checkouts 24h", tipoDesde("funnel_event", desde24)),
+    contar("activities", "contactos 24h", tipoDesde("contact", desde24)),
+    contar("activities", "carritos 7d", tipoDesde("add_to_cart", desde7d))
+  ]);
+
+  Object.assign(base, {
+    pedidos, clientes, productos, enCheckout,
+    vistas24h, carritos24h, checkouts24h, contactos24h, carritos7d
+  });
+
+  // Mensajes de WhatsApp: las actividades de conversación no traen 'type', se
+  // reconocen porque llevan teléfono del cliente.
+  base.mensajesWa24h = await contar("activities", "mensajes WhatsApp 24h",
+    (q: any) => q.not("data->>customerPhone", "is", null).gte("data->>timestamp", desde24));
+
+  base.pedidos7d = await contar("orders", "pedidos 7d",
+    (q: any) => q.gte("data->>createdAt", desde7d));
+
+  try {
+    const { data, error } = await supabase
+      .from("orders").select("data").order("data->>createdAt", { ascending: false }).limit(6);
+    if (error) advertencias.push(`últimos pedidos: ${error.message}`);
+    else if (Array.isArray(data)) {
+      base.ultimosPedidos = data.map((row: any) => {
+        const d = row?.data || {};
+        return {
+          fecha: String(d.createdAt || "").slice(0, 16).replace("T", " "),
+          cliente: String(d.customerName || "—"),
+          producto: String(d.productName || "—").slice(0, 60),
+          estado: String(d.status || "—")
+        };
+      });
+    }
+  } catch (e: any) {
+    advertencias.push(`últimos pedidos: ${e?.message || "error"}`);
+  }
+
+  return base;
+}
+
+/** La página. Se sirve completa y pide los datos a /api/informe cada 60 s. */
+export function paginaInforme(token: string): string {
+  const t = JSON.stringify(token);
+  return `<!doctype html>
+<html lang="es"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Jansel Shop en vivo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=JetBrains+Mono:wght@400;500&family=Public+Sans:wght@400;500;600&display=swap">
+<style>
+  :root{--bg:#EDF0F3;--surface:#fff;--surface-2:#F4F7F9;--ink:#0E141A;--muted:#57646F;
+    --faint:#8695A1;--line:#D6DDE4;--line-2:#BCC7D0;--accent:#0E6A70;
+    --good:#1B7040;--good-soft:#DDEFE4;--warn:#9A6000;--warn-soft:#F8EAD1;
+    --bad:#A62F1C;--bad-soft:#FADFD9;--shadow:0 1px 2px rgba(14,20,26,.05),0 4px 16px rgba(14,20,26,.05)}
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --bg:#0F1317;--surface:#161C22;--surface-2:#1D242B;--ink:#E6ECF2;--muted:#93A1AE;
+    --faint:#6C7B88;--line:#252E36;--line-2:#36424C;--accent:#4FC3C8;
+    --good:#57C185;--good-soft:#122E1F;--warn:#E0A94B;--warn-soft:#312413;
+    --bad:#F0705C;--bad-soft:#361A16;--shadow:0 1px 2px rgba(0,0,0,.45),0 4px 16px rgba(0,0,0,.35)}}
+  :root[data-theme="dark"]{--bg:#0F1317;--surface:#161C22;--surface-2:#1D242B;--ink:#E6ECF2;
+    --muted:#93A1AE;--faint:#6C7B88;--line:#252E36;--line-2:#36424C;--accent:#4FC3C8;
+    --good:#57C185;--good-soft:#122E1F;--warn:#E0A94B;--warn-soft:#312413;
+    --bad:#F0705C;--bad-soft:#361A16;--shadow:0 1px 2px rgba(0,0,0,.45),0 4px 16px rgba(0,0,0,.35)}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:"Public Sans",system-ui,sans-serif;
+    font-size:16px;line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:900px;margin:0 auto;padding:30px 18px 80px}
+  .mono{font-family:"JetBrains Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+  header{border-bottom:2px solid var(--line-2);padding-bottom:18px;margin-bottom:6px}
+  .kicker{font-family:"JetBrains Mono",monospace;font-size:11px;letter-spacing:.16em;
+    text-transform:uppercase;color:var(--faint);margin-bottom:10px}
+  h1{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:clamp(28px,5.2vw,42px);
+    line-height:1.06;letter-spacing:-.025em;margin:0 0 8px}
+  .sub{margin:0;color:var(--muted);max-width:62ch}
+  .bar{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin:14px 0 2px;
+    font-family:"JetBrains Mono",monospace;font-size:11.5px;color:var(--faint)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--faint)}
+  .dot.on{background:var(--good);box-shadow:0 0 0 3px var(--good-soft)}
+  .dot.off{background:var(--bad)}
+  button{font-family:"Public Sans",sans-serif;font-size:12.5px;font-weight:500;padding:4px 11px;
+    border-radius:6px;cursor:pointer;background:var(--surface);color:var(--ink);border:1px solid var(--line-2)}
+  button:hover{background:var(--surface-2)}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+  .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(144px,1fr));gap:11px;margin:20px 0}
+  .kpi{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:13px 15px;box-shadow:var(--shadow)}
+  .kpi .lbl{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.1em;
+    text-transform:uppercase;color:var(--faint);display:block;margin-bottom:5px}
+  .kpi .val{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:26px;
+    letter-spacing:-.02em;font-variant-numeric:tabular-nums;line-height:1.1}
+  .kpi .note{font-size:12.5px;color:var(--muted);margin-top:2px}
+  .kpi.good .val{color:var(--good)}.kpi.bad .val{color:var(--bad)}.kpi.warn .val{color:var(--warn)}
+  h2{font-family:"Bricolage Grotesque",sans-serif;font-weight:700;font-size:21px;
+    letter-spacing:-.018em;margin:36px 0 8px}
+  p{margin:0 0 12px;max-width:70ch}
+  .scroll{overflow-x:auto;margin:12px 0;border:1px solid var(--line);border-radius:10px;
+    background:var(--surface);box-shadow:var(--shadow)}
+  table{width:100%;border-collapse:collapse;font-size:14.5px;min-width:480px}
+  th,td{padding:9px 13px;text-align:left;border-bottom:1px solid var(--line)}
+  th{font-family:"JetBrains Mono",monospace;font-size:10.5px;letter-spacing:.09em;
+    text-transform:uppercase;color:var(--faint);font-weight:500;background:var(--surface-2)}
+  td.num{font-family:"JetBrains Mono",monospace;font-variant-numeric:tabular-nums;text-align:right}
+  tr:last-child td{border-bottom:none}
+  .aviso{border-radius:10px;padding:16px 18px;margin:16px 0;border:1px solid;box-shadow:var(--shadow)}
+  .aviso.ok{background:var(--good-soft);border-color:var(--good)}
+  .aviso.warn{background:var(--warn-soft);border-color:var(--warn)}
+  .aviso.bad{background:var(--bad-soft);border-color:var(--bad)}
+  .aviso h3{margin:0 0 6px;font-size:16px;font-family:"Bricolage Grotesque",sans-serif}
+  .aviso.ok h3{color:var(--good)}.aviso.warn h3{color:var(--warn)}.aviso.bad h3{color:var(--bad)}
+  .aviso p:last-child{margin-bottom:0}
+  a{color:var(--accent)}
+  footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--line);font-size:13px;color:var(--faint)}
+  @media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style></head><body>
+<div class="wrap">
+<header>
+  <div class="kicker">Jansel Shop · informe en vivo</div>
+  <h1>Cómo va la tienda</h1>
+  <p class="sub">Se lee directo de tu base de datos y se actualiza solo cada minuto.</p>
+</header>
+
+<div class="bar">
+  <span class="dot" id="dot"></span>
+  <span id="estado">Cargando…</span>
+  <button id="btn" type="button">Actualizar ahora</button>
+</div>
+
+<div class="kpis">
+  <div class="kpi"><span class="lbl">Pedidos</span><div class="val mono" id="k-ped">—</div><div class="note">total en la base</div></div>
+  <div class="kpi"><span class="lbl">Al carrito 24 h</span><div class="val mono" id="k-car">—</div><div class="note" id="k-car7">—</div></div>
+  <div class="kpi"><span class="lbl">Visitas 24 h</span><div class="val mono" id="k-vis">—</div><div class="note">páginas vistas</div></div>
+  <div class="kpi"><span class="lbl">Escribieron 24 h</span><div class="val mono" id="k-con">—</div><div class="note">por WhatsApp</div></div>
+  <div class="kpi"><span class="lbl">En checkout</span><div class="val mono" id="k-chk">—</div><div class="note">a mitad del pedido</div></div>
+</div>
+
+<div id="alertas"></div>
+
+<h2>Embudo de las últimas 24 horas</h2>
+<div class="scroll"><table>
+  <thead><tr><th>Paso</th><th class="num">Cantidad</th><th>Qué significa</th></tr></thead>
+  <tbody id="embudo"><tr><td colspan="3">Cargando…</td></tr></tbody>
+</table></div>
+
+<h2>Últimos pedidos</h2>
+<div class="scroll"><table>
+  <thead><tr><th>Fecha</th><th>Cliente</th><th>Producto</th><th>Estado</th></tr></thead>
+  <tbody id="pedidos"><tr><td colspan="4">Cargando…</td></tr></tbody>
+</table></div>
+
+<h2>Anuncios</h2>
+<p>Las cifras de gasto y CTR viven en Meta y no se pueden leer desde aquí.
+  <a href="https://www.facebook.com/adsmanager/manage/campaigns?act=816603727681853" target="_blank" rel="noopener">Abrir el administrador de anuncios →</a></p>
+
+<footer id="pie">—</footer>
+</div>
+
+<script>
+(function(){
+  var TOKEN = ${t};
+  var $=function(i){return document.getElementById(i)};
+  var esc=function(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){
+    return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})};
+  var num=function(v){var x=Number(v);return isFinite(x)?x.toLocaleString("es-CO"):"—"};
+
+  function pintar(d){
+    $("k-ped").textContent=num(d.pedidos);
+    $("k-ped").parentElement.className="kpi"+(Number(d.pedidos)===0?" bad":" good");
+    $("k-car").textContent=num(d.carritos24h);
+    $("k-car7").textContent=num(d.carritos7d)+" en 7 días";
+    $("k-vis").textContent=num(d.vistas24h);
+    $("k-con").textContent=num(d.contactos24h);
+    $("k-chk").textContent=num(d.enCheckout);
+
+    var pasos=[["Visitas",d.vistas24h,"entraron a la tienda"],
+      ["Al carrito",d.carritos24h,"agregaron un producto"],
+      ["Iniciaron pedido",d.checkouts24h,"llegaron al formulario"],
+      ["Escribieron",d.contactos24h,"tocaron el botón de WhatsApp"],
+      ["Mensajes WhatsApp",d.mensajesWa24h,"conversaciones con el bot"]];
+    $("embudo").innerHTML=pasos.map(function(p){
+      return "<tr><td>"+esc(p[0])+'</td><td class="num">'+num(p[1])+"</td><td>"+esc(p[2])+"</td></tr>"}).join("");
+
+    var ped=d.ultimosPedidos||[];
+    $("pedidos").innerHTML=ped.length
+      ? ped.map(function(o){return "<tr><td>"+esc(o.fecha)+"</td><td>"+esc(o.cliente)+
+          "</td><td>"+esc(o.producto)+"</td><td>"+esc(o.estado)+"</td></tr>"}).join("")
+      : '<tr><td colspan="4">Todavía no ha entrado ningún pedido.</td></tr>';
+
+    var av=[];
+    if(d.reactivacionActiva)
+      av.push('<div class="aviso warn"><h3>Campaña de reactivación ENCENDIDA</h3><p>Está mandando mensajes automáticos por WhatsApp. Si no era lo que querías, quita <b>REACTIVACION_AUTOMATICA</b> en Railway.</p></div>');
+    else
+      av.push('<div class="aviso ok"><h3>Campaña de reactivación apagada</h3><p>No se están enviando mensajes automáticos por WhatsApp.</p></div>');
+    if((d.advertencias||[]).length)
+      av.push('<div class="aviso bad"><h3>Algunos datos no se pudieron leer</h3><p>'+
+        d.advertencias.map(esc).join("<br>")+"</p></div>");
+    $("alertas").innerHTML=av.join("");
+
+    $("dot").className="dot on";
+    $("estado").textContent="Al día · se actualiza solo cada minuto";
+    $("pie").textContent="Última lectura: "+new Date(d.generadoEn).toLocaleString("es-CO")+
+      " · "+num(d.clientes)+" clientes y "+num(d.productos)+" productos en catálogo.";
+  }
+
+  var cargando=false;
+  function cargar(){
+    if(cargando)return; cargando=true;
+    fetch("/api/informe?k="+encodeURIComponent(TOKEN),{cache:"no-store"})
+      .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json()})
+      .then(function(j){ if(!j||!j.success) throw new Error((j&&j.error)||"respuesta inesperada"); pintar(j.datos)})
+      .catch(function(e){
+        $("dot").className="dot off";
+        $("estado").textContent="No se pudo leer: "+e.message;
+      })
+      .then(function(){cargando=false});
+  }
+  $("btn").addEventListener("click",cargar);
+  cargar();
+  setInterval(function(){ if(!document.hidden) cargar() },60000);
+})();
+</script>
+</body></html>`;
+}
