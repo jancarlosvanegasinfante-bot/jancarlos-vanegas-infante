@@ -334,14 +334,30 @@ export default function LandingPage() {
       const saved = localStorage.getItem("jan_sel_shop_cart");
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+        if (Array.isArray(parsed)) {
+          // El carrito guardado puede ser de hace semanas, con productos que ya
+          // no vendemos y con precios viejos. Un cliente abrió la landing y le
+          // aparecía un "Carplay Para Moto" en el carrito, que salió del
+          // catálogo hace rato. Se descarta lo que ya no existe y el resto se
+          // vuelve a leer del catálogo de HOY, para que nadie vea un precio que
+          // no le vamos a respetar.
+          return parsed
+            .map((item: any) => {
+              const vigente = TRENDING_PRODUCTS.find((p) => p.id === item?.product?.id);
+              if (!vigente) return null;
+              const cantidad = Math.max(1, Math.min(20, Number(item?.quantity) || 1));
+              return { product: vigente, quantity: cantidad };
+            })
+            .filter(Boolean) as { product: typeof TRENDING_PRODUCTS[0]; quantity: number }[];
         }
       }
     } catch (e) {
       console.error("Error reading cart from localStorage", e);
     }
-    return [{ product: TRENDING_PRODUCTS[0], quantity: 1 }];
+    // Arranca VACÍO. Antes metía TRENDING_PRODUCTS[0] de entrada, así que todo
+    // visitante nuevo veía un producto que él no había elegido: confunde, y
+    // hace que el carrito no signifique nada.
+    return [];
   });
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isSupportOpen, setIsSupportOpen] = useState(false);
@@ -497,7 +513,7 @@ export default function LandingPage() {
   const claimWheelPrize = () => {
     setWheelOpen(false);
     setCheckoutMode("formulario");
-    setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 200);
+    bajarAlFormulario();
   };
 
 
@@ -806,7 +822,7 @@ export default function LandingPage() {
     toast.success("¡" + combo.name + " listo! Completa tus datos 👇");
     setIsCartOpen(false);
     setCheckoutMode("formulario");
-    setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 200);
+    bajarAlFormulario();
 
     // Mismo caso que el camino de la ficha de producto: baja al formulario sin
     // pasar por el botón del carrito, así que InitiateCheckout no salía. Se usa
@@ -852,6 +868,24 @@ export default function LandingPage() {
     } catch { /* ignore */ }
   }, []);
 
+  // Lleva el formulario ARRIBA de la pantalla, no "a la vista". Con
+  // scrollIntoView por defecto el formulario quedaba abajo y tocaba deslizar
+  // para verlo completo — y ahí es donde la gente se cansa y se sale.
+  // Reintenta durante 2 segundos porque el formulario se monta al cambiar
+  // checkoutMode: si se llama antes, el elemento todavía no existe.
+  const bajarAlFormulario = React.useCallback(() => {
+    let intentos = 0;
+    const intentar = () => {
+      const el = formRef.current;
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      if (++intentos < 20) setTimeout(intentar, 100);
+    };
+    setTimeout(intentar, 60);
+  }, []);
+
   // Recibe pedidos que llegan desde otras paginas (la ficha de producto, por
   // ejemplo) con ?add=<idProducto> o ?combo=<idCombo>. Mete lo pedido al carrito
   // y baja directo al formulario, para que cerrar por formulario sea posible
@@ -877,7 +911,7 @@ export default function LandingPage() {
           toast.success("¡" + p.name + " listo! Completa tus datos 👇");
           setIsCartOpen(false);
           setCheckoutMode("formulario");
-          setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 350);
+          bajarAlFormulario();
 
           // Este camino lleva al formulario igual que el botón del carrito, pero
           // no disparaba InitiateCheckout: el evento solo salía desde el carrito.
@@ -1005,7 +1039,7 @@ export default function LandingPage() {
   const handleProceedToForm = () => {
     setIsCartOpen(false);
     setCheckoutMode("formulario");
-    setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 150);
+    bajarAlFormulario();
 
     // Track InitiateCheckout Event
     const checkoutEventId1 = generateEventId();
@@ -1035,7 +1069,7 @@ export default function LandingPage() {
     });
     setCheckoutMode("formulario");
     toast.success(`¡Configura tu despacho para ${product.name}! 📦`, { icon: "⚡" });
-    setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 100);
+    bajarAlFormulario();
 
     // Track ViewContent & InitiateCheckout
     const viewContentEventId = generateEventId();
@@ -1716,7 +1750,7 @@ export default function LandingPage() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => { setIsCartOpen(true); setTimeout(() => formRef.current?.scrollIntoView({ behavior: "smooth" }), 150); }}
+                        onClick={() => { setIsCartOpen(true); bajarAlFormulario(); }}
                         className="h-11 px-4 rounded-xl btn-cta-primary text-black font-black text-[10px] uppercase tracking-wider flex items-center gap-1 cursor-pointer"
                       >
                         Finalizar 🚀
@@ -2538,7 +2572,7 @@ export default function LandingPage() {
 
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <button
-                onClick={() => formRef.current?.scrollIntoView({ behavior: "smooth" })}
+                onClick={() => bajarAlFormulario()}
                 className="btn-cta-primary text-black font-black text-base uppercase tracking-wider px-10 py-5 rounded-2xl flex items-center gap-3 cursor-pointer w-full sm:w-auto justify-center"
               >
                 <ShoppingBag size={20} />
@@ -3216,7 +3250,7 @@ export default function LandingPage() {
                     if (cart.length === 0 && TRENDING_PRODUCTS.length > 0) addToCart(TRENDING_PRODUCTS[0], true);
                     setIsCartOpen(false);
                     setCheckoutMode("formulario");
-                    setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 200);
+                    bajarAlFormulario();
                   }}
                   className="flex items-center gap-3 rounded-2xl border border-amber-400/40 bg-gradient-to-r from-amber-400/15 to-orange-500/10 p-3 text-left transition hover:border-amber-400 cursor-pointer"
                 >

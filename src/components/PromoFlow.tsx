@@ -144,6 +144,16 @@ export default function PromoFlow({ officialBotNumber, onPedirFormulario }: { of
   const [picked, setPicked] = useState<number | null>(null);
 
   useEffect(() => {
+    // NO abrir cuando la persona ya viene decidida. La ficha de producto manda
+    // a /landing?add=<id> y el combo a ?combo=<id>: en los dos casos el cliente
+    // acaba de tocar "pedir" y la página lo está bajando al formulario. El
+    // popup se abría 600 ms después y le tapaba justo el formulario al que iba,
+    // con una ruleta que él no pidió. Interrumpir ahí es perder la venta.
+    try {
+      const q = new URLSearchParams(window.location.search);
+      if (q.get("add") || q.get("combo")) return;
+    } catch { /* si no se puede leer la URL, sigue el comportamiento normal */ }
+
     const seen = typeof sessionStorage !== "undefined" && sessionStorage.getItem("jansel_promo_seen");
     if (!seen) {
       const t = setTimeout(() => setOpen(true), 600);
