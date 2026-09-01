@@ -31,6 +31,11 @@ export interface DatosInforme {
   checkouts7d: number;
   contactos7d: number;
   mensajesWa7d: number;
+  // Diagnóstico del formulario: separa "lo abrió y no tocó nada" de "escribió
+  // y se fue a mitad". Son dos problemas distintos con soluciones distintas.
+  formEmpezado7d: number;
+  formAbandonado7d: number;
+  abandonoPorCampo: Array<{ campo: string; veces: number }>;
   // Ingresos REALES, sumados de los pedidos de la base. No son los de Meta:
   // las ventas se cierran contraentrega por WhatsApp y Meta nunca las ve, así
   // que su ROAS siempre saldría bajo aunque el negocio esté vendiendo bien.
@@ -80,6 +85,7 @@ export async function recogerDatosInforme(supabase: any, reactivacionActiva: boo
     vistas24h: 0, carritos24h: 0, checkouts24h: 0, contactos24h: 0, mensajesWa24h: 0,
     carritos7d: 0, pedidos7d: 0,
     vistas7d: 0, checkouts7d: 0, contactos7d: 0, mensajesWa7d: 0,
+    formEmpezado7d: 0, formAbandonado7d: 0, abandonoPorCampo: [],
     ingresos7d: 0, ticketPromedio: 0, roasReal: 0, cpaReal: 0,
     meta: await recogerMetricasMeta(),
     reactivacionActiva,
@@ -142,6 +148,41 @@ export async function recogerDatosInforme(supabase: any, reactivacionActiva: boo
       (q: any) => q.not("data->>customerPhone", "is", null).gte("data->>timestamp", desde7d))
   ]);
   Object.assign(base, { vistas7d, checkouts7d, contactos7d, mensajesWa7d });
+
+  const [formEmpezado7d, formAbandonado7d] = await Promise.all([
+    contar("activities", "empezaron el formulario 7d", tipoDesde("form_start", desde7d)),
+    contar("activities", "abandonos del formulario 7d", tipoDesde("form_abandon", desde7d))
+  ]);
+  Object.assign(base, { formEmpezado7d, formAbandonado7d });
+
+  // En qué campo se quedaron. El mensaje guardado termina en "se fue en: X",
+  // así que se agrupa por ese pedazo. Saber que 8 de 10 se van en "dirección"
+  // vale mucho más que saber que hubo 10 abandonos.
+  if (formAbandonado7d > 0) {
+    try {
+      const { data, error } = await supabase
+        .from("activities").select("data")
+        .eq("data->>type", "form_abandon")
+        .gte("data->>timestamp", desde7d)
+        .limit(400);
+      if (error) advertencias.push(`abandono por campo: ${error.message}`);
+      else if (Array.isArray(data)) {
+        const cuenta: Record<string, number> = {};
+        for (const row of data) {
+          const msg = String(row?.data?.message || "");
+          const m = msg.match(/se fue en:\s*(.+?)\s*$/i);
+          const campo = m ? m[1].trim() : "sin dato";
+          cuenta[campo] = (cuenta[campo] || 0) + 1;
+        }
+        base.abandonoPorCampo = Object.entries(cuenta)
+          .map(([campo, veces]) => ({ campo, veces }))
+          .sort((a, b) => b.veces - a.veces)
+          .slice(0, 6);
+      }
+    } catch (e: any) {
+      advertencias.push(`abandono por campo: ${e?.message || "error"}`);
+    }
+  }
 
   base.pedidos7d = await contar("orders", "pedidos 7d",
     (q: any) => q.gte("data->>createdAt", desde7d));

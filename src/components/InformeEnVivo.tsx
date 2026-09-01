@@ -27,6 +27,8 @@ interface Datos {
   contactos24h: number; mensajesWa24h: number;
   carritos7d: number; pedidos7d: number;
   vistas7d: number; checkouts7d: number; contactos7d: number; mensajesWa7d: number;
+  formEmpezado7d: number; formAbandonado7d: number;
+  abandonoPorCampo: Array<{ campo: string; veces: number }>;
   ingresos7d: number; ticketPromedio: number; roasReal: number; cpaReal: number;
   reactivacionActiva: boolean;
   ultimosPedidos: Array<{ fecha: string; cliente: string; producto: string; estado: string }>;
@@ -575,6 +577,63 @@ export default function InformeEnVivo() {
             );
           })}
         </div>
+      </div>
+
+      {/* Dónde se cae la gente dentro del formulario */}
+      <div>
+        <h3 className="text-sm font-black uppercase tracking-wider text-neutral-400 mb-2.5">
+          Dentro del formulario · 7 días
+        </h3>
+        {d.checkouts7d > 0 ? (
+          <div className="bg-neutral-900/40 border border-neutral-800 rounded-2xl overflow-hidden">
+            {([
+              ["Abrieron el formulario", d.checkouts7d, "tocaron pedir"],
+              ["Empezaron a escribir", d.formEmpezado7d, "tocaron alguna tecla"],
+              ["Se fueron sin terminar", d.formAbandonado7d, "cerraron a mitad"],
+              ["Pedidos completados", d.pedidos7d, "llegaron hasta el final"]
+            ] as Array<[string, number, string]>).map(([k, v, ayuda], i, arr) => {
+              const tope = Math.max(...arr.map(x => x[1]), 1);
+              const ancho = Math.max(2, Math.round((v / tope) * 100));
+              const ultimo = i === arr.length - 1;
+              return (
+                <div key={k} className={`px-4 py-3 ${i < arr.length - 1 ? "border-b border-neutral-800/70" : ""}`}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-neutral-200 text-sm font-medium">{k}</span>
+                    <span className={`font-black tabular-nums ${ultimo && v === 0 ? "text-red-400" : "text-white"}`}>{nu(v)}</span>
+                  </div>
+                  <div className="mt-1.5 h-1.5 bg-neutral-800 rounded-full overflow-hidden">
+                    <div className={`h-full rounded-full ${ultimo ? "bg-emerald-500/70" : "bg-amber-500/70"}`} style={{ width: ancho + "%" }} />
+                  </div>
+                  <div className="text-[11px] text-neutral-500 mt-1">{ayuda}</div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="bg-neutral-900/40 border border-neutral-800 rounded-2xl p-5 text-neutral-400 text-sm">
+            Nadie ha abierto el formulario en los últimos 7 días.
+          </div>
+        )}
+
+        {d.abandonoPorCampo?.length > 0 && (
+          <div className="mt-3 bg-neutral-900/40 border border-neutral-800 rounded-2xl overflow-hidden">
+            <div className="px-4 py-2.5 bg-neutral-900/80 text-[10px] uppercase tracking-wider text-neutral-500 font-medium">
+              ¿En qué campo se quedaron?
+            </div>
+            {d.abandonoPorCampo.map((f) => (
+              <div key={f.campo} className="px-4 py-2.5 border-b border-neutral-800/70 last:border-0 flex items-baseline justify-between gap-3">
+                <span className="text-neutral-200 text-sm">{f.campo}</span>
+                <span className="text-white font-bold tabular-nums">{nu(f.veces)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <p className="text-[11px] text-neutral-500 mt-2 leading-relaxed">
+          Si muchos <b className="text-neutral-400">abren y no escriben</b>, el formulario asusta de entrada.
+          Si <b className="text-neutral-400">escriben y se van</b>, mira en qué campo: ahí está el estorbo.
+          Si <b className="text-neutral-400">llenan todo y no confirman</b>, el problema es el botón o el precio final.
+        </p>
       </div>
 
       {/* Últimos pedidos */}
