@@ -1,12 +1,16 @@
 // Métricas de la cuenta publicitaria de Meta, leídas desde el servidor.
 //
-// Se usa la Graph API SIN número de versión en la ruta. Fijar una versión
-// (v21.0, v23.0…) obliga a acordarse de subirla antes de que Meta la retire, y
-// el día que la retira el informe se cae solo. Sin versión, Meta resuelve a una
-// vigente por su cuenta.
+// La versión de la API va FIJA y en una variable de entorno. El primer intento
+// fue llamar sin versión, para no tener que acordarse de subirla; Meta lo
+// rechazó con "(#2635) You are calling a deprecated version of the Ads API".
+// Resulta que sin versión resuelve a una vieja y ya retirada. Queda en
+// META_API_VERSION para poder subirla desde Railway el día que toque, sin
+// tocar código.
 //
 // Nunca lanza: si falta el token o la petición falla, devuelve `disponible:
 // false` con el motivo, para que el informe cargue igual y diga qué pasó.
+
+const VERSION = String(process.env.META_API_VERSION || "v24.0").trim();
 
 export interface FilaAnuncio {
   nombre: string;
@@ -17,6 +21,24 @@ export interface FilaAnuncio {
   cpc: number;
   carritos: number;
   compras: number;
+}
+
+/** Un día de la serie, para las barras. */
+export interface DiaMetrica {
+  fecha: string;      // YYYY-MM-DD
+  gasto: number;
+  impresiones: number;
+  clics: number;
+  ctr: number;
+  carritos: number;
+  compras: number;
+}
+
+/** Un evento tal como Meta lo registró, con su valor exacto y sin agrupar. */
+export interface EventoReal {
+  tipo: string;
+  etiqueta: string;
+  cantidad: number;
 }
 
 export interface MetricasMeta {
@@ -36,6 +58,9 @@ export interface MetricasMeta {
   compras7d: number;
   valorCompras7d: number;
   anuncios: FilaAnuncio[];
+  dias: DiaMetrica[];
+  eventos: EventoReal[];
+  version: string;
 }
 
 const VACIO: MetricasMeta = {
@@ -43,7 +68,36 @@ const VACIO: MetricasMeta = {
   gastoHoy: 0, gasto7d: 0, impresiones7d: 0, alcance7d: 0, frecuencia7d: 0,
   clics7d: 0, ctr7d: 0, cpc7d: 0, cpm7d: 0,
   carritos7d: 0, checkouts7d: 0, compras7d: 0, valorCompras7d: 0,
-  anuncios: []
+  anuncios: [], dias: [], eventos: [], version: VERSION
+};
+
+// Nombres legibles para los action_type de Meta. Los que no estén aquí se
+// muestran con su nombre técnico: es preferible enseñar un nombre feo pero
+// real que esconder un evento que sí se está disparando.
+const NOMBRES: Record<string, string> = {
+  "page_engagement": "Interacción con la página",
+  "post_engagement": "Interacción con la publicación",
+  "landing_page_view": "Vieron la página completa",
+  "link_click": "Clic en el enlace",
+  "video_view": "Vieron el video",
+  "view_content": "Vieron producto",
+  "add_to_cart": "Agregaron al carrito",
+  "initiate_checkout": "Iniciaron el pedido",
+  "purchase": "Compraron",
+  "lead": "Dejaron datos",
+  "contact": "Escribieron",
+  "offsite_conversion.fb_pixel_view_content": "Vieron producto (píxel)",
+  "offsite_conversion.fb_pixel_add_to_cart": "Agregaron al carrito (píxel)",
+  "offsite_conversion.fb_pixel_initiate_checkout": "Iniciaron el pedido (píxel)",
+  "offsite_conversion.fb_pixel_purchase": "Compraron (píxel)",
+  "offsite_conversion.fb_pixel_lead": "Dejaron datos (píxel)",
+  "offsite_conversion.fb_pixel_custom": "Evento personalizado (píxel)",
+  "omni_view_content": "Vieron producto (total)",
+  "omni_add_to_cart": "Agregaron al carrito (total)",
+  "omni_initiated_checkout": "Iniciaron el pedido (total)",
+  "omni_purchase": "Compraron (total)",
+  "onsite_conversion.post_save": "Guardaron la publicación",
+  "onsite_conversion.messaging_conversation_started_7d": "Iniciaron conversación"
 };
 
 function n(v: any): number {
@@ -93,14 +147,17 @@ export async function recogerMetricasMeta(): Promise<MetricasMeta> {
   }
 
   const campos = "spend,impressions,clicks,ctr,cpc,cpm,reach,frequency,actions,action_values";
-  const base = `https://graph.facebook.com/act_${encodeURIComponent(cuenta)}/insights`;
+  const base = `https://graph.facebook.com/${VERSION}/act_${encodeURIComponent(cuenta)}/insights`;
   const auth = `access_token=${encodeURIComponent(token)}`;
 
   try {
-    const [hoy, semana, porAnuncio] = await Promise.all([
+    const [hoy, semana, porAnuncio, serie] = await Promise.all([
       pedir(`${base}?fields=spend&date_preset=today&${auth}`),
       pedir(`${base}?fields=${campos}&date_preset=last_7d&${auth}`),
-      pedir(`${base}?fields=name,${campos}&level=ad&date_preset=last_7d&limit=25&${auth}`)
+      pedir(`${base}?fields=name,${campos}&level=ad&date_preset=last_7d&limit=25&${auth}`),
+      // time_increment=1 devuelve UNA FILA POR DÍA, que es lo que alimenta las
+      // barras. 14 días para que se vea la tendencia y no solo la semana suelta.
+      pedir(`${base}?fields=spend,impressions,clicks,ctr,actions&time_increment=1&date_preset=last_14d&${auth}`)
     ]);
 
     const s = (semana?.data && semana.data[0]) || {};
@@ -120,8 +177,37 @@ export async function recogerMetricasMeta(): Promise<MetricasMeta> {
         })).sort((x: FilaAnuncio, y: FilaAnuncio) => y.gasto - x.gasto)
       : [];
 
+    const dias: DiaMetrica[] = Array.isArray(serie?.data)
+      ? serie.data.map((f: any) => ({
+          fecha: String(f.date_start || ""),
+          gasto: n(f.spend),
+          impresiones: n(f.impressions),
+          clics: n(f.clicks),
+          ctr: n(f.ctr),
+          carritos: sumaAccion(f.actions, CARRITO),
+          compras: sumaAccion(f.actions, COMPRA)
+        })).sort((a: DiaMetrica, b: DiaMetrica) => a.fecha.localeCompare(b.fecha))
+      : [];
+
+    // Todos los eventos que Meta registró de verdad, con su valor exacto y sin
+    // agrupar. Antes solo se mostraban los tres que interesaban de antemano, y
+    // así no había forma de notar que un evento no se estaba disparando.
+    const eventos: EventoReal[] = Array.isArray(acciones)
+      ? acciones
+          .map((a: any) => ({
+            tipo: String(a?.action_type || ""),
+            etiqueta: NOMBRES[String(a?.action_type || "")] || String(a?.action_type || ""),
+            cantidad: n(a?.value)
+          }))
+          .filter((e: EventoReal) => e.tipo && e.cantidad > 0)
+          .sort((a: EventoReal, b: EventoReal) => b.cantidad - a.cantidad)
+      : [];
+
     return {
       disponible: true,
+      version: VERSION,
+      dias,
+      eventos,
       gastoHoy: n(hoy?.data?.[0]?.spend),
       gasto7d: n(s.spend),
       impresiones7d: n(s.impressions),

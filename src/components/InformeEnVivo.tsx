@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
   RefreshCw, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2,
-  Megaphone, ShoppingCart, MessageCircle, Lightbulb, Wallet
+  Megaphone, ShoppingCart, MessageCircle, Lightbulb, Wallet, BarChart3
 } from "lucide-react";
 import { adminAuthHeaders } from "../supabase";
 
@@ -15,6 +15,11 @@ interface FilaAnuncio {
   nombre: string; gasto: number; impresiones: number; clics: number;
   ctr: number; cpc: number; carritos: number; compras: number;
 }
+interface DiaMetrica {
+  fecha: string; gasto: number; impresiones: number; clics: number;
+  ctr: number; carritos: number; compras: number;
+}
+interface EventoReal { tipo: string; etiqueta: string; cantidad: number; }
 interface Datos {
   generadoEn: string;
   pedidos: number; clientes: number; productos: number; enCheckout: number;
@@ -31,7 +36,73 @@ interface Datos {
     frecuencia7d: number; clics7d: number; ctr7d: number; cpc7d: number; cpm7d: number;
     carritos7d: number; checkouts7d: number; compras7d: number; valorCompras7d: number;
     anuncios: FilaAnuncio[];
+    dias: DiaMetrica[];
+    eventos: EventoReal[];
+    version: string;
   };
+}
+
+// Barras por día. Se dibuja con divs y no con una librería de gráficas: son
+// pocos datos y meter una dependencia entera para 14 barras engordaría el
+// bundle, que ya pasa de 1,5 MB.
+function BarrasPorDia({ dias }: { dias: DiaMetrica[] }) {
+  const [metrica, setMetrica] = useState<"gasto" | "clics" | "impresiones" | "carritos">("gasto");
+  if (!dias?.length) return null;
+
+  const OPCIONES: Array<[typeof metrica, string]> = [
+    ["gasto", "Gasto"], ["clics", "Clics"], ["impresiones", "Impresiones"], ["carritos", "Carritos"]
+  ];
+  const valores = dias.map(d => Number(d[metrica]) || 0);
+  const tope = Math.max(...valores, 1);
+  const total = valores.reduce((a, b) => a + b, 0);
+  const fmt = (v: number) => metrica === "gasto" ? cop(v) : nu(v);
+
+  return (
+    <div className="bg-neutral-900/40 border border-neutral-800 rounded-2xl p-4">
+      <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+        <div className="flex gap-1 bg-neutral-900 p-1 rounded-xl">
+          {OPCIONES.map(([k, etiqueta]) => (
+            <button
+              key={k}
+              onClick={() => setMetrica(k)}
+              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                metrica === k ? "bg-amber-500/15 text-amber-400" : "text-neutral-500 hover:text-neutral-300"
+              }`}
+            >{etiqueta}</button>
+          ))}
+        </div>
+        <span className="text-[11px] text-neutral-500">
+          Total 14 días: <span className="text-white font-bold tabular-nums">{fmt(total)}</span>
+        </span>
+      </div>
+
+      <div className="flex items-end gap-1 h-36">
+        {dias.map((d) => {
+          const v = Number(d[metrica]) || 0;
+          const alto = tope > 0 ? Math.round((v / tope) * 100) : 0;
+          const dia = d.fecha.slice(8, 10);
+          const mes = d.fecha.slice(5, 7);
+          return (
+            <div key={d.fecha} className="flex-1 flex flex-col items-center gap-1 min-w-0 group relative">
+              <span className="text-[9px] text-neutral-500 tabular-nums opacity-0 group-hover:opacity-100 transition-opacity absolute -top-4 whitespace-nowrap bg-neutral-800 px-1.5 py-0.5 rounded z-10">
+                {fmt(v)}
+              </span>
+              <div className="w-full bg-neutral-800/60 rounded-t-sm flex items-end" style={{ height: "100%" }}>
+                <div
+                  className={`w-full rounded-t-sm transition-all ${v > 0 ? "bg-amber-500/70 group-hover:bg-amber-400" : "bg-neutral-700"}`}
+                  style={{ height: Math.max(v > 0 ? 3 : 1, alto) + "%" }}
+                />
+              </div>
+              <span className="text-[9px] text-neutral-600 tabular-nums">{dia}/{mes}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="text-[11px] text-neutral-500 mt-3">
+        Pasa el dedo o el mouse por una barra para ver el valor exacto de ese día.
+      </p>
+    </div>
+  );
 }
 
 const cop = (v: number | undefined) => {
@@ -351,6 +422,49 @@ export default function InformeEnVivo() {
           </div>
         )}
       </div>
+
+      {/* Métricas por día */}
+      {hayMeta && m.dias?.length > 0 && (
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-wider text-neutral-400 mb-2.5">
+            <BarChart3 size={15} /> Por día · últimos 14 días
+          </h3>
+          <BarrasPorDia dias={m.dias} />
+        </div>
+      )}
+
+      {/* Eventos que de verdad se dispararon */}
+      {hayMeta && (
+        <div>
+          <h3 className="text-sm font-black uppercase tracking-wider text-neutral-400 mb-2.5">
+            Eventos registrados por Meta · 7 días
+          </h3>
+          {m.eventos?.length > 0 ? (
+            <div className="bg-neutral-900/40 border border-neutral-800 rounded-2xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[420px]">
+                  <tbody>
+                    {m.eventos.map((e) => (
+                      <tr key={e.tipo} className="border-b border-neutral-800/70 last:border-0">
+                        <td className="px-4 py-2.5 text-neutral-200">{e.etiqueta}</td>
+                        <td className="px-4 py-2.5 text-right font-bold text-white tabular-nums whitespace-nowrap">{nu(e.cantidad)}</td>
+                        <td className="px-4 py-2.5 text-neutral-600 text-[11px] font-mono">{e.tipo}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-neutral-900/40 border border-neutral-800 rounded-2xl p-5 text-neutral-400 text-sm">
+              Meta no registró ningún evento en los últimos 7 días.
+            </div>
+          )}
+          <p className="text-[11px] text-neutral-600 mt-2">
+            Son los valores exactos que Meta tiene guardados, sin agrupar ni redondear. El nombre técnico va a la derecha.
+          </p>
+        </div>
+      )}
 
       {/* Por anuncio */}
       {hayMeta && m.anuncios?.length > 0 && (
