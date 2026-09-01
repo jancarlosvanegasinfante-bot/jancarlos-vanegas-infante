@@ -363,6 +363,11 @@ export default function LandingPage() {
   const [isSupportOpen, setIsSupportOpen] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<"contraentrega" | "anticipado">("contraentrega");
   const [checkoutMode, setCheckoutMode] = useState<"formulario" | "whatsapp">("formulario");
+  // El formulario vive en una pantalla emergente. Antes era una seccion mas de
+  // la landing: tocaba deslizar para llegar, y quien venia de la ficha de
+  // producto aterrizaba a media pantalla. En un modal el cliente no puede
+  // perderlo de vista ni distraerse con el resto de la pagina.
+  const [pedidoAbierto, setPedidoAbierto] = useState(false);
   const [formData, setFormData] = useState({
     customerName: "",
     customerPhone: "",
@@ -873,18 +878,34 @@ export default function LandingPage() {
   // para verlo completo — y ahí es donde la gente se cansa y se sale.
   // Reintenta durante 2 segundos porque el formulario se monta al cambiar
   // checkoutMode: si se llama antes, el elemento todavía no existe.
+  // Todos los caminos que antes bajaban al formulario ahora abren el modal:
+  // el boton del carrito, la compra rapida, los combos y el ?add= que manda
+  // la ficha de producto. Se conserva el nombre para no tocar cada llamada.
   const bajarAlFormulario = React.useCallback(() => {
-    let intentos = 0;
-    const intentar = () => {
-      const el = formRef.current;
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "start" });
-        return;
-      }
-      if (++intentos < 20) setTimeout(intentar, 100);
-    };
-    setTimeout(intentar, 60);
+    setCheckoutMode("formulario");
+    setIsCartOpen(false);
+    setPedidoAbierto(true);
   }, []);
+
+  const cerrarPedido = React.useCallback(() => setPedidoAbierto(false), []);
+
+  // Con el modal abierto se bloquea el scroll del fondo: en el celular, si no,
+  // se arrastra la pagina de atras y el formulario se siente roto.
+  useEffect(() => {
+    if (!pedidoAbierto) return;
+    const previo = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const alTeclear = (e: KeyboardEvent) => { if (e.key === "Escape") setPedidoAbierto(false); };
+    window.addEventListener("keydown", alTeclear);
+    return () => {
+      document.body.style.overflow = previo;
+      window.removeEventListener("keydown", alTeclear);
+    };
+  }, [pedidoAbierto]);
+
+  // Cuando el pedido queda registrado, la pantalla de exito se muestra aparte:
+  // dejar el modal encima la taparia.
+  useEffect(() => { if (orderCompleted) setPedidoAbierto(false); }, [orderCompleted]);
 
   // Recibe pedidos que llegan desde otras paginas (la ficha de producto, por
   // ejemplo) con ?add=<idProducto> o ?combo=<idCombo>. Mete lo pedido al carrito
@@ -1964,7 +1985,31 @@ export default function LandingPage() {
       {/* ════════════════════════════════════════════
           FORMULARIO DE PEDIDO — MEJORADO
       ════════════════════════════════════════════ */}
-      <section className="py-20 px-4 relative" ref={formRef} id="formulario">
+      {/* PEDIDO EN PANTALLA EMERGENTE
+          Misma logica de siempre (metodo de pago, carrito, descuentos y envio
+          del pedido); lo unico que cambia es que ya no hay que deslizar. */}
+      <AnimatePresence>
+      {pedidoAbierto && (
+      <motion.div
+        className="fixed inset-0 z-[90] overflow-y-auto overscroll-contain bg-black/85 backdrop-blur-sm px-3 py-4 sm:px-6 sm:py-8"
+        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+        onClick={(e) => { if (e.target === e.currentTarget) cerrarPedido(); }}
+        role="dialog" aria-modal="true" aria-label="Completa tu pedido"
+      >
+      <motion.div
+        className="relative w-full max-w-3xl mx-auto"
+        initial={{ opacity: 0, y: 26, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        exit={{ opacity: 0, y: 18, scale: 0.98 }}
+        transition={{ type: "spring", stiffness: 280, damping: 28 }}
+      >
+        <button
+          type="button" onClick={cerrarPedido} aria-label="Cerrar"
+          className="absolute -top-1 right-1 z-20 w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 border border-white/15 text-white flex items-center justify-center backdrop-blur-md transition-colors"
+        >
+          <X size={18} />
+        </button>
+      <section className="relative rounded-3xl border border-white/10 bg-[#0A0C15] shadow-2xl shadow-black/60 px-4 py-7 sm:px-7 sm:py-9 overflow-hidden" ref={formRef} id="formulario">
         <div className="absolute inset-0 bg-gradient-to-b from-transparent via-emerald-950/5 to-transparent pointer-events-none" />
         <div className="max-w-5xl mx-auto relative z-10">
           {wheelPrize && (
@@ -1977,7 +2022,7 @@ export default function LandingPage() {
             </div>
           )}
           {/* Section header */}
-          <div className="text-center space-y-4 mb-12">
+          <div className="text-center space-y-3 mb-7">
             <div className="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-4 py-1.5 rounded-full text-emerald-400 text-[10px] font-black uppercase tracking-widest">
               <CheckCircle size={12} />
               ZONA DE PEDIDO SEGURO
@@ -2409,6 +2454,10 @@ export default function LandingPage() {
           </div>
         </div>
       </section>
+      </motion.div>
+      </motion.div>
+      )}
+      </AnimatePresence>
 
       {/* ════════════════════════════════════════════
           TESTIMONIOS — CAROUSEL PREMIUM
