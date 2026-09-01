@@ -2804,8 +2804,14 @@ async function ensureTrendOfferTemplate(): Promise<string | null> {
       },
       types: {
         "twilio/card": {
-          title: "{{1}}",
-          subtitle: "{{2}}",
+          // El 'subtitle' de una card aterriza en el PIE DE PÁGINA de la
+          // plantilla de WhatsApp, y ese campo no admite variables: Twilio
+          // respondía "Subtitle cannot contain variables" y la creación fallaba.
+          // Al fallar nunca se guardaba el SID, así que se reintentaba en cada
+          // oferta y la campaña de tendencias jamás llegó a salir. El pitch se
+          // pasa al cuerpo (title), que sí acepta variables, y el pie queda fijo.
+          title: "{{2}}\n\n*{{1}}*",
+          subtitle: "Envío gratis · Pagas contra entrega",
           media: ["{{3}}"],
           actions: [
             // Sin emojis: Twilio rechaza el template con "Button Title text cannot
@@ -4112,6 +4118,261 @@ async function sendCartActionButtons(to: string, from: string, cartSummary: stri
     return true;
   } catch (e: any) {
     console.error("[WhatsApp Buttons] Error enviando botones de carrito:", e.message);
+    return false;
+  }
+}
+
+// ── VENTA DETERMINÍSTICA DE UN SOLO PRODUCTO ─────────────────────────────────
+// El cliente que llegaba desde la ficha web preguntando por un producto puntual
+// caía en el interceptor de catálogo (su mensaje trae "producto" y "tienen") y
+// recibía el saludo genérico más la lista completa de tendencias, sin que la IA
+// llegara a verlo siquiera. Pedía UNA cosa y se iba con quince opciones.
+// Aquí se detecta cuál producto está nombrando, se le manda SU ficha de venta y
+// se entra directo a pedir los datos. Sin IA: el mismo mensaje siempre, sin
+// margen para que improvise ni para que se desvíe a otro producto.
+
+function normalizarParaBuscar(s: string): string {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Palabras que aparecen en casi cualquier mensaje y no distinguen un producto de
+// otro. Sin esta lista, "producto" o "precio" sumarían puntos por sí solas.
+const PALABRAS_NO_DISTINTIVAS = new Set([
+  "producto", "productos", "precio", "cop", "hola", "interesa", "vengo",
+  "pagina", "tienen", "tiene", "hay", "envio", "hoy", "disponible", "quiero",
+  "necesito", "cuanto", "vale", "cuesta", "para", "con", "del", "las", "los",
+  "shop", "jan", "sel", "jansel", "que", "por", "una", "uno"
+]);
+
+// Devuelve el producto del catálogo que el cliente está nombrando, o null.
+// Compara por palabras significativas y no por igualdad: el nombre que manda la
+// web ("Modulador Cargador Aromatizante 4 en 1") no es idéntico al del catálogo
+// ("Modulador Cargador Aromatizante Carro TC"), así que comparar textos completos
+// fallaría siempre.
+function detectarProductoUnico(mensaje: string, products: any[]): any | null {
+  const texto = normalizarParaBuscar(mensaje);
+  if (!texto) return null;
+
+  // La ficha web manda el nombre entre asteriscos ("Me interesa: *NOMBRE*").
+  // Cuando viene así es la señal más limpia que existe, por eso pesa el doble.
+  const entreAsteriscos = String(mensaje || "").match(/\*([^*]{3,120})\*/);
+  const textoFuerte = entreAsteriscos ? normalizarParaBuscar(entreAsteriscos[1]) : "";
+
+  let mejor: any = null;
+  let mejorPuntaje = 0;
+  let segundoPuntaje = 0;
+
+  for (const p of products) {
+    const palabras = normalizarParaBuscar(p.name)
+      .split(" ")
+      .filter(w => w.length > 2 && !PALABRAS_NO_DISTINTIVAS.has(w));
+    if (palabras.length === 0) continue;
+
+    let puntaje = 0;
+    for (const w of palabras) {
+      if (textoFuerte && textoFuerte.includes(w)) puntaje += 2;
+      else if (texto.includes(w)) puntaje += 1;
+    }
+
+    if (puntaje > mejorPuntaje) {
+      segundoPuntaje = mejorPuntaje;
+      mejorPuntaje = puntaje;
+      mejor = p;
+    } else if (puntaje > segundoPuntaje) {
+      segundoPuntaje = puntaje;
+    }
+  }
+
+  // Dos condiciones, y las dos tienen que cumplirse:
+  //  1. Al menos 2 puntos, para que una sola palabra suelta no dispare nada.
+  //  2. Que le saque MÍNIMO el doble al segundo. Un umbral fijo no sirve:
+  //     "la aspiradora de mano" solo suma 2 y es inequívoco, mientras que
+  //     "el cargador" también sumaría pero lo contienen DOS productos distintos.
+  //     Lo que separa un caso del otro no es el puntaje, es la distancia.
+  //     Ante un empate preferimos no adivinar y dejar seguir el flujo normal.
+  if (mejorPuntaje < 2) return null;
+  if (mejorPuntaje < segundoPuntaje * 2) return null;
+  return mejor;
+}
+
+// Puntos de venta por producto, redactados a partir de la descripción real del
+// catálogo. Viven en código y no en la base para no depender de un re-seed (que
+// ya borró el catálogo una vez). Si entra un producto que no esté aquí,
+// puntosDeVenta() arma las viñetas con las frases de su propia descripción.
+const PUNTOS_DE_VENTA: Record<string, string[]> = {
+  "cargador-aromatizante-carro": [
+    "Dos *cables retráctiles que se recogen solos* — se acabaron los cables enredados en la consola",
+    "Carga *4 dispositivos a la vez*: el tuyo, el del copiloto y los de atrás",
+    "*Difusor de aroma* que mantiene el carro fresco todo el día",
+    "*Luces LED* que le dan un aire premium al tablero"
+  ],
+  "game-stick-retro-m8": [
+    "*Más de 10.000 juegos* clásicos: NES, SNES, SEGA, PS1, N64 y GBA",
+    "*2 controles inalámbricos incluidos* — la partida arranca desde el primer día",
+    "*Salida 4K y 64GB*: conectas el HDMI y en un minuto estás jugando",
+    "*Sin instalar nada* y sin suscripciones"
+  ],
+  "soporte-de-carga-magnetica": [
+    "El celular *se pega solo con imán*, sin pelear con cables",
+    "Carga *celular, audífonos y reloj al mismo tiempo* con 15W",
+    "*Se pliega del tamaño de tu palma* — cabe en cualquier maleta"
+  ],
+  "candado-moto-manubrio": [
+    "Bloquea *freno o manubrio*: por más que la empujen, no gira ni avanza",
+    "Cuerpo de *acero de alta resistencia* a cortes y golpes",
+    "Se pone y se quita *en segundos*, sin herramientas"
+  ],
+  "iniciador-de-bateria": [
+    "*Arranca tu carro solo*, sin depender de que alguien te dé corriente",
+    "Sirve para *carro, camioneta, moto y lancha*",
+    "Lo dejas en la guantera y *te salva el día que menos lo esperas*"
+  ],
+  "aspiradora-de-mano": [
+    "Saca *la arena entre los asientos y las migas* que el trapo no alcanza",
+    "*Inalámbrica*: no tienes que ir hasta el lavadero",
+    "*Filtro lavable* — no gastas en repuestos"
+  ],
+  "carpa-cobertor-carro": [
+    "Lo cubre completo contra *lluvia, rayos UV, polvo y excrementos de pájaro*",
+    "*Impermeable* y forrada por dentro para no rayar la pintura",
+    "Se guarda en su bolsa y *cabe en el baúl*"
+  ],
+  "soporte-holder-moto": [
+    "Deja el celular *fijo al manubrio y a la vista* — nunca más en la mano",
+    "*Funda táctil*: contestas y navegas sin sacarlo, incluso bajo el aguacero",
+    "*Gira 360°* y aguanta el agua"
+  ],
+  "cargador-celular-moto": [
+    "*Carga rápida QC 3.0*: llena tu celular hasta 4 veces más rápido rodando",
+    "*Voltímetro digital* para ver la batería de la moto en tiempo real",
+    "Instalación *en minutos*"
+  ],
+  "mini-pulidora-inalambrica": [
+    "*19.000 RPM* con disco de 115mm: corta, pule, desbasta y limpia",
+    "Sirve en *metal, acero, cerámica y madera*",
+    "*Inalámbrica*: no tienes que buscar dónde enchufarla"
+  ],
+  "selfie-stick-tripode": [
+    "*Luz LED regulable en 3 niveles* para verte bien incluso de noche",
+    "*Trípode con control remoto Bluetooth* hasta 10 metros",
+    "*Gira 360°* y se pliega para llevarlo a donde sea"
+  ]
+};
+
+function puntosDeVenta(p: any): string[] {
+  const curados = PUNTOS_DE_VENTA[p.id];
+  if (curados && curados.length) return curados;
+  // Respaldo para un producto nuevo: las primeras frases de su descripción real.
+  // Nunca se inventa nada; si no hay descripción, no salen viñetas.
+  return String(p.description || "")
+    .split(/(?<=\.)\s+/)
+    .map(s => s.trim())
+    .filter(s => s.length > 25)
+    .slice(0, 3);
+}
+
+// Ficha de venta de UN producto. Todos los gatillos que usa son verificables
+// contra el catálogo, ninguno inventado:
+//   · Anclaje ....... el precio de lista real ('originalPrice') junto al de hoy.
+//   · Pérdida ....... el ahorro se nombra en pesos, que pesa más que un %.
+//   · Escasez ....... el stock que hay de verdad, y solo si ya está bajo.
+//   · Cero riesgo ... paga cuando lo recibe.
+//   · Compromiso .... cierra pidiendo el nombre, que es un "sí" pequeño y fácil.
+function textoVentaProducto(p: any): string {
+  const precio = Number(p.price) || 0;
+  const antes = Number(p.originalPrice) || 0;
+  const cop = (n: number) => "$" + n.toLocaleString("es-CO");
+
+  const l: string[] = [];
+  l.push(`¡Excelente elección! 🔥 El *${p.name}* es de los que más nos piden.`);
+  l.push("");
+
+  const puntos = puntosDeVenta(p);
+  if (puntos.length) {
+    l.push("✅ *Esto es lo que te llevas:*");
+    for (const punto of puntos) l.push(`• ${punto}`);
+    l.push("");
+  }
+
+  if (antes > precio) {
+    l.push(`💵 Antes: ~${cop(antes)}~`);
+    l.push(`🔥 *Hoy lo pagas en ${cop(precio)}* — te ahorras *${cop(antes - precio)}*`);
+  } else {
+    l.push(`💵 *Precio: ${cop(precio)}*`);
+  }
+
+  if (p.id === "cargador-aromatizante-carro") {
+    l.push("🎁 Y va con *3 esencias de regalo*");
+  }
+
+  l.push("");
+  l.push("🚚 *Envío GRATIS* a toda Colombia");
+  l.push("💰 *Pagas cuando lo recibas* en la puerta de tu casa — no mandas un peso por adelantado");
+
+  // Escasez solo cuando es cierta. Si quedan 40 unidades, decir "quedan pocas"
+  // es una mentira que se cae sola cuando el cliente vuelve mañana.
+  const stock = Number(p.stock) || 0;
+  if (stock > 0 && stock <= 15) {
+    l.push(`📦 Quedan *${stock} unidades* de este lote`);
+  }
+
+  l.push("");
+  l.push("¿Te lo despacho hoy? 🚀 Dime tu *Nombre y Apellido completo* para la guía de despacho 📝");
+
+  return l.join("\n");
+}
+
+// Manda la ficha del producto y deja al cliente ya dentro del checkout, parado
+// en el paso de nombre. El checkout es el determinístico que ya existía; lo
+// único nuevo es cómo se entra a él.
+async function sendProductSalesFlow(
+  from: string,
+  cleanFrom: string,
+  to: string,
+  assignedStoreId: string,
+  producto: any,
+  activityId?: string
+): Promise<boolean> {
+  try {
+    const customerProfileId = customerDocId(assignedStoreId, cleanFrom);
+    const mensaje = textoVentaProducto(producto);
+
+    await sendWhatsApp(from, mensaje, undefined, activityId, to);
+
+    await setDoc(doc(db, "customers", customerProfileId), {
+      checkoutStep: "nombre",
+      checkoutData: {
+        producto: producto.name,
+        nombre: "",
+        telefono: "",
+        ciudad: "",
+        direccion: "",
+        referencia: "",
+        valor: Number(producto.price) || 0
+      },
+      etapa: "negociando",
+      intencion: "comprar_producto_puntual",
+      productoEnfocado: producto.id,
+      score: 70,
+      lastInteractionAt: serverTimestamp()
+    }, { merge: true });
+
+    if (activityId) {
+      await updateDoc(doc(db, "activities", activityId), {
+        status: "respondido",
+        response: mensaje,
+        respondedAt: serverTimestamp()
+      });
+    }
+    return true;
+  } catch (e: any) {
+    console.error("[Venta Producto] No se pudo enviar la ficha de venta:", e.message);
     return false;
   }
 }
@@ -8979,6 +9240,34 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         // de dejar al cliente sin respuesta.
       }
       
+      // ==============================================
+      // 3.4 INTERCEPTOR: PREGUNTA POR UN PRODUCTO PUNTUAL
+      // ==============================================
+      // Va ANTES del interceptor de catálogo a propósito, y esa es justamente la
+      // corrección. El mensaje que manda la ficha web ("Vengo de la página del
+      // producto... ¿Tienen disponible para envío hoy?") contiene "producto" y
+      // "tienen", así que activaba isCatalogRequest: el cliente pedía UN producto
+      // y recibía el saludo genérico más la lista completa de tendencias, sin que
+      // la IA alcanzara a verlo. Verificado en la base el 31/08/2026: el cliente
+      // escribió a las 18:34:30 y a las 18:34:32 ya tenía encima el catálogo.
+      let productoPreguntado: any = null;
+      if (from.startsWith("whatsapp:")) {
+        try {
+          const catalogoTienda = await loadProductsForStore(assignedStoreId);
+          productoPreguntado = detectarProductoUnico(finalMessage || "", catalogoTienda);
+        } catch (e: any) {
+          console.error("[WhatsApp Interceptor] No se pudo leer el catálogo para detectar producto:", e.message);
+        }
+      }
+
+      if (productoPreguntado) {
+        console.log(`[WhatsApp Interceptor] Pregunta por producto puntual: ${productoPreguntado.name} (${productoPreguntado.id}) desde ${from}`);
+        const enviado = await sendProductSalesFlow(from, cleanFrom, to, assignedStoreId, productoPreguntado, activityRef.id);
+        if (enviado) return res.status(200).send("");
+        // Si la ficha no pudo salir se deja seguir el flujo normal, para no dejar
+        // al cliente sin ninguna respuesta.
+      }
+
       if (isCatalogRequest && from.startsWith("whatsapp:")) {
         console.log(`[WhatsApp Interceptor] Catalog request detected from ${from}. Replying deterministically with trending products first...`);
 
