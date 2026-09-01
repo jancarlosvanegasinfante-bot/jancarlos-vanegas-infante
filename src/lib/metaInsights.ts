@@ -151,14 +151,29 @@ export async function recogerMetricasMeta(): Promise<MetricasMeta> {
   const auth = `access_token=${encodeURIComponent(token)}`;
 
   try {
-    const [hoy, semana, porAnuncio, serie] = await Promise.all([
+    // allSettled y no all: si una sola de las cuatro consultas falla, con `all`
+    // se perdían las otras tres y el informe quedaba sin nada. Así cada bloque
+    // aparece si su consulta salió bien.
+    const [rHoy, rSemana, rAnuncios, rSerie] = await Promise.allSettled([
       pedir(`${base}?fields=spend&date_preset=today&${auth}`),
       pedir(`${base}?fields=${campos}&date_preset=last_7d&${auth}`),
-      pedir(`${base}?fields=name,${campos}&level=ad&date_preset=last_7d&limit=25&${auth}`),
+      // En Ads Insights el nombre del anuncio es 'ad_name', no 'name': con
+      // 'name' Meta responde "(#100) name is not valid for fields param".
+      pedir(`${base}?fields=ad_name,${campos}&level=ad&date_preset=last_7d&limit=25&${auth}`),
       // time_increment=1 devuelve UNA FILA POR DÍA, que es lo que alimenta las
       // barras. 14 días para que se vea la tendencia y no solo la semana suelta.
       pedir(`${base}?fields=spend,impressions,clicks,ctr,actions&time_increment=1&date_preset=last_14d&${auth}`)
     ]);
+
+    const valor = (r: PromiseSettledResult<any>) => r.status === "fulfilled" ? r.value : null;
+    const hoy = valor(rHoy), semana = valor(rSemana);
+    const porAnuncio = valor(rAnuncios), serie = valor(rSerie);
+
+    // Si la consulta principal falló, no hay informe que mostrar.
+    if (!semana) {
+      const err: any = (rSemana as PromiseRejectedResult).reason;
+      throw new Error(String(err?.message || "sin respuesta"));
+    }
 
     const s = (semana?.data && semana.data[0]) || {};
     const acciones = s.actions || [];
@@ -166,7 +181,7 @@ export async function recogerMetricasMeta(): Promise<MetricasMeta> {
 
     const anuncios: FilaAnuncio[] = Array.isArray(porAnuncio?.data)
       ? porAnuncio.data.map((a: any) => ({
-          nombre: String(a.name || "—"),
+          nombre: String(a.ad_name || a.name || "—"),
           gasto: n(a.spend),
           impresiones: n(a.impressions),
           clics: n(a.clicks),
