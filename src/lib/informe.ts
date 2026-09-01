@@ -41,6 +41,22 @@ function n(v: any): number {
   return Number.isFinite(x) ? x : 0;
 }
 
+// Caché en memoria del informe. El panel se refresca cada hora, pero si hay
+// varias pestañas o el celular abierto al tiempo, cada una pediría lo suyo y se
+// multiplicarían las consultas a la base y a Meta. Con esto todas comparten la
+// misma lectura durante 10 minutos, y el botón "Actualizar" la salta.
+let cache: { datos: DatosInforme; hasta: number } | null = null;
+const CACHE_MS = 10 * 60 * 1000;
+
+export function invalidarCacheInforme() { cache = null; }
+
+export async function obtenerInforme(supabase: any, reactivacionActiva: boolean, forzar: boolean): Promise<DatosInforme> {
+  if (!forzar && cache && Date.now() < cache.hasta) return cache.datos;
+  const datos = await recogerDatosInforme(supabase, reactivacionActiva);
+  cache = { datos, hasta: Date.now() + CACHE_MS };
+  return datos;
+}
+
 /** Recoge todos los conteos del informe. Nunca lanza: si una consulta falla,
  *  ese dato queda en 0 y el motivo se acumula en `advertencias`, para que la
  *  página cargue igual en vez de quedarse en blanco por un solo fallo. */
@@ -154,7 +170,7 @@ export async function recogerDatosInforme(supabase: any, reactivacionActiva: boo
   return base;
 }
 
-/** La página. Se sirve completa y pide los datos a /api/informe cada 60 s. */
+/** La página. Se sirve completa y pide los datos a /api/informe cada hora. */
 export function paginaInforme(token: string): string {
   const t = JSON.stringify(token);
   return `<!doctype html>
@@ -234,7 +250,7 @@ export function paginaInforme(token: string): string {
 <header>
   <div class="kicker">Jansel Shop · informe en vivo</div>
   <h1>Cómo va la tienda</h1>
-  <p class="sub">Se lee directo de tu base de datos y se actualiza solo cada minuto.</p>
+  <p class="sub">Se lee directo de tu base de datos y se actualiza solo cada hora.</p>
 </header>
 
 <div class="bar">
@@ -377,15 +393,15 @@ export function paginaInforme(token: string): string {
     $("alertas").innerHTML=av.join("");
 
     $("dot").className="dot on";
-    $("estado").textContent="Al día · se actualiza solo cada minuto";
+    $("estado").textContent="Al día · se actualiza solo cada hora";
     $("pie").textContent="Última lectura: "+new Date(d.generadoEn).toLocaleString("es-CO")+
       " · "+num(d.clientes)+" clientes y "+num(d.productos)+" productos en catálogo.";
   }
 
   var cargando=false;
-  function cargar(){
+  function cargar(forzar){
     if(cargando)return; cargando=true;
-    fetch("/api/informe?k="+encodeURIComponent(TOKEN),{cache:"no-store"})
+    fetch("/api/informe?k="+encodeURIComponent(TOKEN)+(forzar?"&fresh=1":""),{cache:"no-store"})
       .then(function(r){ if(!r.ok) throw new Error("HTTP "+r.status); return r.json()})
       .then(function(j){ if(!j||!j.success) throw new Error((j&&j.error)||"respuesta inesperada"); pintar(j.datos)})
       .catch(function(e){
@@ -394,9 +410,9 @@ export function paginaInforme(token: string): string {
       })
       .then(function(){cargando=false});
   }
-  $("btn").addEventListener("click",cargar);
+  $("btn").addEventListener("click",function(){cargar(true)});
   cargar();
-  setInterval(function(){ if(!document.hidden) cargar() },60000);
+  setInterval(function(){ if(!document.hidden) cargar() },3600000);
 })();
 </script>
 </body></html>`;

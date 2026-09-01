@@ -182,12 +182,13 @@ export default function InformeEnVivo() {
   const [cargando, setCargando] = useState(false);
   const pidiendo = useRef(false);
 
-  const cargar = useCallback(async () => {
+  const cargar = useCallback(async (forzar = false) => {
     if (pidiendo.current) return;
     pidiendo.current = true;
     setCargando(true);
     try {
-      const r = await fetch("/api/informe", { headers: { ...adminAuthHeaders() }, cache: "no-store" });
+      const url = "/api/informe" + (forzar ? "?fresh=1" : "");
+      const r = await fetch(url, { headers: { ...adminAuthHeaders() }, cache: "no-store" });
       if (!r.ok) throw new Error(r.status === 404 ? "El informe no está habilitado en el servidor." : `HTTP ${r.status}`);
       const j = await r.json();
       if (!j?.success) throw new Error(j?.error || "Respuesta inesperada del servidor.");
@@ -201,9 +202,13 @@ export default function InformeEnVivo() {
     }
   }, []);
 
+  // Cada hora, no cada minuto: estos números no cambian de un minuto a otro y
+  // cada consulta pega a la base y a la API de Meta. Con el panel abierto todo
+  // el día, un minuto serían 1.440 consultas diarias para ver lo mismo.
+  // Para el dato del momento está el botón "Actualizar".
   useEffect(() => {
     cargar();
-    const t = setInterval(() => { if (!document.hidden) cargar(); }, 60000);
+    const t = setInterval(() => { if (!document.hidden) cargar(); }, 60 * 60 * 1000);
     return () => clearInterval(t);
   }, [cargar]);
 
@@ -271,10 +276,10 @@ export default function InformeEnVivo() {
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-2 text-[11px] text-neutral-500">
           <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_0_3px_rgba(52,211,153,0.15)]" />
-          <span>Se actualiza solo cada minuto · última lectura {new Date(d.generadoEn).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })}</span>
+          <span>Última lectura {new Date(d.generadoEn).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" })} · se actualiza solo cada hora</span>
         </div>
         <button
-          onClick={cargar}
+          onClick={() => cargar(true)}
           disabled={cargando}
           className="flex items-center gap-1.5 text-[11px] font-black uppercase bg-amber-500/10 text-amber-400 border border-amber-500/30 px-3 py-1.5 rounded-lg active:scale-95 transition-all disabled:opacity-50"
         >

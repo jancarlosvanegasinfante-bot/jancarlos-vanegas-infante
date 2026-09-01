@@ -11,7 +11,7 @@ import { createClient } from "@supabase/supabase-js";
 import sgMail from '@sendgrid/mail';
 import { getSystemInstruction } from "./src/lib/janAgent.js";
 import { ACTIVE_PROMOTIONS } from "./src/lib/promotions.js";
-import { recogerDatosInforme, paginaInforme } from "./src/lib/informe.js";
+import { obtenerInforme, paginaInforme } from "./src/lib/informe.js";
 import crypto from "crypto";
 
 // 1. Initialize Supabase / Local JSON File Storage
@@ -9571,7 +9571,10 @@ Responde directamente con el número de tu opción:
       }
       try {
         const activa = String(process.env.REACTIVACION_AUTOMATICA || "").toLowerCase() === "true";
-        const datos = await recogerDatosInforme(supabaseServer, activa);
+        // ?fresh=1 lo manda el botón "Actualizar": salta la caché de 10 minutos
+        // que comparten todas las pestañas abiertas.
+        const forzar = String(req.query?.fresh || "") === "1";
+        const datos = await obtenerInforme(supabaseServer, activa, forzar);
         res.setHeader("Cache-Control", "no-store");
         res.json({ success: true, datos });
       } catch (e: any) {
