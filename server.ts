@@ -9563,7 +9563,12 @@ Responde directamente con el número de tu opción:
     });
 
     app.get("/api/informe", async (req, res) => {
-      if (!tokenValido(req)) return res.status(404).json({ success: false, error: "No encontrado" });
+      // Dos puertas: el token de la URL (para abrirlo suelto desde el celular)
+      // o la sesión de administrador (para el apartado dentro del panel, que
+      // ya viene autenticado y no debería tener que cargar el token).
+      if (!tokenValido(req) && !isAdminRequestAuthorized(req)) {
+        return res.status(404).json({ success: false, error: "No encontrado" });
+      }
       try {
         const activa = String(process.env.REACTIVACION_AUTOMATICA || "").toLowerCase() === "true";
         const datos = await recogerDatosInforme(supabaseServer, activa);

@@ -49,7 +49,8 @@ import {
   Volume2,
   VolumeX,
   Smartphone,
-  Download
+  Download,
+  BarChart3
 } from "lucide-react";
 import { 
   requestNotificationPermission, 
@@ -210,6 +211,7 @@ class AppErrorBoundary extends (React.Component as any) {
 
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Catalog from "./components/Catalog";
+import InformeEnVivo from "./components/InformeEnVivo";
 
 function JanAdmin() {
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -239,7 +241,7 @@ function JanAdmin() {
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [isClearing, setIsClearing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'crm' | 'orders' | 'inventory' | 'reports' | 'config' | 'recovery' | 'monitor'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'informes' | 'crm' | 'orders' | 'inventory' | 'reports' | 'config' | 'recovery' | 'monitor'>('dashboard');
 
   // Native System & Voice Notifications (Windows / Android / Mac)
   const [nativeNotificationsEnabled, setNativeNotificationsEnabled] = useState<boolean>(() => {
@@ -911,6 +913,7 @@ function JanAdmin() {
 
         <nav className="flex-1 px-4 py-8 lg:py-0 space-y-2">
           <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<TrendingUp size={18} />} label="Dashboard" />
+          <NavItem active={activeTab === 'informes'} onClick={() => setActiveTab('informes')} icon={<BarChart3 size={18} />} label="Informes en Vivo" />
           <NavItem active={activeTab === 'crm'} onClick={() => setActiveTab('crm')} icon={<User size={18} />} label="CRM / Pipeline" />
           <NavItem active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<History size={18} />} label="Reportes" />
           <NavItem active={activeTab === 'monitor'} onClick={() => setActiveTab('monitor')} icon={<Clock size={18} />} label="Monitor" />
@@ -989,6 +992,7 @@ function JanAdmin() {
              <div className="w-[1px] h-6 bg-neutral-800 hidden md:block mx-2" />
              <h2 className="text-[9px] lg:text-xs font-black uppercase tracking-[0.2em] lg:tracking-[0.3em] text-neutral-400">
                {activeTab === 'dashboard' && 'Visión General del Negocio'}
+               {activeTab === 'informes' && 'Informe en Vivo del Negocio'}
                {activeTab === 'crm' && 'CRM Pipeline de Clientes'}
                {activeTab === 'reports' && 'Reporte de Conversaciones'}
                {activeTab === 'monitor' && 'Monitor de Tiempo Real (Audit)'}
@@ -1102,6 +1106,7 @@ function JanAdmin() {
            <AppErrorBoundary>
               <AnimatePresence mode="wait" initial={false}>
                  {activeTab === 'dashboard' && <Dashboard key="dash" orders={filteredOrders} products={products} activities={filteredActivities} onShowReports={() => setActiveTab('reports')} onShowRecovery={() => setActiveTab('recovery')} />}
+                 {activeTab === 'informes' && <InformeEnVivo key="informes" />}
                  {activeTab === 'crm' && <CRMTab key="crm" customers={customers} selectedUser={selectedUser} onSelectUser={(phone: string) => { setSelectedUser(phone); setActiveTab('monitor'); }} />}
                  {activeTab === 'reports' && <ReportsTab key="reports" customers={customers} orders={orders}
                     activities={filteredActivities} 

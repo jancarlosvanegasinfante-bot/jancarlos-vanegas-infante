@@ -509,7 +509,10 @@ function notifySessionExpired(tokenUsado?: string | null) {
   } catch { /* noop */ }
 }
 
-function adminAuthHeaders(): Record<string, string> {
+// Se exporta para que los componentes que llaman endpoints propios del servidor
+// (como el informe en vivo) manden la misma sesión que usa el resto del panel,
+// en vez de inventarse otra forma de autenticarse.
+export function adminAuthHeaders(): Record<string, string> {
   return adminSessionToken ? { Authorization: `Bearer ${adminSessionToken}` } : {};
 }
 
