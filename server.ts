@@ -6322,9 +6322,32 @@ async function startServer() {
       return { sent: 0, totalCandidates: 0 };
     }
 
+    // El producto guardado en el cliente puede ser del catálogo viejo. El 01/09
+    // salieron 44 mensajes ofreciendo Carplay Para Moto, Cera M1 y Kit
+    // Lubristone, que ya no se venden: 34 de 37 clientes tenían guardado algo
+    // descontinuado. Se valida contra el catálogo vigente y, si no está, se usa
+    // el mensaje genérico en vez de prometer algo que no se puede despachar.
+    const catalogoVigente = await loadProductsForStore(storeId);
+    const nombresVigentes = new Set(catalogoVigente.map((p: any) => normalizarParaBuscar(p.name)));
+
+    // Tope por corrida: aunque se acumulen candidatos, nunca se manda una ráfaga.
+    // Los 44 mensajes en 82 segundos de esa madrugada son exactamente el patrón
+    // que WhatsApp lee como spam.
+    const TOPE_POR_CORRIDA = 12;
+
     let sentCount = 0;
+    let descartadosPorProducto = 0;
     for (const c of candidates) {
-      const topProduct = c.lastProductList?.[0];
+      if (sentCount >= TOPE_POR_CORRIDA) {
+        console.log(`[Reactivation Campaign] Tope de ${TOPE_POR_CORRIDA} alcanzado; el resto queda para la próxima corrida.`);
+        break;
+      }
+
+      const guardado = c.lastProductList?.[0];
+      const sigueVigente = guardado?.name && nombresVigentes.has(normalizarParaBuscar(guardado.name));
+      if (guardado && !sigueVigente) descartadosPorProducto++;
+      const topProduct = sigueVigente ? guardado : null;
+
       const productName = topProduct?.name || "nuestro catálogo";
       const pitch = topProduct
         ? `¡Hola! 👋 Vi que te interesó *${topProduct.name}* — se está agotando rápido y no quería que te quedaras sin el tuyo. ¿Seguimos con tu pedido? 🚀 Envío gratis contraentrega.`
@@ -6357,6 +6380,9 @@ async function startServer() {
       await new Promise(r => setTimeout(r, 1500));
     }
 
+    if (descartadosPorProducto > 0) {
+      console.log(`[Reactivation Campaign] ${descartadosPorProducto} clientes tenían guardado un producto que ya no está en el catálogo; se les mandó el mensaje genérico en vez del producto.`);
+    }
     return { sent: sentCount, totalCandidates: candidates.length };
   }
 
@@ -9549,16 +9575,41 @@ Responde directamente con el número de tu opción:
    * mano. El cooldown interno de 3 días por cliente evita que se vuelva
    * spam repetitivo.
    */
-  setInterval(async () => {
-    try {
-      const result = await runReactivationCampaign("default", 12);
-      if (result.sent > 0) {
-        console.log(`[Reactivation Campaign] Auto-ejecutada: ${result.sent}/${result.totalCandidates} mensajes de reactivación enviados.`);
+  // APAGADA POR DEFECTO desde el 01/09/2026. El 1 de septiembre a las 3:36 de la
+  // madrugada esta campaña mandó 44 mensajes a 41 personas ofreciendo Carplay
+  // Para Moto, Cera M1 y Kit Lubristone: tres productos que ya no existen en el
+  // catálogo. Llevaba meses cayéndose sola porque el template de Twilio fallaba,
+  // y al arreglar ese template se destapó todo lo represado de una sola vez.
+  //
+  // Mandar decenas de mensajes no solicitados, de madrugada y sobre productos
+  // inexistentes es la forma más rápida de que la gente bloquee o reporte el
+  // número. Meta califica la calidad del número con eso y puede restringirlo, y
+  // sin WhatsApp no hay por dónde cerrar ventas.
+  //
+  // Para volver a encenderla: REACTIVACION_AUTOMATICA=true en Railway. Antes de
+  // hacerlo, revisar que los clientes tengan productos vigentes guardados.
+  const reactivacionActiva = String(process.env.REACTIVACION_AUTOMATICA || "").toLowerCase() === "true";
+  if (!reactivacionActiva) {
+    console.log("[Reactivation Campaign] Desactivada (REACTIVACION_AUTOMATICA no es 'true'). No se enviarán mensajes automáticos.");
+  } else {
+    setInterval(async () => {
+      try {
+        // Nadie quiere publicidad a las 3 de la mañana, y un mensaje a esa hora
+        // es justo el que termina en "bloquear". Solo entre 9am y 8pm Colombia.
+        const horaCol = Number(new Date().toLocaleString("en-US", { timeZone: "America/Bogota", hour: "2-digit", hour12: false }));
+        if (horaCol < 9 || horaCol >= 20) {
+          console.log(`[Reactivation Campaign] Fuera de horario (${horaCol}h Colombia). Se omite esta corrida.`);
+          return;
+        }
+        const result = await runReactivationCampaign("default", 12);
+        if (result.sent > 0) {
+          console.log(`[Reactivation Campaign] Auto-ejecutada: ${result.sent}/${result.totalCandidates} mensajes de reactivación enviados.`);
+        }
+      } catch (e: any) {
+        console.error("[Reactivation Campaign] Error en ejecución automática:", e.message);
       }
-    } catch (e: any) {
-      console.error("[Reactivation Campaign] Error en ejecución automática:", e.message);
-    }
-  }, 6 * 60 * 60 * 1000);
+    }, 6 * 60 * 60 * 1000);
+  }
 
   /**
    * 📊 REPORTE SEMANAL DE DEMANDA AUTOMÁTICO
