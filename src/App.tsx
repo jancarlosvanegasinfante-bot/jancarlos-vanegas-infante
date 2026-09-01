@@ -4857,9 +4857,16 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
 import Storefront from "./components/Storefront";
 import LandingPage from "./components/LandingPage";
 import ProductDetail from "./components/ProductDetail";
+import { ensurePixels } from "./lib/pixel";
 
 // Global App component with Routing
 export default function App() {
+  // El pixel se inicializaba DENTRO de LandingPage, asi que solo existia en
+  // /landing. En /producto/:id no cargaba nada, y esa es justo la pagina a la
+  // que apuntan los anuncios: se pagaba por trafico del que Meta no recibia una
+  // sola senal. Arrancarlo aqui lo deja activo en todas las rutas.
+  useEffect(() => { ensurePixels(); }, []);
+
   return (
     <BrowserRouter>
       {/* Toaster global: estaba importado pero nunca montado, asi que NINGUN

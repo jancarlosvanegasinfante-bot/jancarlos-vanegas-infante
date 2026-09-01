@@ -691,15 +691,12 @@ export default function LandingPage() {
     fetch("/api/public/config")
       .then((res) => res.json())
       .then((data) => { 
-        if (data.whatsappNumber) setOfficialBotNumber(data.whatsappNumber); 
-        if (data.metaPixelId) {
-          setMetaPixelId(data.metaPixelId);
-          initMetaPixel(data.metaPixelId);
-        }
-        if (data.tiktokPixelId) {
-          setTiktokPixelId(data.tiktokPixelId);
-          initTiktokPixel(data.tiktokPixelId);
-        }
+        if (data.whatsappNumber) setOfficialBotNumber(data.whatsappNumber);
+        // Los píxeles ya los arranca App.tsx para TODAS las rutas (src/lib/pixel.ts).
+        // Aquí solo se guardan los ids; volver a inicializarlos dispararía un
+        // segundo PageView por cada visita a la landing e inflaría el conteo.
+        if (data.metaPixelId) setMetaPixelId(data.metaPixelId);
+        if (data.tiktokPixelId) setTiktokPixelId(data.tiktokPixelId);
       })
       .catch((err) => console.error("Error al cargar configuración de píxeles:", err));
 
@@ -810,6 +807,20 @@ export default function LandingPage() {
     setIsCartOpen(false);
     setCheckoutMode("formulario");
     setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 200);
+
+    // Mismo caso que el camino de la ficha de producto: baja al formulario sin
+    // pasar por el botón del carrito, así que InitiateCheckout no salía. Se usa
+    // el precio del combo, que es el que la persona va a pagar.
+    const iceCombo = generateEventId();
+    trackMetaEvent("InitiateCheckout", {
+      content_ids: combo.productIds, content_name: combo.name, content_type: "product",
+      num_items: items.length, value: combo.promoPrice, currency: "COP"
+    }, iceCombo);
+    sendFunnelEventCapi("InitiateCheckout", iceCombo, { contentIds: combo.productIds, contentName: combo.name, value: combo.promoPrice });
+    trackTiktokEvent("InitiateCheckout", {
+      contents: items.map((p) => ({ content_id: p.id, content_name: p.name, quantity: 1, price: p.price })),
+      value: combo.promoPrice, currency: "COP"
+    });
   };
 
   const removeFromCart = (productId: string) => {
@@ -867,6 +878,23 @@ export default function LandingPage() {
           setIsCartOpen(false);
           setCheckoutMode("formulario");
           setTimeout(() => { formRef.current?.scrollIntoView({ behavior: "smooth" }); }, 350);
+
+          // Este camino lleva al formulario igual que el botón del carrito, pero
+          // no disparaba InitiateCheckout: el evento solo salía desde el carrito.
+          // Como los anuncios entran justamente por aquí (ficha de producto), en
+          // los informes parecía que todos abandonaban en el carrito. Se usa el
+          // precio del producto y no el total del carrito porque el estado aún
+          // no se ha actualizado en este punto.
+          const iceExterno = generateEventId();
+          trackMetaEvent("InitiateCheckout", {
+            content_ids: [p.id], content_name: p.name, content_type: "product",
+            num_items: 1, value: p.price, currency: "COP"
+          }, iceExterno);
+          sendFunnelEventCapi("InitiateCheckout", iceExterno, { contentIds: [p.id], contentName: p.name, value: p.price });
+          trackTiktokEvent("InitiateCheckout", {
+            contents: [{ content_id: p.id, content_name: p.name, quantity: 1, price: p.price }],
+            value: p.price, currency: "COP"
+          });
         }
       }
     } catch { /* ignore */ }

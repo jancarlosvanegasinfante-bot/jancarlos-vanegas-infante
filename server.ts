@@ -6645,7 +6645,11 @@ async function startServer() {
   // Evento genérico server-side para ViewContent / AddToCart / InitiateCheckout —
   // los eventos de "intención" que alimentan los públicos de remarketing.
   // Lista blanca de eventos por seguridad (no se puede mandar cualquier nombre de evento).
-  const ALLOWED_FUNNEL_EVENTS = new Set(["ViewContent", "AddToCart", "InitiateCheckout"]);
+  // "Contact" estaba en el comentario de arriba pero NO en esta lista, asi que
+  // el endpoint lo rechazaba con 400 y el evento viajaba solo por el navegador,
+  // sin respaldo de servidor. Cualquier bloqueador o un iPhone con seguimiento
+  // restringido lo borraba y no quedaba rastro de que el cliente escribio.
+  const ALLOWED_FUNNEL_EVENTS = new Set(["ViewContent", "AddToCart", "InitiateCheckout", "Contact"]);
   app.post("/api/public/track-event", express.json(), async (req, res) => {
     try {
       const { eventName, storeId, eventId, fbp, fbc, eventSourceUrl, customerPhone, contentIds, contentName, value } = req.body;
@@ -6686,9 +6690,9 @@ async function startServer() {
       // Record real-time activity for live admin audio/voice notifications
       try {
         await addDoc(collection(db, "activities"), {
-          type: eventName === "AddToCart" ? "add_to_cart" : eventName === "ViewContent" ? "page_view" : "funnel_event",
+          type: eventName === "AddToCart" ? "add_to_cart" : eventName === "ViewContent" ? "page_view" : eventName === "Contact" ? "contact" : "funnel_event",
           customerName: customerPhone ? `Cliente ${customerPhone}` : "Visitante Web",
-          message: eventName === "AddToCart" ? `🛒 Producto añadido al carrito: ${contentName || 'Producto'}` : eventName === "ViewContent" ? `👀 Visita en tienda web: ${contentName || 'Página Principal'}` : `⚡ Inicio de Checkout: ${contentName || 'Carrito'}`,
+          message: eventName === "AddToCart" ? `🛒 Producto añadido al carrito: ${contentName || 'Producto'}` : eventName === "ViewContent" ? `👀 Visita en tienda web: ${contentName || 'Página Principal'}` : eventName === "Contact" ? `💬 Escribió por WhatsApp desde: ${contentName || 'la tienda'}` : `⚡ Inicio de Checkout: ${contentName || 'Carrito'}`,
           timestamp: serverTimestamp(),
           storeId: targetStoreId,
           contentName: contentName || "",

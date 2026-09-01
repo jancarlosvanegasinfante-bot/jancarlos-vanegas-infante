@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import { ArrowLeft, Star, Shield, Truck, Check, MessageCircle, Package, RotateCcw, Flame, Zap } from "lucide-react";
 import { TRENDING_PRODUCTS } from "./LandingPage";
 import { ACTIVE_PROMOTIONS } from "../lib/promotions";
 import { getProxiedImageUrl } from "../lib/utils";
+import { trackEvento } from "../lib/pixel";
 
 const NL = String.fromCharCode(10);
 // Numero de respaldo: el REAL del negocio, no el sandbox de Twilio. Antes aqui
@@ -47,6 +48,21 @@ export default function ProductDetail() {
   useEffect(() => {
     window.scrollTo(0, 0);
     if (product) document.title = product.name + " | Jan Sel Shop";
+  }, [product]);
+
+  // ViewContent: esta pagina es el destino de los anuncios y hasta hoy no
+  // reportaba NADA a Meta. Sin este evento no hay publico de remarketing ni
+  // forma de saber que creativo trae gente que de verdad mira el producto.
+  // Se dispara una sola vez por producto, no en cada re-render.
+  const viewContentEnviado = useRef<string>("");
+  useEffect(() => {
+    if (!product || viewContentEnviado.current === product.id) return;
+    viewContentEnviado.current = product.id;
+    trackEvento("ViewContent", {
+      contentIds: [product.id],
+      contentName: product.name,
+      value: product.price
+    });
   }, [product]);
 
   const combos = useMemo(
@@ -93,6 +109,16 @@ export default function ProductDetail() {
       "¿Tienen disponible para envío hoy?",
     ].join(NL);
     window.open("https://wa.me/" + waNumber + "?text=" + encodeURIComponent(msg), "_blank");
+
+    // Contact: el cliente que escribio hoy salio de aqui y el evento nunca se
+    // disparo, porque en esta ruta ni siquiera cargaba el pixel. Va por el
+    // navegador y por el CAPI con el mismo eventId, para que no lo borre un
+    // bloqueador ni lo pierda iOS.
+    trackEvento("Contact", {
+      contentIds: [product.id],
+      contentName: product.name,
+      value: product.price
+    }, { method: "WhatsApp Ficha de Producto" });
   };
 
   return (
