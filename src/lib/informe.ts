@@ -23,6 +23,14 @@ export interface DatosInforme {
   mensajesWa24h: number;
   carritos7d: number;
   pedidos7d: number;
+  // El mismo embudo a 7 días desde la base propia. Va aparte del de Meta a
+  // propósito: Meta solo cuenta lo que le puede atribuir a un anuncio, así que
+  // sus cifras salen muy por debajo del tráfico real. Verlas juntas y bien
+  // rotuladas evita compararlas como si midieran lo mismo.
+  vistas7d: number;
+  checkouts7d: number;
+  contactos7d: number;
+  mensajesWa7d: number;
   // Ingresos REALES, sumados de los pedidos de la base. No son los de Meta:
   // las ventas se cierran contraentrega por WhatsApp y Meta nunca las ve, así
   // que su ROAS siempre saldría bajo aunque el negocio esté vendiendo bien.
@@ -71,6 +79,7 @@ export async function recogerDatosInforme(supabase: any, reactivacionActiva: boo
     pedidos: 0, clientes: 0, productos: 0, enCheckout: 0,
     vistas24h: 0, carritos24h: 0, checkouts24h: 0, contactos24h: 0, mensajesWa24h: 0,
     carritos7d: 0, pedidos7d: 0,
+    vistas7d: 0, checkouts7d: 0, contactos7d: 0, mensajesWa7d: 0,
     ingresos7d: 0, ticketPromedio: 0, roasReal: 0, cpaReal: 0,
     meta: await recogerMetricasMeta(),
     reactivacionActiva,
@@ -124,6 +133,15 @@ export async function recogerDatosInforme(supabase: any, reactivacionActiva: boo
   // reconocen porque llevan teléfono del cliente.
   base.mensajesWa24h = await contar("activities", "mensajes WhatsApp 24h",
     (q: any) => q.not("data->>customerPhone", "is", null).gte("data->>timestamp", desde24));
+
+  const [vistas7d, checkouts7d, contactos7d, mensajesWa7d] = await Promise.all([
+    contar("activities", "visitas 7d", tipoDesde("page_view", desde7d)),
+    contar("activities", "checkouts 7d", tipoDesde("funnel_event", desde7d)),
+    contar("activities", "contactos 7d", tipoDesde("contact", desde7d)),
+    contar("activities", "mensajes WhatsApp 7d",
+      (q: any) => q.not("data->>customerPhone", "is", null).gte("data->>timestamp", desde7d))
+  ]);
+  Object.assign(base, { vistas7d, checkouts7d, contactos7d, mensajesWa7d });
 
   base.pedidos7d = await contar("orders", "pedidos 7d",
     (q: any) => q.gte("data->>createdAt", desde7d));

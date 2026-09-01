@@ -26,6 +26,7 @@ interface Datos {
   vistas24h: number; carritos24h: number; checkouts24h: number;
   contactos24h: number; mensajesWa24h: number;
   carritos7d: number; pedidos7d: number;
+  vistas7d: number; checkouts7d: number; contactos7d: number; mensajesWa7d: number;
   ingresos7d: number; ticketPromedio: number; roasReal: number; cpaReal: number;
   reactivacionActiva: boolean;
   ultimosPedidos: Array<{ fecha: string; cliente: string; producto: string; estado: string }>;
@@ -500,6 +501,56 @@ export default function InformeEnVivo() {
           </div>
         </div>
       )}
+
+      {/* Tráfico real vs lo que ve Meta */}
+      {hayMeta && (() => {
+        const evs: Record<string, number> = {};
+        (m.eventos || []).forEach((e) => { evs[e.tipo] = e.cantidad; });
+        const filas: Array<[string, number, number]> = [
+          ["Vieron producto", evs["view_content"] || 0, d.vistas7d],
+          ["Agregaron al carrito", evs["add_to_cart"] || 0, d.carritos7d],
+          ["Iniciaron pedido", evs["initiate_checkout"] || 0, d.checkouts7d],
+          ["Escribieron", evs["contact"] || 0, d.contactos7d]
+        ];
+        return (
+          <div>
+            <h3 className="text-sm font-black uppercase tracking-wider text-neutral-400 mb-2.5">
+              Tráfico real vs lo que ve Meta · 7 días
+            </h3>
+            <div className="bg-neutral-900/40 border border-neutral-800 rounded-2xl overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm min-w-[420px]">
+                  <thead>
+                    <tr className="bg-neutral-900/80 text-[10px] uppercase tracking-wider text-neutral-500">
+                      <th className="px-4 py-2.5 text-left font-medium">Paso</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Meta</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Tu tienda</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Diferencia</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filas.map(([k, meta, propio]) => (
+                      <tr key={k} className="border-b border-neutral-800/70 last:border-0">
+                        <td className="px-4 py-2.5 text-neutral-200">{k}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-neutral-400">{nu(meta)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums font-bold text-white">{nu(propio)}</td>
+                        <td className="px-4 py-2.5 text-right tabular-nums text-emerald-400 font-bold">
+                          {meta > 0 && propio > meta ? "×" + dec(propio / meta, 1) : propio > 0 && meta === 0 ? "solo tú" : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            <p className="text-[11px] text-neutral-500 mt-2 leading-relaxed">
+              No se contradicen: <b className="text-neutral-400">Meta</b> solo cuenta a quien puede atribuirle a un anuncio, y pierde gente
+              por bloqueadores y iPhones con seguimiento restringido. <b className="text-neutral-400">Tu tienda</b> cuenta a todo el que entra,
+              venga de donde venga. Para saber si el anuncio rinde, mira Meta; para saber cuánta gente tienes de verdad, mira tu tienda.
+            </p>
+          </div>
+        );
+      })()}
 
       {/* Embudo */}
       <div>
