@@ -8,6 +8,8 @@
 // Es SOLO LECTURA: consulta conteos y no escribe ni modifica nada. Va detrás de
 // un token en la URL, y si no hay token configurado las rutas ni se registran.
 
+import { recogerMetricasMeta, type MetricasMeta } from "./metaInsights.js";
+
 export interface DatosInforme {
   generadoEn: string;
   pedidos: number;
@@ -21,6 +23,14 @@ export interface DatosInforme {
   mensajesWa24h: number;
   carritos7d: number;
   pedidos7d: number;
+  // Ingresos REALES, sumados de los pedidos de la base. No son los de Meta:
+  // las ventas se cierran contraentrega por WhatsApp y Meta nunca las ve, así
+  // que su ROAS siempre saldría bajo aunque el negocio esté vendiendo bien.
+  ingresos7d: number;
+  ticketPromedio: number;
+  roasReal: number;
+  cpaReal: number;
+  meta: MetricasMeta;
   reactivacionActiva: boolean;
   ultimosPedidos: Array<{ fecha: string; cliente: string; producto: string; estado: string }>;
   advertencias: string[];
@@ -45,10 +55,13 @@ export async function recogerDatosInforme(supabase: any, reactivacionActiva: boo
     pedidos: 0, clientes: 0, productos: 0, enCheckout: 0,
     vistas24h: 0, carritos24h: 0, checkouts24h: 0, contactos24h: 0, mensajesWa24h: 0,
     carritos7d: 0, pedidos7d: 0,
+    ingresos7d: 0, ticketPromedio: 0, roasReal: 0, cpaReal: 0,
+    meta: await recogerMetricasMeta(),
     reactivacionActiva,
     ultimosPedidos: [],
     advertencias
   };
+  if (!base.meta.disponible && base.meta.motivo) advertencias.push(base.meta.motivo);
 
   if (!supabase) {
     advertencias.push("Sin conexión a la base de datos.");
@@ -98,6 +111,26 @@ export async function recogerDatosInforme(supabase: any, reactivacionActiva: boo
 
   base.pedidos7d = await contar("orders", "pedidos 7d",
     (q: any) => q.gte("data->>createdAt", desde7d));
+
+  // Ingresos reales de los últimos 7 días. Se traen los pedidos y se suman en
+  // memoria: son pocos, y 'totalPrice' vive dentro del JSON, donde no hay una
+  // suma directa que valga la pena montar.
+  try {
+    const { data, error } = await supabase
+      .from("orders").select("data").gte("data->>createdAt", desde7d).limit(500);
+    if (error) advertencias.push(`ingresos 7d: ${error.message}`);
+    else if (Array.isArray(data)) {
+      const validos = data.filter((r: any) => String(r?.data?.status || "").toLowerCase() !== "cancelado");
+      base.ingresos7d = validos.reduce((s: number, r: any) => s + n(r?.data?.totalPrice), 0);
+      base.ticketPromedio = validos.length ? Math.round(base.ingresos7d / validos.length) : 0;
+    }
+  } catch (e: any) {
+    advertencias.push(`ingresos 7d: ${e?.message || "error"}`);
+  }
+
+  const gastoMeta = base.meta.disponible ? base.meta.gasto7d : 0;
+  base.roasReal = gastoMeta > 0 ? base.ingresos7d / gastoMeta : 0;
+  base.cpaReal = base.pedidos7d > 0 && gastoMeta > 0 ? Math.round(gastoMeta / base.pedidos7d) : 0;
 
   try {
     const { data, error } = await supabase
@@ -211,14 +244,27 @@ export function paginaInforme(token: string): string {
 </div>
 
 <div class="kpis">
+  <div class="kpi"><span class="lbl">ROAS real</span><div class="val mono" id="k-roas">—</div><div class="note" id="k-roas-n">7 días</div></div>
+  <div class="kpi"><span class="lbl">Gasto 7 días</span><div class="val mono" id="k-gasto">—</div><div class="note" id="k-gastohoy">—</div></div>
+  <div class="kpi"><span class="lbl">Ingresos 7 días</span><div class="val mono" id="k-ing">—</div><div class="note" id="k-ticket">—</div></div>
+  <div class="kpi"><span class="lbl">CTR</span><div class="val mono" id="k-ctr">—</div><div class="note">referente: 1–2%</div></div>
+  <div class="kpi"><span class="lbl">CPA real</span><div class="val mono" id="k-cpa">—</div><div class="note">costo por pedido</div></div>
   <div class="kpi"><span class="lbl">Pedidos</span><div class="val mono" id="k-ped">—</div><div class="note">total en la base</div></div>
-  <div class="kpi"><span class="lbl">Al carrito 24 h</span><div class="val mono" id="k-car">—</div><div class="note" id="k-car7">—</div></div>
-  <div class="kpi"><span class="lbl">Visitas 24 h</span><div class="val mono" id="k-vis">—</div><div class="note">páginas vistas</div></div>
-  <div class="kpi"><span class="lbl">Escribieron 24 h</span><div class="val mono" id="k-con">—</div><div class="note">por WhatsApp</div></div>
-  <div class="kpi"><span class="lbl">En checkout</span><div class="val mono" id="k-chk">—</div><div class="note">a mitad del pedido</div></div>
 </div>
 
 <div id="alertas"></div>
+
+<h2>Métricas de los anuncios · 7 días</h2>
+<div class="scroll"><table>
+  <thead><tr><th>Métrica</th><th class="num">Valor</th><th>Qué te dice</th></tr></thead>
+  <tbody id="metricas"><tr><td colspan="3">Cargando…</td></tr></tbody>
+</table></div>
+
+<h2>Rendimiento por anuncio · 7 días</h2>
+<div class="scroll"><table>
+  <thead><tr><th>Anuncio</th><th class="num">Gasto</th><th class="num">Clics</th><th class="num">CTR</th><th class="num">CPC</th><th class="num">Carritos</th></tr></thead>
+  <tbody id="anuncios"><tr><td colspan="6">Cargando…</td></tr></tbody>
+</table></div>
 
 <h2>Embudo de las últimas 24 horas</h2>
 <div class="scroll"><table>
@@ -247,14 +293,64 @@ export function paginaInforme(token: string): string {
     return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]})};
   var num=function(v){var x=Number(v);return isFinite(x)?x.toLocaleString("es-CO"):"—"};
 
+  var pesos=function(v){var x=Number(v);return isFinite(x)?"$"+Math.round(x).toLocaleString("es-CO"):"—"};
+  var dec=function(v,d){var x=Number(v);return isFinite(x)?x.toFixed(d==null?2:d).replace(".",","):"—"};
+
   function pintar(d){
+    var m=d.meta||{}, hay=!!m.disponible;
+
+    // ROAS: por cada peso puesto en Meta, cuántos volvieron en pedidos reales.
+    // Bajo 1 se está perdiendo plata; sobre 2 el negocio respira.
+    if(hay && Number(m.gasto7d)>0){
+      $("k-roas").textContent=dec(d.roasReal)+"x";
+      $("k-roas").parentElement.className="kpi"+(d.roasReal>=2?" good":(d.roasReal>=1?" warn":" bad"));
+      $("k-roas-n").textContent=d.roasReal>=1?"por cada $1 invertido":"estás perdiendo plata";
+    } else { $("k-roas").textContent="—"; $("k-roas-n").textContent=hay?"sin gasto aún":"sin datos de Meta"; }
+
+    $("k-gasto").textContent=hay?pesos(m.gasto7d):"—";
+    $("k-gastohoy").textContent=hay?("hoy: "+pesos(m.gastoHoy)):"sin datos de Meta";
+    $("k-ing").textContent=pesos(d.ingresos7d);
+    $("k-ticket").textContent="ticket: "+pesos(d.ticketPromedio);
+    if(hay){
+      $("k-ctr").textContent=dec(m.ctr7d)+"%";
+      $("k-ctr").parentElement.className="kpi"+(Number(m.ctr7d)>=3?" good":(Number(m.ctr7d)>=1?"":" warn"));
+    } else $("k-ctr").textContent="—";
+    $("k-cpa").textContent=d.cpaReal>0?pesos(d.cpaReal):"—";
     $("k-ped").textContent=num(d.pedidos);
     $("k-ped").parentElement.className="kpi"+(Number(d.pedidos)===0?" bad":" good");
-    $("k-car").textContent=num(d.carritos24h);
-    $("k-car7").textContent=num(d.carritos7d)+" en 7 días";
-    $("k-vis").textContent=num(d.vistas24h);
-    $("k-con").textContent=num(d.contactos24h);
-    $("k-chk").textContent=num(d.enCheckout);
+
+    if(hay){
+      var mets=[
+        ["Gasto",pesos(m.gasto7d),"lo que llevas invertido"],
+        ["Impresiones",num(m.impresiones7d),"veces que se mostró tu anuncio"],
+        ["Alcance",num(m.alcance7d),"personas distintas que lo vieron"],
+        ["Frecuencia",dec(m.frecuencia7d,1),"veces que lo vio cada una · sobre 3 cansa"],
+        ["Clics",num(m.clics7d),"cuántos entraron a la tienda"],
+        ["CTR",dec(m.ctr7d)+"%","qué tan bien engancha · 1–2% es normal"],
+        ["CPC",pesos(m.cpc7d),"lo que pagas por cada clic"],
+        ["CPM",pesos(m.cpm7d),"costo por cada mil impresiones"],
+        ["Carritos (Meta)",num(m.carritos7d),"agregaron al carrito"],
+        ["Iniciaron pedido",num(m.checkouts7d),"llegaron al formulario"],
+        ["Compras (Meta)",num(m.compras7d),"lo que Meta alcanza a ver"],
+        ["Costo por carrito",Number(m.carritos7d)>0?pesos(Number(m.gasto7d)/Number(m.carritos7d)):"—","cuánto te cuesta un carrito"],
+        ["Pedidos reales",num(d.pedidos7d),"de tu base, incluidos los de WhatsApp"],
+        ["CPA real",d.cpaReal>0?pesos(d.cpaReal):"—","lo que te cuesta cada pedido de verdad"],
+        ["ROAS real",Number(m.gasto7d)>0?dec(d.roasReal)+"x":"—","ingresos ÷ gasto"]
+      ];
+      $("metricas").innerHTML=mets.map(function(x){
+        return "<tr><td>"+esc(x[0])+'</td><td class="num">'+esc(x[1])+"</td><td>"+esc(x[2])+"</td></tr>"}).join("");
+
+      var ads=m.anuncios||[];
+      $("anuncios").innerHTML=ads.length?ads.map(function(a){
+        return "<tr><td>"+esc(a.nombre)+'</td><td class="num">'+pesos(a.gasto)+
+          '</td><td class="num">'+num(a.clics)+'</td><td class="num">'+dec(a.ctr)+
+          '%</td><td class="num">'+pesos(a.cpc)+'</td><td class="num">'+num(a.carritos)+"</td></tr>"}).join("")
+        : '<tr><td colspan="6">Sin anuncios con datos en los últimos 7 días.</td></tr>';
+    } else {
+      var aviso='<tr><td colspan="3">'+esc(m.motivo||"Sin datos de Meta.")+"</td></tr>";
+      $("metricas").innerHTML=aviso;
+      $("anuncios").innerHTML='<tr><td colspan="6">'+esc(m.motivo||"Sin datos de Meta.")+"</td></tr>";
+    }
 
     var pasos=[["Visitas",d.vistas24h,"entraron a la tienda"],
       ["Al carrito",d.carritos24h,"agregaron un producto"],
