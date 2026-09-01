@@ -873,6 +873,72 @@ export default function LandingPage() {
     } catch { /* ignore */ }
   }, []);
 
+  // ── DIAGNÓSTICO DEL FORMULARIO ────────────────────────────────────────────
+  // Hasta ahora "abrió el formulario y no tocó nada" y "escribió sus datos y se
+  // fue a mitad" se veían idénticos en el embudo, y se arreglan de forma muy
+  // distinta. Estos dos avisos separan los dos casos.
+  const formularioEmpezado = useRef(false);
+  const pedidoEnviadoOk = useRef(false);
+  const datosActuales = useRef<any>({});
+
+  const avisarEventoFormulario = React.useCallback((nombre: "FormStart" | "FormAbandon", detalle: string, usarBeacon = false) => {
+    const cuerpo = JSON.stringify({
+      eventName: nombre,
+      storeId: "default",
+      eventId: `${nombre}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+      eventSourceUrl: window.location.href,
+      contentName: detalle
+    });
+    try {
+      // Al salir de la página un fetch normal se cancela; sendBeacon sí llega.
+      if (usarBeacon && navigator.sendBeacon) {
+        navigator.sendBeacon("/api/public/track-event", new Blob([cuerpo], { type: "application/json" }));
+        return;
+      }
+      fetch("/api/public/track-event", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: cuerpo,
+        keepalive: true
+      }).catch(() => {});
+    } catch { /* nunca debe estorbar el pedido */ }
+  }, []);
+
+  // Se dispara con la primera tecla en cualquier campo, una sola vez.
+  const alEscribirEnFormulario = React.useCallback(() => {
+    if (formularioEmpezado.current) return;
+    formularioEmpezado.current = true;
+    avisarEventoFormulario("FormStart", "empezó a escribir sus datos");
+  }, [avisarEventoFormulario]);
+
+  // Al irse: cuántos de los 4 campos obligatorios alcanzó a llenar. Eso dice si
+  // el formulario asusta de entrada o si algo lo frena a mitad de camino.
+  useEffect(() => {
+    const alSalir = () => {
+      if (!formularioEmpezado.current || pedidoEnviadoOk.current) return;
+      const d = datosActuales.current || {};
+      const campos: Array<[string, string]> = [
+        ["nombre", d.customerName], ["celular", d.customerPhone],
+        ["ciudad", d.city], ["dirección", d.address]
+      ].map(([k, v]) => [k, String(v || "").trim()]) as Array<[string, string]>;
+      const llenos = campos.filter(([, v]) => v.length > 0).map(([k]) => k);
+      const faltantes = campos.filter(([, v]) => v.length === 0).map(([k]) => k);
+      avisarEventoFormulario(
+        "FormAbandon",
+        `llenó ${llenos.length} de 4 (${llenos.join(", ") || "ninguno"}) — se fue en: ${faltantes[0] || "el botón de confirmar"}`,
+        true
+      );
+      formularioEmpezado.current = false; // que no se repita si vuelve
+    };
+    const alOcultar = () => { if (document.hidden) alSalir(); };
+    window.addEventListener("pagehide", alSalir);
+    document.addEventListener("visibilitychange", alOcultar);
+    return () => {
+      window.removeEventListener("pagehide", alSalir);
+      document.removeEventListener("visibilitychange", alOcultar);
+    };
+  }, [avisarEventoFormulario]);
+
   // Lleva el formulario ARRIBA de la pantalla, no "a la vista". Con
   // scrollIntoView por defecto el formulario quedaba abajo y tocaba deslizar
   // para verlo completo — y ahí es donde la gente se cansa y se sale.
@@ -1054,6 +1120,8 @@ export default function LandingPage() {
     const finalTotal = Math.max(0, intermediateTotal - prepaymentDiscount - referralDiscount);
     return { subtotal, originalSubtotal, totalQty, quantityDiscount: descuentoAplicado, descuentoRuleta, combosVigentes, prepaymentDiscount, referralDiscount, finalTotal, savings: originalSubtotal - finalTotal };
   };
+
+  useEffect(() => { datosActuales.current = formData; }, [formData]);
 
   const { subtotal, totalQty, quantityDiscount, descuentoRuleta, combosVigentes, prepaymentDiscount, referralDiscount, finalTotal, savings } = calculateTotals();
 
@@ -1243,6 +1311,7 @@ export default function LandingPage() {
           currency: "COP"
         });
 
+        pedidoEnviadoOk.current = true;
         setOrderCompleted({ ...data.order, cartItems: [...cart], paymentMethodMode: paymentMethod });
         toast.success("¡Pedido registrado! 🎉");
         setCart([]);
@@ -2250,7 +2319,7 @@ export default function LandingPage() {
 
               {/* Form or WhatsApp mode */}
               {checkoutMode === "formulario" ? (
-                <form onSubmit={handleSubmit} className="glass-card rounded-3xl p-6 space-y-4">
+                <form onSubmit={handleSubmit} onInput={alEscribirEnFormulario} className="glass-card rounded-3xl p-6 space-y-4">
                   <h3 className="text-xs font-black uppercase tracking-widest text-amber-400 flex items-center gap-2">
                     <MapPin size={14} />
                     Paso 3 — Datos de Envío

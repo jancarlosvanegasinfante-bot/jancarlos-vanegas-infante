@@ -6676,7 +6676,18 @@ async function startServer() {
   // el endpoint lo rechazaba con 400 y el evento viajaba solo por el navegador,
   // sin respaldo de servidor. Cualquier bloqueador o un iPhone con seguimiento
   // restringido lo borraba y no quedaba rastro de que el cliente escribio.
-  const ALLOWED_FUNNEL_EVENTS = new Set(["ViewContent", "AddToCart", "InitiateCheckout", "Contact"]);
+  const ALLOWED_FUNNEL_EVENTS = new Set([
+    "ViewContent", "AddToCart", "InitiateCheckout", "Contact",
+    // Diagnóstico propio del formulario. Sin esto no hay forma de distinguir
+    // entre "abrió el formulario y no tocó nada" y "escribió sus datos y se
+    // fue a mitad": los dos casos se ven idénticos en el embudo, y se arreglan
+    // de forma muy distinta.
+    "FormStart", "FormAbandon"
+  ]);
+
+  // Estos dos NO se mandan a Meta: son para entender el formulario, no eventos
+  // de campaña, y ensuciarían el píxel con nombres que Meta no reconoce.
+  const EVENTOS_SOLO_INTERNOS = new Set(["FormStart", "FormAbandon"]);
   app.post("/api/public/track-event", express.json(), async (req, res) => {
     try {
       const { eventName, storeId, eventId, fbp, fbc, eventSourceUrl, customerPhone, contentIds, contentName, value } = req.body;
@@ -6692,7 +6703,7 @@ async function startServer() {
         console.error("[Track Event] Error loading store config:", err);
       }
       const capiAccessToken = storeConfig?.metaCapiAccessToken || process.env.META_CAPI_ACCESS_TOKEN || "";
-      if (storeConfig?.metaPixelId && capiAccessToken && eventId) {
+      if (storeConfig?.metaPixelId && capiAccessToken && eventId && !EVENTOS_SOLO_INTERNOS.has(eventName)) {
         await sendMetaCapiEvent({
           pixelId: storeConfig.metaPixelId,
           accessToken: capiAccessToken,
@@ -6717,9 +6728,9 @@ async function startServer() {
       // Record real-time activity for live admin audio/voice notifications
       try {
         await addDoc(collection(db, "activities"), {
-          type: eventName === "AddToCart" ? "add_to_cart" : eventName === "ViewContent" ? "page_view" : eventName === "Contact" ? "contact" : "funnel_event",
+          type: eventName === "AddToCart" ? "add_to_cart" : eventName === "ViewContent" ? "page_view" : eventName === "Contact" ? "contact" : eventName === "FormStart" ? "form_start" : eventName === "FormAbandon" ? "form_abandon" : "funnel_event",
           customerName: customerPhone ? `Cliente ${customerPhone}` : "Visitante Web",
-          message: eventName === "AddToCart" ? `🛒 Producto añadido al carrito: ${contentName || 'Producto'}` : eventName === "ViewContent" ? `👀 Visita en tienda web: ${contentName || 'Página Principal'}` : eventName === "Contact" ? `💬 Escribió por WhatsApp desde: ${contentName || 'la tienda'}` : `⚡ Inicio de Checkout: ${contentName || 'Carrito'}`,
+          message: eventName === "AddToCart" ? `🛒 Producto añadido al carrito: ${contentName || 'Producto'}` : eventName === "ViewContent" ? `👀 Visita en tienda web: ${contentName || 'Página Principal'}` : eventName === "Contact" ? `💬 Escribió por WhatsApp desde: ${contentName || 'la tienda'}` : eventName === "FormStart" ? `✍️ Empezó a llenar el formulario: ${contentName || 'pedido'}` : eventName === "FormAbandon" ? `🚪 Se fue del formulario: ${contentName || 'sin datos'}` : `⚡ Inicio de Checkout: ${contentName || 'Carrito'}`,
           timestamp: serverTimestamp(),
           storeId: targetStoreId,
           contentName: contentName || "",
