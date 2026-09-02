@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
   RefreshCw, TrendingUp, TrendingDown, AlertTriangle, CheckCircle2,
-  Megaphone, ShoppingCart, MessageCircle, Lightbulb, Wallet, BarChart3
+  Megaphone, ShoppingCart, MessageCircle, Lightbulb, Wallet, BarChart3, Footprints
 } from "lucide-react";
 import { adminAuthHeaders } from "../supabase";
 
@@ -29,6 +29,10 @@ interface Datos {
   vistas7d: number; checkouts7d: number; contactos7d: number; mensajesWa7d: number;
   formEmpezado7d: number; formAbandonado7d: number;
   abandonoPorCampo: Array<{ campo: string; veces: number }>;
+  recorridos: Array<{
+    visitante: string; origen: string; desde: string; hasta: string;
+    pasos: Array<{ hora: string; texto: string }>;
+  }>;
   ingresos7d: number; ticketPromedio: number; roasReal: number; cpaReal: number;
   reactivacionActiva: boolean;
   ultimosPedidos: Array<{ fecha: string; cliente: string; producto: string; estado: string }>;
@@ -633,6 +637,58 @@ export default function InformeEnVivo() {
           Si muchos <b className="text-neutral-400">abren y no escriben</b>, el formulario asusta de entrada.
           Si <b className="text-neutral-400">escriben y se van</b>, mira en qué campo: ahí está el estorbo.
           Si <b className="text-neutral-400">llenan todo y no confirman</b>, el problema es el botón o el precio final.
+        </p>
+      </div>
+
+      {/* Recorridos: qué hizo cada visita */}
+      <div>
+        <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-wider text-neutral-400 mb-2.5">
+          <Footprints size={15} /> Recorridos · últimas 24 horas
+        </h3>
+        {d.recorridos?.length > 0 ? (
+          <div className="space-y-2.5">
+            {d.recorridos.map((r) => {
+              const hora = (t: string) => t ? new Date(t).toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit" }) : "";
+              const segundos = r.desde && r.hasta
+                ? Math.max(0, Math.round((Date.parse(r.hasta) - Date.parse(r.desde)) / 1000)) : 0;
+              const duracion = segundos >= 60 ? `${Math.floor(segundos / 60)} min ${segundos % 60}s` : `${segundos}s`;
+              const compro = r.pasos.some((p) => /pedido|compr/i.test(p.texto));
+              const seFue = r.pasos.some((p) => /se fue del formulario/i.test(p.texto));
+              return (
+                <div key={r.visitante} className="bg-neutral-900/40 border border-neutral-800 rounded-2xl overflow-hidden">
+                  <div className="px-4 py-2.5 bg-neutral-900/70 flex items-center justify-between gap-3 flex-wrap">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="font-mono text-[11px] text-neutral-500">{r.visitante}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-neutral-800 text-neutral-300">{r.origen}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <span className="text-neutral-500 tabular-nums">{hora(r.desde)} · {duracion}</span>
+                      {compro ? <span className="text-emerald-400 font-bold">compró</span>
+                        : seFue ? <span className="text-red-400 font-bold">se fue</span>
+                        : <span className="text-neutral-500">sin cerrar</span>}
+                    </div>
+                  </div>
+                  <div className="px-4 py-2.5 space-y-1">
+                    {r.pasos.map((p, i) => (
+                      <div key={i} className="flex gap-2.5 text-[13px] leading-snug">
+                        <span className="text-neutral-600 tabular-nums shrink-0 font-mono text-[11px] pt-0.5">{hora(p.hora)}</span>
+                        <span className="text-neutral-300 min-w-0">{p.texto}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="bg-neutral-900/40 border border-neutral-800 rounded-2xl p-5 text-neutral-400 text-sm">
+            Todavía no hay recorridos. Empiezan a aparecer con las visitas nuevas, porque el código de visitante
+            se crea la primera vez que alguien entra después de este cambio.
+          </div>
+        )}
+        <p className="text-[11px] text-neutral-500 mt-2 leading-relaxed">
+          El código (<span className="font-mono">v_a7f3k2</span>) es <b className="text-neutral-400">anónimo</b>: un número al azar
+          guardado en el navegador. Sirve para enlazar los pasos de una misma visita, no identifica a nadie.
         </p>
       </div>
 

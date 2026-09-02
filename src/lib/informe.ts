@@ -36,6 +36,15 @@ export interface DatosInforme {
   formEmpezado7d: number;
   formAbandonado7d: number;
   abandonoPorCampo: Array<{ campo: string; veces: number }>;
+  // Recorridos: los pasos de cada visita, en orden. Es lo que convierte una
+  // lista de eventos sueltos en "esta persona entró, vio esto y terminó aquí".
+  recorridos: Array<{
+    visitante: string;
+    origen: string;
+    desde: string;
+    hasta: string;
+    pasos: Array<{ hora: string; texto: string }>;
+  }>;
   // Ingresos REALES, sumados de los pedidos de la base. No son los de Meta:
   // las ventas se cierran contraentrega por WhatsApp y Meta nunca las ve, así
   // que su ROAS siempre saldría bajo aunque el negocio esté vendiendo bien.
@@ -85,7 +94,7 @@ export async function recogerDatosInforme(supabase: any, reactivacionActiva: boo
     vistas24h: 0, carritos24h: 0, checkouts24h: 0, contactos24h: 0, mensajesWa24h: 0,
     carritos7d: 0, pedidos7d: 0,
     vistas7d: 0, checkouts7d: 0, contactos7d: 0, mensajesWa7d: 0,
-    formEmpezado7d: 0, formAbandonado7d: 0, abandonoPorCampo: [],
+    formEmpezado7d: 0, formAbandonado7d: 0, abandonoPorCampo: [], recorridos: [],
     ingresos7d: 0, ticketPromedio: 0, roasReal: 0, cpaReal: 0,
     meta: await recogerMetricasMeta(),
     reactivacionActiva,
@@ -206,6 +215,48 @@ export async function recogerDatosInforme(supabase: any, reactivacionActiva: boo
   const gastoMeta = base.meta.disponible ? base.meta.gasto7d : 0;
   base.roasReal = gastoMeta > 0 ? base.ingresos7d / gastoMeta : 0;
   base.cpaReal = base.pedidos7d > 0 && gastoMeta > 0 ? Math.round(gastoMeta / base.pedidos7d) : 0;
+
+  // Recorridos de las últimas visitas. Se agrupa por el código anónimo del
+  // navegador; las actividades sin ese código son de antes de que existiera y
+  // se ignoran, porque no hay forma de saber a quién pertenecen.
+  try {
+    const { data, error } = await supabase
+      .from("activities").select("data")
+      .not("data->>visitorId", "is", null)
+      .gte("data->>timestamp", desde24)
+      .order("data->>timestamp", { ascending: false })
+      .limit(300);
+    if (error) advertencias.push(`recorridos: ${error.message}`);
+    else if (Array.isArray(data)) {
+      const porVisitante = new Map<string, any[]>();
+      for (const row of data) {
+        const d = row?.data || {};
+        const id = String(d.visitorId || "").trim();
+        if (!id) continue;
+        if (!porVisitante.has(id)) porVisitante.set(id, []);
+        porVisitante.get(id)!.push(d);
+      }
+      base.recorridos = Array.from(porVisitante.entries())
+        .map(([visitante, eventos]) => {
+          const orden = eventos.slice().sort((a, b) =>
+            String(a.timestamp || "").localeCompare(String(b.timestamp || "")));
+          return {
+            visitante,
+            origen: String(orden.find((e) => e.origen)?.origen || "Desconocido"),
+            desde: String(orden[0]?.timestamp || ""),
+            hasta: String(orden[orden.length - 1]?.timestamp || ""),
+            pasos: orden.slice(-12).map((e) => ({
+              hora: String(e.timestamp || ""),
+              texto: String(e.message || "")
+            }))
+          };
+        })
+        .sort((a, b) => b.hasta.localeCompare(a.hasta))
+        .slice(0, 12);
+    }
+  } catch (e: any) {
+    advertencias.push(`recorridos: ${e?.message || "error"}`);
+  }
 
   try {
     const { data, error } = await supabase

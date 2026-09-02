@@ -6690,7 +6690,7 @@ async function startServer() {
   const EVENTOS_SOLO_INTERNOS = new Set(["FormStart", "FormAbandon"]);
   app.post("/api/public/track-event", express.json(), async (req, res) => {
     try {
-      const { eventName, storeId, eventId, fbp, fbc, eventSourceUrl, customerPhone, contentIds, contentName, value } = req.body;
+      const { eventName, storeId, eventId, fbp, fbc, eventSourceUrl, customerPhone, contentIds, contentName, value, visitorId, origen } = req.body;
       if (!ALLOWED_FUNNEL_EVENTS.has(eventName)) {
         return res.status(400).json({ success: false, error: "Evento no permitido." });
       }
@@ -6734,7 +6734,11 @@ async function startServer() {
           timestamp: serverTimestamp(),
           storeId: targetStoreId,
           contentName: contentName || "",
-          value: value || 0
+          value: value || 0,
+          // Código ANÓNIMO del navegador: enlaza los pasos de una misma visita
+          // para poder reconstruir el recorrido. No identifica a nadie.
+          visitorId: String(visitorId || "").slice(0, 40),
+          origen: String(origen || "").slice(0, 60)
         });
       } catch (actErr: any) {
         console.error("[Track Event] Error saving activity:", actErr.message);

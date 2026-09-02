@@ -31,6 +31,59 @@ export function getFbc(): string {
   return fbclid ? `fb.1.${Date.now()}.${fbclid}` : "";
 }
 
+// ── QUIÉN Y DE DÓNDE ────────────────────────────────────────────────────────
+// Hasta ahora cada evento se guardaba suelto, sin nada que lo conectara con los
+// demás: se podía contar "3 se fueron en ciudad" pero no reconstruir el
+// recorrido de una persona. Este identificador es ANÓNIMO — un código al azar
+// en el navegador, sin nombre, correo ni teléfono. Solo sirve para enlazar los
+// pasos de una misma visita.
+const CLAVE_VISITANTE = "jan_sel_visitante";
+const CLAVE_ORIGEN = "jan_sel_origen";
+
+export function idVisitante(): string {
+  try {
+    let id = localStorage.getItem(CLAVE_VISITANTE);
+    if (!id) {
+      id = "v_" + Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
+      localStorage.setItem(CLAVE_VISITANTE, id);
+    }
+    return id;
+  } catch {
+    return "";
+  }
+}
+
+// De dónde llegó. Se calcula UNA vez por sesión y se conserva: si no, al
+// navegar dentro del sitio el origen pasaría a ser la página anterior y todo
+// el tráfico acabaría pareciendo "directo".
+export function origenVisita(): string {
+  try {
+    const guardado = sessionStorage.getItem(CLAVE_ORIGEN);
+    if (guardado) return guardado;
+
+    const q = new URLSearchParams(window.location.search);
+    let origen = "";
+    if (q.get("fbclid")) origen = "Anuncio de Meta";
+    else if (q.get("utm_source")) origen = `${q.get("utm_source")}${q.get("utm_campaign") ? " · " + q.get("utm_campaign") : ""}`;
+    else {
+      const ref = document.referrer || "";
+      if (!ref) origen = "Directo";
+      else {
+        const host = (() => { try { return new URL(ref).hostname.replace(/^www\./, ""); } catch { return ""; } })();
+        if (!host || host.includes(window.location.hostname)) origen = "Directo";
+        else if (/facebook|instagram|fb\.com/.test(host)) origen = "Meta (orgánico)";
+        else if (/whatsapp|wa\.me/.test(host)) origen = "WhatsApp";
+        else if (/google|bing/.test(host)) origen = "Buscador";
+        else origen = host;
+      }
+    }
+    sessionStorage.setItem(CLAVE_ORIGEN, origen);
+    return origen;
+  } catch {
+    return "";
+  }
+}
+
 export function generateEventId(): string {
   const c = window.crypto as any;
   if (c?.randomUUID) return c.randomUUID();
@@ -72,7 +125,9 @@ export function sendFunnelEventCapi(
       customerPhone: opts.customerPhone || "",
       contentIds: opts.contentIds || [],
       contentName: opts.contentName || "",
-      value: opts.value || 0
+      value: opts.value || 0,
+      visitorId: idVisitante(),
+      origen: origenVisita()
     })
   }).catch(() => {});
 }

@@ -31,6 +31,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Link } from "react-router-dom";
 import ReferralChallenge, { ReferralJoin, Confetti } from "./ReferralChallenge";
 import { getProxiedImageUrl } from "../lib/utils";
+import { idVisitante, origenVisita } from "../lib/pixel";
 import toast from "react-hot-toast";
 import PromoFlow from "./PromoFlow";
 import { ACTIVE_PROMOTIONS } from "../lib/promotions";
@@ -655,7 +656,9 @@ export default function LandingPage() {
         customerPhone: formData?.customerPhone || "",
         contentIds: opts.contentIds || [],
         contentName: opts.contentName || "",
-        value: opts.value || 0
+        value: opts.value || 0,
+        visitorId: idVisitante(),
+        origen: origenVisita()
       })
     }).catch(() => {});
   };
@@ -887,7 +890,9 @@ export default function LandingPage() {
       storeId: "default",
       eventId: `${nombre}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       eventSourceUrl: window.location.href,
-      contentName: detalle
+      contentName: detalle,
+      visitorId: idVisitante(),
+      origen: origenVisita()
     });
     try {
       // Al salir de la página un fetch normal se cancela; sendBeacon sí llega.
