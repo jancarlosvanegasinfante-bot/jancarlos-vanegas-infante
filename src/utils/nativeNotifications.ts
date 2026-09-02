@@ -77,26 +77,74 @@ export function playSoundAlert(type: 'order' | 'message' | 'cart' | 'visitor' | 
   }
 }
 
-export function speakVoiceAlert(text: string) {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+// Cola de voz.
+//
+// Antes esta función empezaba con speechSynthesis.cancel(), o sea que CADA
+// aviso cortaba al anterior. Con dos tipos de evento casi no se notaba, pero
+// una visita dispara varios seguidos (entró, agregó al carrito, abrió el
+// formulario, empezó a escribir) y todos llegan en el mismo ciclo: se pisaban
+// unos a otros y solo alcanzaba a sonar el último, cuando alcanzaba.
+//
+// Ahora se encolan y se dicen de a uno. La venta es la excepción: esa sí
+// interrumpe, porque es lo único que no puede esperar.
+const colaVoz: string[] = [];
+let hablando = false;
+const MAX_EN_COLA = 4; // si se acumulan más, es ruido: no vale la pena decirlos
+
+function siguienteEnCola() {
+  if (hablando) return;
+  const texto = colaVoz.shift();
+  if (!texto) return;
+
   try {
-    window.speechSynthesis.cancel(); // Stop previous voice speech
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'es-CO'; // Spanish
+    const utterance = new SpeechSynthesisUtterance(texto);
+    utterance.lang = 'es-CO';
     utterance.rate = 1.05;
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
 
     const voices = window.speechSynthesis.getVoices();
     const spanishVoice = voices.find(v => v.lang.startsWith('es'));
-    if (spanishVoice) {
-      utterance.voice = spanishVoice;
-    }
+    if (spanishVoice) utterance.voice = spanishVoice;
+
+    hablando = true;
+    const seguir = () => { hablando = false; siguienteEnCola(); };
+    utterance.onend = seguir;
+    // Si la locución falla (pestaña oculta, voz no disponible), la cola no se
+    // puede quedar trabada para siempre.
+    utterance.onerror = seguir;
 
     window.speechSynthesis.speak(utterance);
+
+    // Chrome suspende el sintetizador si una frase pasa de ~15 segundos. Este
+    // empujón lo mantiene vivo; se limpia al terminar.
+    const empujon = setInterval(() => {
+      if (!hablando) { clearInterval(empujon); return; }
+      try { window.speechSynthesis.resume(); } catch { /* ignorar */ }
+    }, 5000);
   } catch (err) {
+    hablando = false;
     console.warn('[SpeechSynthesis] Error speaking:', err);
   }
+}
+
+export function speakVoiceAlert(text: string, prioritario = false) {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  if (!text) return;
+
+  if (prioritario) {
+    // Una venta manda: se limpia lo pendiente y se dice de una.
+    colaVoz.length = 0;
+    try { window.speechSynthesis.cancel(); } catch { /* ignorar */ }
+    hablando = false;
+    colaVoz.push(text);
+    siguienteEnCola();
+    return;
+  }
+
+  if (colaVoz.length >= MAX_EN_COLA) return;
+  colaVoz.push(text);
+  siguienteEnCola();
 }
 
 export async function requestNotificationPermission(): Promise<boolean> {
@@ -145,11 +193,14 @@ export async function triggerNativeEventAlert(event: {
 }) {
   if (!event.enabled) return;
 
+  // La venta es lo único que interrumpe lo que se esté diciendo.
+  const esVenta = event.type === 'order';
+
   // 1. Play synth sound chime
   playSoundAlert(event.type);
 
   // 2. Speak voice alert in Spanish
-  speakVoiceAlert(event.voiceText);
+  speakVoiceAlert(event.voiceText, esVenta);
 
   // 3. Send system Windows / Android / Mac notification banner
   sendNativeBannerNotification(event.title, {

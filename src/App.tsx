@@ -437,7 +437,8 @@ function JanAdmin() {
                     title: "🎉 ¡VENTA CONFIRMADA!",
                     body: act.message || "Entró un pedido nuevo",
                     voiceText: `¡Felicitaciones! ¡Venta confirmada! ${act.customerName || "Un cliente"} acaba de pedir ${act.contentName || "un producto"} por ${Number(act.value || 0).toLocaleString("es-CO")} pesos.`,
-                    type: "alert",
+                    // "order" es el único tipo que interrumpe la cola de voz.
+                    type: "order",
                     enabled: nativeNotificationsEnabledRef.current
                   });
 
