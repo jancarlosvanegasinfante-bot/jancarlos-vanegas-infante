@@ -2096,33 +2096,18 @@ export default function LandingPage() {
             </div>
           )}
           {/* Section header */}
-          <div className="text-center space-y-3 mb-7">
-            <div className="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/20 px-4 py-1.5 rounded-full text-emerald-400 text-[10px] font-black uppercase tracking-widest">
-              <CheckCircle size={12} />
-              ZONA DE PEDIDO SEGURO
-            </div>
-            <h2 className="text-3xl sm:text-4xl font-black tracking-tight">
-              📝 Completa Tu Pedido
-            </h2>
-            <p className="text-slate-400 text-sm max-w-xl mx-auto">
-              Sencillo, rápido y seguro. Elige tu método de pago, revisa tu carrito e ingresa tus datos.{" "}
-              <span className="text-amber-400 font-bold">¡Despachamos hoy mismo!</span>
-            </p>
-            {/* Steps */}
-            <div className="flex items-center justify-center gap-2 text-xs text-slate-500">
-              {["1. Revisa tu carrito", "→", "2. Elige tu método de pago", "→", "3. Ingresa tus datos", "→", "4. ¡Listo! 🎉"].map((s, i) => (
-                <span key={i} className={s === "→" ? "text-slate-700" : "font-bold text-slate-400"}>{s}</span>
-              ))}
-            </div>
+          <div className="text-center mb-5">
+            <h2 className="text-xl sm:text-2xl font-black tracking-tight">📝 Completa tu pedido</h2>
+            <p className="text-slate-500 text-xs mt-1">Envío gratis · Pagas al recibir</p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
 
             {/* LEFT: Form */}
-            <div className="lg:col-span-7 space-y-6">
+            <div className="lg:col-span-7 flex flex-col gap-6">
 
               {/* Cart review */}
-              <div className="glass-card rounded-3xl p-6 space-y-4">
+              <div className="order-1 glass-card rounded-3xl p-6 space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
                     <ShoppingCart size={14} className="text-amber-400" />
@@ -2186,7 +2171,7 @@ export default function LandingPage() {
               </div>
 
               {/* Payment method */}
-              <div className="glass-card rounded-3xl p-6 space-y-4">
+              <div className="order-4 glass-card rounded-3xl p-6 space-y-4">
                 <h3 className="text-xs font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
                   <CreditCard size={14} className="text-amber-400" />
                   Paso 2 — Método de Pago
@@ -2303,7 +2288,7 @@ export default function LandingPage() {
               </div>
 
               {/* Checkout mode selector */}
-              <div className="flex gap-2 p-1 glass-card rounded-2xl">
+              <div className="order-2 flex gap-2 p-1 glass-card rounded-2xl">
                 {[
                   { key: "formulario" as const, label: "📝 Formulario", icon: <Lock size={13} />, activeColor: "bg-amber-400 text-black shadow-lg shadow-amber-400/15" },
                   { key: "whatsapp" as const, label: "🟢 WhatsApp", icon: <MessageCircle size={13} fill="currentColor" />, activeColor: "bg-[#25D366] text-white shadow-lg shadow-emerald-500/15" },
@@ -2324,7 +2309,7 @@ export default function LandingPage() {
 
               {/* Form or WhatsApp mode */}
               {checkoutMode === "formulario" ? (
-                <form onSubmit={handleSubmit} onInput={alEscribirEnFormulario} className="glass-card rounded-3xl p-6 space-y-4">
+                <form onSubmit={handleSubmit} onInput={alEscribirEnFormulario} className="order-3 glass-card rounded-3xl p-6 space-y-4">
                   <h3 className="text-xs font-black uppercase tracking-widest text-amber-400 flex items-center gap-2">
                     <MapPin size={14} />
                     Paso 3 — Datos de Envío
@@ -2396,7 +2381,10 @@ export default function LandingPage() {
                   </div>
                 </form>
               ) : (
-                <div className="glass-card rounded-3xl p-6 space-y-5">
+                // El mismo orden-3 que el formulario: sin esto se iria al
+                // principio de la columna (order por defecto es 0) y aparecería
+                // encima del carrito al elegir WhatsApp.
+                <div className="order-3 glass-card rounded-3xl p-6 space-y-5">
                   <h3 className="text-xs font-black uppercase tracking-widest text-[#25D366] flex items-center gap-2">
                     <MessageCircle size={14} fill="currentColor" />
                     Paso 3 — Pedido por WhatsApp
