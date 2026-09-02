@@ -4862,6 +4862,7 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
 import Storefront from "./components/Storefront";
 import LandingPage from "./components/LandingPage";
 import ProductDetail from "./components/ProductDetail";
+import Privacidad from "./components/Privacidad";
 import { ensurePixels } from "./lib/pixel";
 
 // Global App component with Routing
@@ -4896,6 +4897,7 @@ export default function App() {
         <Route path="/catalog" element={<Navigate to="/landing" replace />} />
         <Route path="/landing" element={<LandingPage />} />
         <Route path="/producto/:id" element={<ProductDetail />} />
+        <Route path="/privacidad" element={<Privacidad />} />
         <Route path="/" element={<JanAdmin />} />
         {/* Fallback */}
         <Route path="*" element={<Navigate to="/" replace />} />

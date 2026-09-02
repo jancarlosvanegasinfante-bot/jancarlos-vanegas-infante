@@ -2382,6 +2382,17 @@ export default function LandingPage() {
                       <MessageCircle size={16} fill="currentColor" />
                       O Prefiero Pedir por WhatsApp 🚀
                     </button>
+
+                    {/* La Ley 1581 pide avisar QUE se recogen datos y PARA QUE,
+                        en el momento en que la persona los entrega. Aqui, no
+                        escondido en el pie de pagina. */}
+                    <p className="text-[10px] text-slate-500 text-center leading-relaxed pt-1">
+                      Al confirmar aceptas que usemos tus datos para despachar tu pedido y contactarte.
+                      Puedes pedirnos que los borremos cuando quieras.{" "}
+                      <Link to="/privacidad" className="text-slate-400 underline underline-offset-2 hover:text-amber-400">
+                        Ver política de privacidad
+                      </Link>
+                    </p>
                   </div>
                 </form>
               ) : (
@@ -2791,6 +2802,10 @@ export default function LandingPage() {
           <div className="border-t border-white/5 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
             <p className="text-[10px] text-slate-700 text-center sm:text-left">
               © 2025 Jansel Shop · Todos los derechos reservados · Colombia 🇨🇴
+              <br />
+              <Link to="/privacidad" className="text-slate-500 hover:text-amber-400 underline underline-offset-2 transition-colors">
+                Política de Privacidad y Tratamiento de Datos
+              </Link>
             </p>
             <div className="flex items-center gap-3 text-[10px] text-slate-700 font-mono">
               <span>🔒 SSL Seguro</span>
