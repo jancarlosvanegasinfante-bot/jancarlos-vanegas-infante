@@ -87,17 +87,32 @@ export function playSoundAlert(type: 'order' | 'message' | 'cart' | 'visitor' | 
 //
 // Ahora se encolan y se dicen de a uno. La venta es la excepción: esa sí
 // interrumpe, porque es lo único que no puede esperar.
-const colaVoz: string[] = [];
-let hablando = false;
-const MAX_EN_COLA = 4; // si se acumulan más, es ruido: no vale la pena decirlos
-
-function siguienteEnCola() {
-  if (hablando) return;
-  const texto = colaVoz.shift();
-  if (!texto) return;
+export function speakVoiceAlert(text: string, prioritario = false) {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
+  if (!text) return;
 
   try {
-    const utterance = new SpeechSynthesisUtterance(texto);
+    // speechSynthesis YA tiene su propia cola: si se llama speak() varias veces
+    // seguidas, el navegador las dice una tras otra.
+    //
+    // El bug original era el cancel() incondicional al principio: cortaba lo
+    // anterior en cada aviso, y como una sola visita dispara varios eventos en
+    // el mismo ciclo, se pisaban y solo sonaba el ultimo.
+    //
+    // El intento siguiente —una cola propia con un flag "hablando"— fue peor:
+    // si el navegador no arranca la locucion (pasa cuando aun no ha habido
+    // ningun clic en la pagina), onend y onerror no se disparan nunca, el flag
+    // se queda encendido y NO VUELVE A HABLAR JAMAS. Antes al menos reintentaba
+    // en cada aviso.
+    //
+    // Asi que se deja la cola del navegador, que es la que si funciona, y el
+    // cancel() se reserva para la venta, que es lo unico que puede interrumpir.
+    if (prioritario) window.speechSynthesis.cancel();
+
+    // Si quedo suspendido de una vez anterior, se reanuda.
+    if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+
+    const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'es-CO';
     utterance.rate = 1.05;
     utterance.pitch = 1.0;
@@ -107,44 +122,14 @@ function siguienteEnCola() {
     const spanishVoice = voices.find(v => v.lang.startsWith('es'));
     if (spanishVoice) utterance.voice = spanishVoice;
 
-    hablando = true;
-    const seguir = () => { hablando = false; siguienteEnCola(); };
-    utterance.onend = seguir;
-    // Si la locución falla (pestaña oculta, voz no disponible), la cola no se
-    // puede quedar trabada para siempre.
-    utterance.onerror = seguir;
+    utterance.onerror = (e: any) => {
+      console.warn('[Voz] No se pudo decir el aviso:', e?.error || e);
+    };
 
     window.speechSynthesis.speak(utterance);
-
-    // Chrome suspende el sintetizador si una frase pasa de ~15 segundos. Este
-    // empujón lo mantiene vivo; se limpia al terminar.
-    const empujon = setInterval(() => {
-      if (!hablando) { clearInterval(empujon); return; }
-      try { window.speechSynthesis.resume(); } catch { /* ignorar */ }
-    }, 5000);
   } catch (err) {
-    hablando = false;
     console.warn('[SpeechSynthesis] Error speaking:', err);
   }
-}
-
-export function speakVoiceAlert(text: string, prioritario = false) {
-  if (typeof window === 'undefined' || !('speechSynthesis' in window)) return;
-  if (!text) return;
-
-  if (prioritario) {
-    // Una venta manda: se limpia lo pendiente y se dice de una.
-    colaVoz.length = 0;
-    try { window.speechSynthesis.cancel(); } catch { /* ignorar */ }
-    hablando = false;
-    colaVoz.push(text);
-    siguienteEnCola();
-    return;
-  }
-
-  if (colaVoz.length >= MAX_EN_COLA) return;
-  colaVoz.push(text);
-  siguienteEnCola();
 }
 
 export async function requestNotificationPermission(): Promise<boolean> {

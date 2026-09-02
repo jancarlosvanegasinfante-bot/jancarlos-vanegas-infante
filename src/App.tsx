@@ -1065,6 +1065,23 @@ function JanAdmin() {
 
              {/* 🔔 NATIVE SYSTEM & VOICE NOTIFICATIONS CONTROL (WINDOWS / CELULAR / MAC) */}
              <div className="flex items-center gap-1.5 bg-neutral-900 border border-neutral-800 p-1 rounded-xl">
+               {/* Probar la voz sin esperar a que entre un cliente. Ademas sirve
+                   de diagnostico: si al tocarlo NO se oye nada, el problema es
+                   del navegador (permiso o voz en español), no de los eventos.
+                   Y como el navegador exige un clic antes de dejar hablar, este
+                   boton tambien desbloquea el sintetizador. */}
+               <button
+                 onClick={() => {
+                   playSoundAlert('order');
+                   speakVoiceAlert("Prueba de voz. Si escuchas este mensaje, los avisos hablados están funcionando.", true);
+                   toast("🔊 Si no escuchas nada, revisa el volumen y que el navegador tenga voz en español.");
+                 }}
+                 className="flex items-center gap-1.5 text-[9px] font-black uppercase px-3 py-1.5 rounded-lg bg-black text-neutral-400 border border-neutral-800 hover:text-white transition-all"
+                 title="Probar el sonido y la voz ahora mismo"
+               >
+                 <Volume2 size={12} className="shrink-0" />
+                 <span className="hidden sm:inline">Probar voz</span>
+               </button>
                <button
                  onClick={async () => {
                    const granted = await requestNotificationPermission();
