@@ -251,6 +251,9 @@ function JanAdmin() {
   const isInitialOrdersRef = useRef(true);
   const isInitialActivityRef = useRef(true);
   const appStartTimeRef = useRef(Date.now());
+  // Marca de tiempo mas reciente ya vista, en el reloj DEL SERVIDOR. Se usa
+  // para decidir que es nuevo sin mezclarlo con el reloj del navegador.
+  const ultimaMarcaVistaRef = useRef(0);
 
   // PWA Mobile App Download / Install Prompt
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
@@ -411,7 +414,20 @@ function JanAdmin() {
               const actTime = typeof raw === "number"
                 ? raw
                 : (raw ? Date.parse(String(raw)) : Date.now());
-              if (!Number.isNaN(actTime) && actTime >= appStartTimeRef.current - 10000) {
+              // Antes esto comparaba la hora del SERVIDOR contra la del
+              // computador (appStartTimeRef = Date.now() del navegador). Si el
+              // reloj del equipo va adelantado aunque sea unos minutos, todo
+              // evento nuevo se descartaba por "viejo" y el panel se quedaba
+              // mudo, aunque la voz funcionara perfectamente.
+              //
+              // Ahora se compara contra la marca mas reciente que YA se habia
+              // visto, que viene del mismo reloj del servidor. Sin relojes
+              // mezclados no hay forma de que se desfase.
+              const esNuevo = Number.isNaN(actTime) ? true : actTime > ultimaMarcaVistaRef.current;
+              if (!Number.isNaN(actTime) && actTime > ultimaMarcaVistaRef.current) {
+                ultimaMarcaVistaRef.current = actTime;
+              }
+              if (esNuevo) {
                 if (act.type === 'add_to_cart') {
                   triggerNativeEventAlert({
                     title: "🛒 Producto en Carrito",
@@ -502,6 +518,15 @@ function JanAdmin() {
             }
           });
         } else {
+          // Primera carga: no se anuncia nada, pero se guarda la marca mas
+          // reciente que ya existia. Todo lo que llegue despues de esa marca es
+          // nuevo de verdad. Asi tampoco se canta un lote viejo si la
+          // suscripcion se vuelve a crear.
+          for (const d of docs) {
+            const raw: any = (d as any).timestamp ?? (d as any).createdAt;
+            const t = typeof raw === "number" ? raw : (raw ? Date.parse(String(raw)) : NaN);
+            if (!Number.isNaN(t) && t > ultimaMarcaVistaRef.current) ultimaMarcaVistaRef.current = t;
+          }
           isInitialActivityRef.current = false;
         }
       },
@@ -1074,7 +1099,14 @@ function JanAdmin() {
                  onClick={() => {
                    playSoundAlert('order');
                    speakVoiceAlert("Prueba de voz. Si escuchas este mensaje, los avisos hablados están funcionando.", true);
-                   toast("🔊 Si no escuchas nada, revisa el volumen y que el navegador tenga voz en español.");
+                   // El aviso de un cliente pasa ademas por la campana; esta
+                   // prueba no. Si la campana esta apagada, la voz funciona
+                   // pero los eventos reales no suenan, y eso confunde.
+                   if (nativeNotificationsEnabled) {
+                     toast.success("🔊 Voz activa y campana encendida: los avisos de clientes van a sonar.");
+                   } else {
+                     toast.error("🔕 La voz funciona, pero la CAMPANA está apagada: los avisos de clientes NO van a sonar. Enciéndela aquí al lado.");
+                   }
                  }}
                  className="flex items-center gap-1.5 text-[9px] font-black uppercase px-3 py-1.5 rounded-lg bg-black text-neutral-400 border border-neutral-800 hover:text-white transition-all"
                  title="Probar el sonido y la voz ahora mismo"
