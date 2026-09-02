@@ -6844,6 +6844,25 @@ async function startServer() {
       orderInfo.id = newOrderId;
       console.log(`[Landing Order] Saved landing order successfully with ID: ${newOrderId}`);
 
+      // Actividad de VENTA. Faltaba: se registraba la visita, el carrito y hasta
+      // el abandono del formulario, pero la compra —el único momento que de
+      // verdad importa— no generaba nada, así que el panel nunca la cantaba.
+      try {
+        await addDoc(collection(db, "activities"), {
+          type: "order_completed",
+          customerName: orderInfo.customerName,
+          message: `🎉 ¡VENTA! ${orderInfo.customerName} pidió ${orderInfo.productName} por $${Number(orderInfo.totalPrice || 0).toLocaleString("es-CO")}`,
+          timestamp: serverTimestamp(),
+          storeId: targetStoreId,
+          contentName: orderInfo.productName,
+          value: Number(orderInfo.totalPrice) || 0,
+          orderId: newOrderId
+        });
+      } catch (actErr: any) {
+        // Nunca debe tumbar el pedido: el pedido ya quedó guardado.
+        console.error("[Landing Order] No se pudo registrar la actividad de venta:", actErr?.message);
+      }
+
       // 3a. Meta CAPI: server-side "Purchase" event, deduplicado con el pixel del navegador (mismo event_id)
       const capiAccessToken = storeConfig?.metaCapiAccessToken || process.env.META_CAPI_ACCESS_TOKEN || "";
       if (storeConfig?.metaPixelId && capiAccessToken && eventId) {

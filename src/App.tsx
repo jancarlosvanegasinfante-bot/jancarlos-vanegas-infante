@@ -428,6 +428,55 @@ function JanAdmin() {
                     type: "visitor",
                     enabled: nativeNotificationsEnabledRef.current
                   });
+
+                  // ── VENTA ────────────────────────────────────────────────
+                  // Va de primero en importancia: es el único momento que de
+                  // verdad hay que oír aunque uno esté en otra cosa.
+                } else if (act.type === 'order_completed') {
+                  triggerNativeEventAlert({
+                    title: "🎉 ¡VENTA CONFIRMADA!",
+                    body: act.message || "Entró un pedido nuevo",
+                    voiceText: `¡Felicitaciones! ¡Venta confirmada! ${act.customerName || "Un cliente"} acaba de pedir ${act.contentName || "un producto"} por ${Number(act.value || 0).toLocaleString("es-CO")} pesos.`,
+                    type: "alert",
+                    enabled: nativeNotificationsEnabledRef.current
+                  });
+
+                } else if (act.type === 'funnel_event') {
+                  triggerNativeEventAlert({
+                    title: "⚡ Abrió el Formulario",
+                    body: act.message || "Un visitante abrió el formulario de pedido",
+                    voiceText: `Un visitante abrió el formulario de pedido.`,
+                    type: "cart",
+                    enabled: nativeNotificationsEnabledRef.current
+                  });
+
+                } else if (act.type === 'form_start') {
+                  triggerNativeEventAlert({
+                    title: "✍️ Está Ingresando sus Datos",
+                    body: act.message || "Un visitante empezó a llenar el formulario",
+                    voiceText: `¡Atención! Un visitante está ingresando sus datos ahora mismo.`,
+                    type: "cart",
+                    enabled: nativeNotificationsEnabledRef.current
+                  });
+
+                } else if (act.type === 'form_abandon') {
+                  triggerNativeEventAlert({
+                    title: "🚪 Abandonó el Formulario",
+                    body: act.message || "Un visitante se fue sin terminar",
+                    voiceText: `Un visitante abandonó el formulario sin terminar su pedido.`,
+                    type: "alert",
+                    enabled: nativeNotificationsEnabledRef.current
+                  });
+
+                } else if (act.type === 'contact') {
+                  triggerNativeEventAlert({
+                    title: "💬 Escribió por WhatsApp",
+                    body: act.message || "Un visitante tocó el botón de WhatsApp",
+                    voiceText: `Un visitante escribió por WhatsApp desde la tienda.`,
+                    type: "message",
+                    enabled: nativeNotificationsEnabledRef.current
+                  });
+
                 } else if (act.type === 'human_takeover_needed' || act.message?.toLowerCase().includes('humano') || act.message?.toLowerCase().includes('agente')) {
                   triggerNativeEventAlert({
                     title: "🚨 Solicitud de Agente Humano",
