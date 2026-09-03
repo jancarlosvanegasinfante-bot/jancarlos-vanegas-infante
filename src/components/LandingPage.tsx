@@ -880,6 +880,9 @@ export default function LandingPage() {
   // Hasta ahora "abrió el formulario y no tocó nada" y "escribió sus datos y se
   // fue a mitad" se veían idénticos en el embudo, y se arreglan de forma muy
   // distinta. Estos dos avisos separan los dos casos.
+  // Evita repetir el aviso: el navegador dispara onInvalid por CADA campo
+  // vacio, y saldrian tres toasts encimados.
+  const avisoCampoRef = useRef<string>("");
   const formularioEmpezado = useRef(false);
   const pedidoEnviadoOk = useRef(false);
   const datosActuales = useRef<any>({});
@@ -2309,7 +2312,28 @@ export default function LandingPage() {
 
               {/* Form or WhatsApp mode */}
               {checkoutMode === "formulario" ? (
-                <form onSubmit={handleSubmit} onInput={alEscribirEnFormulario} className="order-3 glass-card rounded-3xl p-6 space-y-4">
+                <form
+                  onSubmit={handleSubmit}
+                  onInput={alEscribirEnFormulario}
+                  onInvalid={(e) => {
+                    const campo = e.target as HTMLInputElement;
+                    if (!campo || avisoCampoRef.current === campo.name) return;
+                    avisoCampoRef.current = campo.name;
+                    setTimeout(() => { avisoCampoRef.current = ""; }, 1200);
+                    const nombres: Record<string, string> = {
+                      customerName: "tu nombre completo",
+                      customerPhone: "tu número de celular",
+                      city: "tu ciudad o municipio",
+                      address: "tu dirección de entrega"
+                    };
+                    try {
+                      campo.scrollIntoView({ behavior: "smooth", block: "center" });
+                      campo.focus({ preventScroll: true });
+                    } catch { /* si el navegador no deja, al menos sale el aviso */ }
+                    toast.error(`Falta ${nombres[campo.name] || "un dato"} para poder despachar tu pedido`);
+                  }}
+                  className="order-3 glass-card rounded-3xl p-6 space-y-4"
+                >
                   <h3 className="text-xs font-black uppercase tracking-widest text-amber-400 flex items-center gap-2">
                     <MapPin size={14} />
                     Paso 3 — Datos de Envío
@@ -2317,26 +2341,26 @@ export default function LandingPage() {
 
                   <div className="space-y-1.5">
                     <label className="block text-xs text-slate-400 font-bold">Nombre Completo *</label>
-                    <input type="text" name="customerName" value={formData.customerName} onChange={handleInputChange} placeholder="Ej. Juan Carlos Vanegas" required
+                    <input type="text" name="customerName" autoComplete="name" value={formData.customerName} onChange={handleInputChange} placeholder="Ej. Juan Carlos Vanegas" required
                       className="w-full bg-black/40 border border-white/8 rounded-2xl px-4 py-3.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400/50 placeholder:text-slate-700 transition-all" />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
                       <label className="block text-xs text-slate-400 font-bold">Número de Celular *</label>
-                      <input type="tel" name="customerPhone" value={formData.customerPhone} onChange={handleInputChange} placeholder="Ej. 3123456789" required
+                      <input type="tel" name="customerPhone" autoComplete="tel" inputMode="numeric" value={formData.customerPhone} onChange={handleInputChange} placeholder="Ej. 3123456789" required
                         className="w-full bg-black/40 border border-white/8 rounded-2xl px-4 py-3.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400/50 placeholder:text-slate-700 transition-all" />
                     </div>
                     <div className="space-y-1.5">
                       <label className="block text-xs text-slate-400 font-bold">Ciudad / Municipio *</label>
-                      <input type="text" name="city" value={formData.city} onChange={handleInputChange} placeholder="Ej. Bogotá, Medellín..." required
+                      <input type="text" name="city" autoComplete="address-level2" value={formData.city} onChange={handleInputChange} placeholder="Ej. Bogotá, Medellín..." required
                         className="w-full bg-black/40 border border-white/8 rounded-2xl px-4 py-3.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400/50 placeholder:text-slate-700 transition-all" />
                     </div>
                   </div>
 
                   <div className="space-y-1.5">
                     <label className="block text-xs text-slate-400 font-bold">Dirección Exacta de Entrega *</label>
-                    <input type="text" name="address" value={formData.address} onChange={handleInputChange} placeholder="Ej. Calle 10 # 5-20, Apto 402, Barrio Las Flores" required
+                    <input type="text" name="address" autoComplete="street-address" value={formData.address} onChange={handleInputChange} placeholder="Ej. Calle 10 # 5-20, Apto 402, Barrio Las Flores" required
                       className="w-full bg-black/40 border border-white/8 rounded-2xl px-4 py-3.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400/50 placeholder:text-slate-700 transition-all" />
                   </div>
 
