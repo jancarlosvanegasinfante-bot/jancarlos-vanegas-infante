@@ -37,6 +37,14 @@ import PromoFlow from "./PromoFlow";
 import { ACTIVE_PROMOTIONS } from "../lib/promotions";
 
 // ─── Products ────────────────────────────────────────────────────────────────
+// APAGADO el 03/09/2026 para probar el embudo sin interrupciones.
+// La ruleta se abria sola a los 4 segundos de entrar, el popup de bienvenida
+// al momento, y el reto de referidos al abrir el carrito. Los tres caen
+// ENCIMA de la persona justo cuando esta decidiendo, y con 52 aperturas de
+// formulario y 0 pedidos hay que quitar variables antes de seguir tocando.
+// Para volver a encenderlos: cambiar a true.
+const DISTRACCIONES_ACTIVAS = false;
+
 export const TRENDING_PRODUCTS = [
   {
     id: "cargador-aromatizante-carro",
@@ -480,6 +488,7 @@ export default function LandingPage() {
         setWheelPrize(savedPrize);
       } else {
         // Mostrar la ruleta automáticamente a los pocos segundos de entrar
+        if (!DISTRACCIONES_ACTIVAS) return;
         const timer = setTimeout(() => setWheelOpen(true), 4000);
         return () => clearTimeout(timer);
       }
@@ -1032,6 +1041,7 @@ export default function LandingPage() {
   // El reto se ofrece cuando ya decidio comprar (abrio el carrito), no al entrar:
   // antes de eso no tiene ningun motivo para invitar a nadie.
   useEffect(() => {
+    if (!DISTRACCIONES_ACTIVAS) return;
     if (!isCartOpen || referralPrompted.current || referralPct > 0 || joinCode) return;
     referralPrompted.current = true;
     const t = setTimeout(() => setShowReferral(true), 900);
@@ -1342,13 +1352,13 @@ export default function LandingPage() {
     <div className="landing-container min-h-screen bg-[#070810] text-white font-sans overflow-x-hidden selection:bg-amber-400 selection:text-black">
       {/* El popup ahora puede cerrar la venta en la propia pagina: agrega el combo
           al carrito y baja al formulario, sin obligar a salir a WhatsApp. */}
-      <PromoFlow
+      {DISTRACCIONES_ACTIVAS && <PromoFlow
         officialBotNumber={officialBotNumber}
         onPedirFormulario={(comboId: string) => {
           const c = ACTIVE_PROMOTIONS.find((x) => x.id === comboId);
           if (c) pedirComboAhora(c);
         }}
-      />
+      />}
 
       {/* ════════════════════════════════════════════
           BARRA DE URGENCIA PREMIUM (STICKY TOP)
