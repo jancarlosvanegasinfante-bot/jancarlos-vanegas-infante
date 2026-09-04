@@ -2867,6 +2867,68 @@ async function ensureOrderConfirmTemplate(): Promise<string | null> {
   }
 }
 
+// Plantilla APARTE para avisar la venta a los dueños.
+//
+// Antes se reutilizaba la del cliente metiendo "NUEVO PEDIDO de Fulano" en el
+// hueco del producto, y salía "¡Hola Jansel Shop! Gracias por tu compra... Tu
+// pedido de NUEVO PEDIDO de Fulano". La tienda dándose las gracias a sí misma
+// por un pedido llamado "NUEVO PEDIDO". Un aviso de venta y una confirmación de
+// compra son mensajes distintos y necesitan textos distintos.
+//
+// Clave propia (landingAdminAlertTemplateSid), verificada como libre:
+// adminAlertTemplateSid ya está tomada por otra función, y ese choque de
+// nombres fue justo el error que costó tres intentos hoy.
+async function ensureAdminOrderTemplate(): Promise<string | null> {
+  if (!twilioClient) return null;
+  try {
+    const cfgSnap = await getDoc(doc(db, "config", "system"));
+    const existingSid = cfgSnap.exists() ? cfgSnap.data()?.landingAdminAlertTemplateSid : null;
+    if (existingSid) return existingSid;
+
+    const content = await (twilioClient as any).content.v1.contents.create({
+      friendlyName: `jan_admin_venta_${Date.now()}`,
+      language: "es",
+      variables: { "1": "Juan Pérez", "2": "Producto", "3": "99.900" },
+      types: {
+        "twilio/text": {
+          body: "🎉 ¡NUEVA VENTA en Jansel Shop!\n\n{{1}} acaba de pedir {{2}} por ${{3}} COP.\n\nEntra al panel para ver la dirección y despacharlo."
+        }
+      }
+    });
+
+    await setDoc(doc(db, "config", "system"), { landingAdminAlertTemplateSid: content.sid }, { merge: true });
+    console.log(`[Admin Alert] Plantilla de venta creada: ${content.sid}`);
+    await solicitarAprobacionPlantilla(content.sid);
+    return content.sid;
+  } catch (e: any) {
+    console.error("[Admin Alert] No se pudo crear la plantilla:", e?.message);
+    return null;
+  }
+}
+
+async function sendAdminOrderAlert(to: string, from: string, cliente: string, producto: string, total: number): Promise<boolean> {
+  if (!twilioClient) return false;
+  try {
+    const contentSid = await ensureAdminOrderTemplate();
+    if (!contentSid) return false;
+    await (twilioClient as any).messages.create({
+      from: normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886"),
+      to: normalizePhone(to),
+      contentSid,
+      contentVariables: JSON.stringify({
+        "1": String(cliente || "Un cliente").slice(0, 60),
+        "2": String(producto || "un producto").slice(0, 90),
+        "3": Number(total || 0).toLocaleString("es-CO")
+      })
+    });
+    console.log(`[Admin Alert] Aviso de venta enviado por plantilla a ${to}`);
+    return true;
+  } catch (e: any) {
+    console.error("[Admin Alert] Falló el aviso por plantilla:", e?.message);
+    return false;
+  }
+}
+
 // Manda la confirmación por plantilla. Devuelve true solo si Twilio la acepta.
 // Si falla, quien llama sigue con el texto libre de siempre: peor es no
 // intentar nada.
@@ -7116,9 +7178,9 @@ _El pedido ya se guardó y está listo en tu tablero._`;
             // Mismo problema que con el cliente: si el dueño no le ha escrito
             // al bot en 24 horas, el texto libre no le llega y se entera de la
             // venta por ningún lado. La plantilla entra siempre.
-            const avisado = await sendOrderConfirmTemplate(
+            const avisado = await sendAdminOrderAlert(
               formattedNum, formattedBotNum,
-              "Jansel Shop", `NUEVO PEDIDO de ${orderInfo.customerName} — ${orderInfo.productName}`,
+              orderInfo.customerName, orderInfo.productName,
               Number(orderInfo.totalPrice) || 0
             );
             // El texto libre trae el detalle completo (dirección, ciudad,
