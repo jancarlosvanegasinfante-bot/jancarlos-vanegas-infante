@@ -1141,6 +1141,9 @@ export default function LandingPage() {
 
   useEffect(() => { datosActuales.current = formData; }, [formData]);
 
+  const camposListos = [formData.customerName, formData.customerPhone, formData.city, formData.address]
+    .filter((v) => String(v || "").trim().length > 1).length;
+
   const { subtotal, totalQty, quantityDiscount, descuentoRuleta, combosVigentes, prepaymentDiscount, referralDiscount, finalTotal, savings } = calculateTotals();
 
   const handleProceedToForm = () => {
@@ -2108,10 +2111,37 @@ export default function LandingPage() {
               </div>
             </div>
           )}
-          {/* Section header */}
-          <div className="text-center mb-5">
-            <h2 className="text-xl sm:text-2xl font-black tracking-tight">📝 Completa tu pedido</h2>
-            <p className="text-slate-500 text-xs mt-1">Envío gratis · Pagas al recibir</p>
+          {/* Cabecera con PROGRESO.
+              Antes decía "Completa tu pedido" y ya. Una barra que avanza activa
+              el efecto de meta cercana: cuesta mucho más abandonar algo que ya
+              se ve empezado que algo que ni se ha tocado. Y el contador pone un
+              número al esfuerzo que falta, que siempre es menos del que la
+              persona se imagina. */}
+          <div className="mb-5">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <h2 className="text-lg sm:text-xl font-black tracking-tight">
+                {camposListos === 0 && "Estás a 30 segundos de tu pedido"}
+                {camposListos > 0 && camposListos < 4 && `¡Vas muy bien! Faltan ${4 - camposListos}`}
+                {camposListos === 4 && "¡Listo! Solo confirma tu pedido 🎉"}
+              </h2>
+              <span className={`shrink-0 text-[11px] font-black px-2.5 py-1 rounded-full tabular-nums ${
+                camposListos === 4 ? "bg-emerald-500/15 text-emerald-400" : "bg-amber-500/15 text-amber-400"
+              }`}>
+                {camposListos}/4
+              </span>
+            </div>
+            <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+              <motion.div
+                className={`h-full rounded-full ${camposListos === 4 ? "bg-emerald-400" : "bg-amber-400"}`}
+                initial={false}
+                animate={{ width: `${Math.max(4, (camposListos / 4) * 100)}%` }}
+                transition={{ type: "spring", stiffness: 200, damping: 26 }}
+              />
+            </div>
+            <p className="text-slate-500 text-[11px] mt-2 flex items-center gap-1.5 flex-wrap">
+              <ShieldCheck size={12} className="text-emerald-400 shrink-0" />
+              No pedimos tarjeta · Pagas en efectivo al recibir · Envío gratis
+            </p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
@@ -2350,28 +2380,48 @@ export default function LandingPage() {
                   </h3>
 
                   <div className="space-y-1.5">
-                    <label className="block text-xs text-slate-400 font-bold">Nombre Completo *</label>
+                    <label className="flex items-center gap-1.5 text-xs text-slate-400 font-bold">
+                        Nombre Completo
+                        {String(formData.customerName || "").trim().length > 1
+                          ? <CheckCircle size={12} className="text-emerald-400" />
+                          : <span className="text-amber-400">*</span>}
+                      </label>
                     <input type="text" name="customerName" autoComplete="name" value={formData.customerName} onChange={handleInputChange} placeholder="Ej. Juan Carlos Vanegas" required
-                      className="w-full bg-black/40 border border-white/8 rounded-2xl px-4 py-3.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400/50 placeholder:text-slate-700 transition-all" />
+                      className={`w-full bg-black/40 border rounded-2xl px-4 py-3.5 pr-11 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 placeholder:text-slate-700 transition-all ${String(formData.customerName || "").trim().length > 1 ? "border-emerald-500/50" : "border-white/8 focus:border-amber-400/50"}`} />
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="space-y-1.5">
-                      <label className="block text-xs text-slate-400 font-bold">Número de Celular *</label>
+                      <label className="flex items-center gap-1.5 text-xs text-slate-400 font-bold">
+                        Número de Celular
+                        {String(formData.customerPhone || "").trim().length > 1
+                          ? <CheckCircle size={12} className="text-emerald-400" />
+                          : <span className="text-amber-400">*</span>}
+                      </label>
                       <input type="tel" name="customerPhone" autoComplete="tel" inputMode="numeric" value={formData.customerPhone} onChange={handleInputChange} placeholder="Ej. 3123456789" required
-                        className="w-full bg-black/40 border border-white/8 rounded-2xl px-4 py-3.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400/50 placeholder:text-slate-700 transition-all" />
+                        className={`w-full bg-black/40 border rounded-2xl px-4 py-3.5 pr-11 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 placeholder:text-slate-700 transition-all ${String(formData.customerPhone || "").trim().length > 1 ? "border-emerald-500/50" : "border-white/8 focus:border-amber-400/50"}`} />
                     </div>
                     <div className="space-y-1.5">
-                      <label className="block text-xs text-slate-400 font-bold">Ciudad / Municipio *</label>
+                      <label className="flex items-center gap-1.5 text-xs text-slate-400 font-bold">
+                        Ciudad / Municipio
+                        {String(formData.city || "").trim().length > 1
+                          ? <CheckCircle size={12} className="text-emerald-400" />
+                          : <span className="text-amber-400">*</span>}
+                      </label>
                       <input type="text" name="city" autoComplete="address-level2" value={formData.city} onChange={handleInputChange} placeholder="Ej. Bogotá, Medellín..." required
-                        className="w-full bg-black/40 border border-white/8 rounded-2xl px-4 py-3.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400/50 placeholder:text-slate-700 transition-all" />
+                        className={`w-full bg-black/40 border rounded-2xl px-4 py-3.5 pr-11 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 placeholder:text-slate-700 transition-all ${String(formData.city || "").trim().length > 1 ? "border-emerald-500/50" : "border-white/8 focus:border-amber-400/50"}`} />
                     </div>
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="block text-xs text-slate-400 font-bold">Dirección Exacta de Entrega *</label>
+                    <label className="flex items-center gap-1.5 text-xs text-slate-400 font-bold">
+                        Dirección Exacta de Entrega
+                        {String(formData.address || "").trim().length > 1
+                          ? <CheckCircle size={12} className="text-emerald-400" />
+                          : <span className="text-amber-400">*</span>}
+                      </label>
                     <input type="text" name="address" autoComplete="street-address" value={formData.address} onChange={handleInputChange} placeholder="Ej. Calle 10 # 5-20, Apto 402, Barrio Las Flores" required
-                      className="w-full bg-black/40 border border-white/8 rounded-2xl px-4 py-3.5 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:border-amber-400/50 placeholder:text-slate-700 transition-all" />
+                      className={`w-full bg-black/40 border rounded-2xl px-4 py-3.5 pr-11 text-sm font-semibold text-white focus:outline-none focus:ring-2 focus:ring-amber-400/50 placeholder:text-slate-700 transition-all ${String(formData.address || "").trim().length > 1 ? "border-emerald-500/50" : "border-white/8 focus:border-amber-400/50"}`} />
                   </div>
 
                   <div className="space-y-1.5">
@@ -2381,6 +2431,27 @@ export default function LandingPage() {
                   </div>
 
                   <div className="pt-4 space-y-3">
+                    {/* El total vivía arriba, en el carrito. La persona confirmaba
+                        sin ver cuánto iba a pagar, y eso frena justo en el último
+                        segundo. Aquí queda pegado al botón, con el ahorro al lado:
+                        el número que se lleva de regalo pesa más que el que paga. */}
+                    <div className="flex items-end justify-between gap-3 px-1">
+                      <div>
+                        <span className="block text-[10px] uppercase tracking-widest text-slate-500 font-black">Total a pagar</span>
+                        <span className="text-2xl font-black text-white tabular-nums leading-tight">
+                          ${finalTotal.toLocaleString("es-CO")}
+                        </span>
+                      </div>
+                      {savings > 0 && (
+                        <div className="text-right">
+                          <span className="block text-[10px] uppercase tracking-widest text-emerald-400/70 font-black">Te ahorras</span>
+                          <span className="text-lg font-black text-emerald-400 tabular-nums leading-tight">
+                            ${savings.toLocaleString("es-CO")}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+
                     <button
                       type="submit"
                       disabled={submitting || cart.length === 0}
@@ -2389,9 +2460,15 @@ export default function LandingPage() {
                       {submitting ? (
                         <><div className="w-5 h-5 border-3 border-black border-t-transparent rounded-full animate-spin" /><span>Guardando Pedido...</span></>
                       ) : (
-                        <><Lock size={16} /><span>Confirmar Pedido Seguro 🔒</span></>
+                        // Dice QUÉ PASA DESPUÉS, no solo "confirmar". "Seguro" no
+                        // significa nada para quien duda; "pagas cuando llegue" sí.
+                        <><Lock size={16} /><span>Pedir ahora · Pago al recibir</span></>
                       )}
                     </button>
+                    <p className="text-center text-[11px] text-slate-500 flex items-center justify-center gap-1.5 flex-wrap">
+                      <Truck size={12} className="text-amber-400 shrink-0" />
+                      Despachamos hoy · Llega en 1 a 3 días · No pagas nada por adelantado
+                    </p>
                     <button
                       type="button"
                       disabled={cart.length === 0}
