@@ -9748,7 +9748,15 @@ Responde directamente con el número de tu opción:
         try {
           const cfg = await getDoc(doc(db, "config", "system"));
           const sidPlantilla = cfg.exists() ? cfg.data()?.landingOrderTextTemplateSid : null;
-          if (!sidPlantilla) {
+          if (!sidPlantilla && String(req.query?.crear || "") === "1") {
+            // ?crear=1 crea y somete la plantilla sin esperar a que entre un
+            // pedido. Sirve para dejarla en aprobación desde ya, que es lo que
+            // tarda.
+            const nuevo = await ensureOrderConfirmTemplate();
+            plantilla = nuevo
+              ? { sid: nuevo, aprobacion: await consultarAprobacionPlantilla(nuevo) }
+              : { sid: null, aprobacion: "no se pudo crear (ver logs)" };
+          } else if (!sidPlantilla) {
             plantilla = { sid: null, aprobacion: "aún no se ha creado" };
           } else {
             // ?aprobar=1 vuelve a someterla, por si la primera vez fallo.
