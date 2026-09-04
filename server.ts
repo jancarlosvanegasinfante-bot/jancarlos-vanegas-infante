@@ -2788,6 +2788,69 @@ async function sendUpsellOfferButtons(to: string, from: string, message: string)
 
 // Template de "producto en tendencia" con imagen (header), texto y botones Sí/No.
 // Usa "twilio/card" porque, a diferencia de "twilio/quick-reply", soporta media (imagen).
+// ── CONFIRMACIÓN DE PEDIDO POR PLANTILLA ────────────────────────────────────
+// Los avisos de pedido salían como TEXTO LIBRE, y WhatsApp solo lo permite
+// dentro de las 24 horas siguientes al último mensaje de esa persona. Un
+// cliente que pide desde la web nunca le ha escrito al bot, así que esa ventana
+// nunca estuvo abierta: los tres mensajes (al cliente y a los dos admins)
+// salían y volvían "undelivered". Comprobado en los logs del 04/09/2026.
+//
+// Una plantilla aprobada sí entra siempre, dentro o fuera de la ventana.
+// Se usa "twilio/text": sin tarjeta, sin botones, sin medios. Es la que menos
+// motivos de rechazo tiene, y aquí solo hace falta avisar.
+async function ensureOrderConfirmTemplate(): Promise<string | null> {
+  if (!twilioClient) return null;
+  try {
+    const cfgSnap = await getDoc(doc(db, "config", "system"));
+    const existingSid = cfgSnap.exists() ? cfgSnap.data()?.orderConfirmTemplateSid : null;
+    if (existingSid) return existingSid;
+
+    const content = await (twilioClient as any).content.v1.contents.create({
+      friendlyName: `jan_order_confirm_${Date.now()}`,
+      language: "es",
+      variables: { "1": "Juan Pérez", "2": "Producto", "3": "99.900" },
+      types: {
+        "twilio/text": {
+          body: "¡Hola {{1}}! 👋 Gracias por tu compra en Jansel Shop.\n\nTu pedido de {{2}} por ${{3}} COP quedó registrado y ya está en preparación 📦\n\nTe escribimos por aquí cuando salga en ruta. Cualquier duda, respóndenos a este mismo chat."
+        }
+      }
+    });
+
+    await setDoc(doc(db, "config", "system"), { orderConfirmTemplateSid: content.sid }, { merge: true });
+    console.log(`[Order Confirm] Plantilla creada: ${content.sid}`);
+    return content.sid;
+  } catch (e: any) {
+    console.error("[Order Confirm] No se pudo crear la plantilla:", e?.message);
+    return null;
+  }
+}
+
+// Manda la confirmación por plantilla. Devuelve true solo si Twilio la acepta.
+// Si falla, quien llama sigue con el texto libre de siempre: peor es no
+// intentar nada.
+async function sendOrderConfirmTemplate(to: string, from: string, nombre: string, producto: string, total: number): Promise<boolean> {
+  if (!twilioClient) return false;
+  try {
+    const contentSid = await ensureOrderConfirmTemplate();
+    if (!contentSid) return false;
+    await (twilioClient as any).messages.create({
+      from: normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886"),
+      to: normalizePhone(to),
+      contentSid,
+      contentVariables: JSON.stringify({
+        "1": String(nombre || "Cliente").slice(0, 60),
+        "2": String(producto || "tu pedido").slice(0, 90),
+        "3": Number(total || 0).toLocaleString("es-CO")
+      })
+    });
+    console.log(`[Order Confirm] Confirmación enviada por plantilla a ${to}`);
+    return true;
+  } catch (e: any) {
+    console.error("[Order Confirm] Falló el envío por plantilla:", e?.message);
+    return false;
+  }
+}
+
 async function ensureTrendOfferTemplate(): Promise<string | null> {
   if (!twilioClient) return null;
   try {
@@ -6898,8 +6961,19 @@ async function startServer() {
         if (!twilioClient) {
           console.warn("[Landing Order Welcome] TWILIO IS NOT INITIALIZED! Cannot send welcome message. Please verify TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER environment variables.");
         } else {
-          await sendWhatsApp(finalPhone, customerWelcomeMsg, undefined, undefined, formattedBotNum);
-          console.log(`[Landing Order Welcome] Welcomed customer ${finalPhone} successfully.`);
+          // Primero la plantilla: el cliente que pide desde la web nunca le ha
+          // escrito al bot, así que su ventana de 24 horas NUNCA estuvo
+          // abierta y el texto libre volvía "undelivered" siempre.
+          const porPlantilla = await sendOrderConfirmTemplate(
+            finalPhone, formattedBotNum,
+            orderInfo.customerName, orderInfo.productName, Number(orderInfo.totalPrice) || 0
+          );
+          if (!porPlantilla) {
+            // Respaldo: el mismo envío de siempre. Si la plantilla aún no está
+            // aprobada, al menos se intenta lo que ya había.
+            await sendWhatsApp(finalPhone, customerWelcomeMsg, undefined, undefined, formattedBotNum);
+          }
+          console.log(`[Landing Order Welcome] Welcomed customer ${finalPhone} (${porPlantilla ? "plantilla" : "texto libre"}).`);
         }
       } catch (welcomeErr: any) {
         console.error(`[Landing Order Welcome] Failed to welcome customer:`, welcomeErr.message);
@@ -6963,8 +7037,19 @@ _El pedido ya se guardó y está listo en tu tablero._`;
           if (!twilioClient) {
             console.warn(`[Landing Order Notify] TWILIO IS NOT INITIALIZED! Cannot notify admin ${formattedNum}. Please verify your environment variables.`);
           } else {
+            // Mismo problema que con el cliente: si el dueño no le ha escrito
+            // al bot en 24 horas, el texto libre no le llega y se entera de la
+            // venta por ningún lado. La plantilla entra siempre.
+            const avisado = await sendOrderConfirmTemplate(
+              formattedNum, formattedBotNum,
+              "Jansel Shop", `NUEVO PEDIDO de ${orderInfo.customerName} — ${orderInfo.productName}`,
+              Number(orderInfo.totalPrice) || 0
+            );
+            // El texto libre trae el detalle completo (dirección, ciudad,
+            // referencia). Se manda igual: si la ventana está abierta llega y
+            // es mucho más útil; si no, al menos ya avisó la plantilla.
             await sendWhatsApp(formattedNum, customMessage, undefined, undefined, formattedBotNum);
-            console.log(`[Landing Order Notify] Admin ${formattedNum} notified successfully.`);
+            console.log(`[Landing Order Notify] Admin ${formattedNum} notified (plantilla: ${avisado}).`);
           }
         } catch (notifyErr: any) {
           console.error(`[Landing Order Notify] Failed to notify ${num}:`, notifyErr.message);
