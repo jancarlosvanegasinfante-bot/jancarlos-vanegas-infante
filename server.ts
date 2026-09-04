@@ -9681,6 +9681,47 @@ Responde directamente con el número de tu opción:
       res.send(paginaInforme(INFORME_TOKEN));
     });
 
+    // Diagnóstico de WhatsApp. SOLO LECTURA: pregunta a Twilio el estado real
+    // de los últimos mensajes con su código de error. Los logs solo dicen
+    // "undelivered", que no distingue entre ventana de 24h cerrada, plantilla
+    // sin aprobar, número no registrado o cuenta en prueba — y cada una se
+    // arregla distinto. Va detrás del mismo token del informe.
+    app.get("/api/diagnostico-whatsapp", async (req, res) => {
+      if (!tokenValido(req) && !isAdminRequestAuthorized(req)) {
+        return res.status(404).json({ success: false, error: "No encontrado" });
+      }
+      if (!twilioClient) return res.json({ success: false, error: "Twilio no está inicializado" });
+      try {
+        const mensajes = await (twilioClient as any).messages.list({ limit: 12 });
+        const filas = mensajes.map((m: any) => ({
+          fecha: m.dateCreated,
+          para: m.to,
+          desde: m.from,
+          estado: m.status,
+          codigoError: m.errorCode || null,
+          mensajeError: m.errorMessage || null,
+          plantilla: m.contentSid || null
+        }));
+        let plantilla: any = null;
+        try {
+          const cfg = await getDoc(doc(db, "config", "system"));
+          const sid = cfg.exists() ? cfg.data()?.orderConfirmTemplateSid : null;
+          if (sid) {
+            const ap = await (twilioClient as any).content.v1.contents(sid).approvalRequests().fetch();
+            plantilla = { sid, aprobacion: ap?.whatsapp || ap || null };
+          } else {
+            plantilla = { sid: null, aprobacion: "aún no se ha creado" };
+          }
+        } catch (e: any) {
+          plantilla = { error: e?.message || "no se pudo consultar la aprobación" };
+        }
+        res.setHeader("Cache-Control", "no-store");
+        res.json({ success: true, remitente: TWILIO_FROM_NUMBER, plantilla, mensajes: filas });
+      } catch (e: any) {
+        res.json({ success: false, error: e?.message || "Error consultando Twilio" });
+      }
+    });
+
     app.get("/api/informe", async (req, res) => {
       // Dos puertas: el token de la URL (para abrirlo suelto desde el celular)
       // o la sesión de administrador (para el apartado dentro del panel, que
