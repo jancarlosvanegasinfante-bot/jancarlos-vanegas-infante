@@ -2840,7 +2840,7 @@ async function ensureOrderConfirmTemplate(): Promise<string | null> {
   if (!twilioClient) return null;
   try {
     const cfgSnap = await getDoc(doc(db, "config", "system"));
-    const existingSid = cfgSnap.exists() ? cfgSnap.data()?.orderConfirmTemplateSid : null;
+    const existingSid = cfgSnap.exists() ? cfgSnap.data()?.landingOrderTextTemplateSid : null;
     if (existingSid) return existingSid;
 
     const content = await (twilioClient as any).content.v1.contents.create({
@@ -2854,7 +2854,7 @@ async function ensureOrderConfirmTemplate(): Promise<string | null> {
       }
     });
 
-    await setDoc(doc(db, "config", "system"), { orderConfirmTemplateSid: content.sid }, { merge: true });
+    await setDoc(doc(db, "config", "system"), { landingOrderTextTemplateSid: content.sid }, { merge: true });
     console.log(`[Order Confirm] Plantilla creada: ${content.sid}`);
     // Crear la plantilla NO la somete a aprobación. Sin aprobar, Twilio la
     // manda como texto libre y Meta la rechaza con 63016 fuera de la ventana
@@ -9747,7 +9747,7 @@ Responde directamente con el número de tu opción:
         let plantilla: any = null;
         try {
           const cfg = await getDoc(doc(db, "config", "system"));
-          const sidPlantilla = cfg.exists() ? cfg.data()?.orderConfirmTemplateSid : null;
+          const sidPlantilla = cfg.exists() ? cfg.data()?.landingOrderTextTemplateSid : null;
           if (!sidPlantilla) {
             plantilla = { sid: null, aprobacion: "aún no se ha creado" };
           } else {
