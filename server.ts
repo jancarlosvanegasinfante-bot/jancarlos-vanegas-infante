@@ -2798,6 +2798,44 @@ async function sendUpsellOfferButtons(to: string, from: string, message: string)
 // Una plantilla aprobada sí entra siempre, dentro o fuera de la ventana.
 // Se usa "twilio/text": sin tarjeta, sin botones, sin medios. Es la que menos
 // motivos de rechazo tiene, y aquí solo hace falta avisar.
+// Somete la plantilla a aprobación de Meta. Se hace por REST y no por el SDK
+// porque la versión instalada no expone approvalRequests().
+// Categoría UTILITY: es una confirmación de una compra que el cliente acaba de
+// hacer, no publicidad. Las de utilidad se aprueban más rápido y cuestan menos.
+async function solicitarAprobacionPlantilla(contentSid: string): Promise<any> {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !token || !contentSid) return null;
+  try {
+    const { data } = await axios.post(
+      `https://content.twilio.com/v1/Content/${contentSid}/ApprovalRequests/whatsapp`,
+      { name: `jansel_confirmacion_pedido_${Date.now().toString(36)}`, category: "UTILITY" },
+      { auth: { username: sid, password: token }, timeout: 15000 }
+    );
+    console.log(`[Order Confirm] Aprobación solicitada a Meta para ${contentSid}:`, data?.status || "enviada");
+    return data;
+  } catch (e: any) {
+    const detalle = e?.response?.data || e?.message;
+    console.error("[Order Confirm] No se pudo pedir la aprobación:", JSON.stringify(detalle)?.slice(0, 300));
+    return null;
+  }
+}
+
+async function consultarAprobacionPlantilla(contentSid: string): Promise<any> {
+  const sid = process.env.TWILIO_ACCOUNT_SID;
+  const token = process.env.TWILIO_AUTH_TOKEN;
+  if (!sid || !token || !contentSid) return null;
+  try {
+    const { data } = await axios.get(
+      `https://content.twilio.com/v1/Content/${contentSid}/ApprovalRequests`,
+      { auth: { username: sid, password: token }, timeout: 15000 }
+    );
+    return data;
+  } catch (e: any) {
+    return { error: e?.response?.data || e?.message };
+  }
+}
+
 async function ensureOrderConfirmTemplate(): Promise<string | null> {
   if (!twilioClient) return null;
   try {
@@ -2818,6 +2856,10 @@ async function ensureOrderConfirmTemplate(): Promise<string | null> {
 
     await setDoc(doc(db, "config", "system"), { orderConfirmTemplateSid: content.sid }, { merge: true });
     console.log(`[Order Confirm] Plantilla creada: ${content.sid}`);
+    // Crear la plantilla NO la somete a aprobación. Sin aprobar, Twilio la
+    // manda como texto libre y Meta la rechaza con 63016 fuera de la ventana
+    // de 24 horas, que es exactamente lo que estaba pasando.
+    await solicitarAprobacionPlantilla(content.sid);
     return content.sid;
   } catch (e: any) {
     console.error("[Order Confirm] No se pudo crear la plantilla:", e?.message);
@@ -9705,12 +9747,15 @@ Responde directamente con el número de tu opción:
         let plantilla: any = null;
         try {
           const cfg = await getDoc(doc(db, "config", "system"));
-          const sid = cfg.exists() ? cfg.data()?.orderConfirmTemplateSid : null;
-          if (sid) {
-            const ap = await (twilioClient as any).content.v1.contents(sid).approvalRequests().fetch();
-            plantilla = { sid, aprobacion: ap?.whatsapp || ap || null };
-          } else {
+          const sidPlantilla = cfg.exists() ? cfg.data()?.orderConfirmTemplateSid : null;
+          if (!sidPlantilla) {
             plantilla = { sid: null, aprobacion: "aún no se ha creado" };
+          } else {
+            // ?aprobar=1 vuelve a someterla, por si la primera vez fallo.
+            if (String(req.query?.aprobar || "") === "1") {
+              await solicitarAprobacionPlantilla(sidPlantilla);
+            }
+            plantilla = { sid: sidPlantilla, aprobacion: await consultarAprobacionPlantilla(sidPlantilla) };
           }
         } catch (e: any) {
           plantilla = { error: e?.message || "no se pudo consultar la aprobación" };
