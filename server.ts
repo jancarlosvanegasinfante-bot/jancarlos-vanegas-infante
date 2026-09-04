@@ -2886,6 +2886,40 @@ async function sendOrderConfirmTemplate(to: string, from: string, nombre: string
       })
     });
     console.log(`[Order Confirm] Confirmación enviada por plantilla a ${to}`);
+
+    // Registrar el mensaje igual que hace sendWhatsApp. Sin esto el WhatsApp
+    // llega pero NO aparece en Reportes: enviar por plantilla se salta a
+    // sendWhatsApp, que es quien deja el rastro para el panel.
+    try {
+      const finalTo = normalizePhone(to);
+      const finalFrom = normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886");
+      const telLimpio = finalTo.replace("whatsapp:", "").trim();
+      // Se guarda el texto YA armado con los datos reales, no la plantilla con
+      // los huecos: en el panel hay que leer lo que el cliente recibió.
+      const textoEnviado =
+        `¡Hola ${nombre || "Cliente"}! 👋 Gracias por tu compra en Jansel Shop.\n\n` +
+        `Tu pedido de ${producto || "tu pedido"} por $${Number(total || 0).toLocaleString("es-CO")} COP ` +
+        `quedó registrado y ya está en preparación 📦\n\n` +
+        `Te escribimos por aquí cuando salga en ruta. Cualquier duda, respóndenos a este mismo chat.`;
+      await addDoc(collection(db, "activities"), {
+        from: finalFrom,
+        to: finalTo,
+        recipient: finalTo,
+        customerPhone: telLimpio,
+        botNumber: finalFrom,
+        storeId: await determineStoreId(telLimpio, textoEnviado, finalFrom),
+        message: textoEnviado,
+        mediaUrl: null,
+        status: "respondido",
+        whatsappStatus: "queued",
+        senderType: "bot",
+        timestamp: serverTimestamp()
+      });
+    } catch (logErr: any) {
+      // Nunca debe tumbar el envío: el mensaje ya salió.
+      console.error("[Order Confirm] No se pudo registrar en el panel:", logErr?.message);
+    }
+
     return true;
   } catch (e: any) {
     console.error("[Order Confirm] Falló el envío por plantilla:", e?.message);
