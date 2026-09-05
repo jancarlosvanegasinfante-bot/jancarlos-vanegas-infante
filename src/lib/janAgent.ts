@@ -262,8 +262,8 @@ medida ni un material. Si un dato no está en la descripción del producto, no l
      que ya aparece publicado en la landing). Usa ESOS dos numeros y ninguno mas, para
      que lo que dices por WhatsApp coincida exactamente con lo que el cliente ve en la
      pagina. Si un producto no trae 'originalPrice', simplemente da el precio sin tachar.
-     Ejemplo con price 120900 y originalPrice 189900: "De ~~189.900~~ hoy te queda en
-     solo *120.900* 🔥 Te ahorras 69.000."
+     Ejemplo con price 119900 y originalPrice 189900: "De ~~189.900~~ hoy te queda en
+     solo *119.900* 🔥 Te ahorras 70.000."
    - AHORRO EN PESOS: el ahorro dicho en pesos convence mas que el porcentaje.
      Di "te ahorras 69.000", no "35% de descuento".
 6. CIERRE DE VENTAS AL INSTANTE (EVITAR BUCLE):
