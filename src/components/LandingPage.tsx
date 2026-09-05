@@ -1017,7 +1017,7 @@ export default function LandingPage() {
       if (addId) {
         const p = TRENDING_PRODUCTS.find((x) => x.id === addId);
         if (p) {
-          addToCart(p, true, false);
+          addToCart(p, true);
           toast.success("¡" + p.name + " listo! Completa tus datos 👇");
           setIsCartOpen(false);
           setCheckoutMode("formulario");
@@ -1029,16 +1029,10 @@ export default function LandingPage() {
           // los informes parecía que todos abandonaban en el carrito. Se usa el
           // precio del producto y no el total del carrito porque el estado aún
           // no se ha actualizado en este punto.
-          const vcExterno = generateEventId();
-          trackMetaEvent("ViewContent", {
-            content_ids: [p.id], content_name: p.name, content_type: "product",
-            value: p.price, currency: "COP"
-          }, vcExterno);
-          sendFunnelEventCapi("ViewContent", vcExterno, { contentIds: [p.id], contentName: p.name, value: p.price });
-          trackTiktokEvent("ViewContent", {
-            contents: [{ content_id: p.id, content_name: p.name, quantity: 1, price: p.price }],
-            value: p.price, currency: "COP"
-          });
+          // Aqui NO va un segundo evento. ViewContent ya lo disparo la ficha
+          // del producto, y el InitiateCheckout que habia aqui hacia que un
+          // solo clic contara como dos pasos del embudo: por eso carritos y
+          // checkouts salian identicos todos los dias.
         }
       }
     } catch { /* ignore */ }
