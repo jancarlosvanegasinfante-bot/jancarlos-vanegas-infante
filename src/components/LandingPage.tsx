@@ -771,7 +771,7 @@ export default function LandingPage() {
   }, []);
 
   // ── Cart Operations ───────────────────────────────────────────────────────────
-  const addToCart = (product: typeof TRENDING_PRODUCTS[0], silent = false) => {
+  const addToCart = (product: typeof TRENDING_PRODUCTS[0], silent = false, contarConversion = true) => {
     setCart((prev) => {
       const existingIndex = prev.findIndex((item) => item.product.id === product.id);
       if (existingIndex > -1) {
@@ -784,6 +784,12 @@ export default function LandingPage() {
       return [...prev, { product, quantity: 1 }];
     });
     if (!silent) setIsCartOpen(true);
+
+    // Las llegadas desde un anuncio (?add=) meten el producto solas: nadie
+    // decidio nada. Contarlas como AddToCart le enseñaba a Meta que su trabajo
+    // era conseguir el clic mas barato, porque todo el que aterrizaba ya
+    // contaba como conversion. Asi el evento medía trafico, no intencion.
+    if (!contarConversion) return;
 
     // Track AddToCart Event
     const addToCartEventId = generateEventId();
@@ -1011,7 +1017,7 @@ export default function LandingPage() {
       if (addId) {
         const p = TRENDING_PRODUCTS.find((x) => x.id === addId);
         if (p) {
-          addToCart(p, true);
+          addToCart(p, true, false);
           toast.success("¡" + p.name + " listo! Completa tus datos 👇");
           setIsCartOpen(false);
           setCheckoutMode("formulario");
@@ -1023,13 +1029,13 @@ export default function LandingPage() {
           // los informes parecía que todos abandonaban en el carrito. Se usa el
           // precio del producto y no el total del carrito porque el estado aún
           // no se ha actualizado en este punto.
-          const iceExterno = generateEventId();
-          trackMetaEvent("InitiateCheckout", {
+          const vcExterno = generateEventId();
+          trackMetaEvent("ViewContent", {
             content_ids: [p.id], content_name: p.name, content_type: "product",
-            num_items: 1, value: p.price, currency: "COP"
-          }, iceExterno);
-          sendFunnelEventCapi("InitiateCheckout", iceExterno, { contentIds: [p.id], contentName: p.name, value: p.price });
-          trackTiktokEvent("InitiateCheckout", {
+            value: p.price, currency: "COP"
+          }, vcExterno);
+          sendFunnelEventCapi("ViewContent", vcExterno, { contentIds: [p.id], contentName: p.name, value: p.price });
+          trackTiktokEvent("ViewContent", {
             contents: [{ content_id: p.id, content_name: p.name, quantity: 1, price: p.price }],
             value: p.price, currency: "COP"
           });
@@ -3506,7 +3512,7 @@ export default function LandingPage() {
                 <button
                   onClick={() => {
                     setIsWaMenuOpen(false);
-                    if (cart.length === 0 && TRENDING_PRODUCTS.length > 0) addToCart(TRENDING_PRODUCTS[0], true);
+                    if (cart.length === 0 && TRENDING_PRODUCTS.length > 0) addToCart(TRENDING_PRODUCTS[0], true, false);
                     setIsCartOpen(false);
                     setCheckoutMode("formulario");
                     bajarAlFormulario();
