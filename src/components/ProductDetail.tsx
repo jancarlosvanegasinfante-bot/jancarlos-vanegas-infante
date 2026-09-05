@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
-import { ArrowLeft, Star, Shield, Truck, Check, MessageCircle, Package, RotateCcw, Flame, Zap } from "lucide-react";
+import { ArrowLeft, Star, Shield, Truck, Check, MessageCircle, Package, RotateCcw, Flame, Zap, ZoomIn, X, CreditCard, Boxes, HelpCircle } from "lucide-react";
 import { TRENDING_PRODUCTS } from "./LandingPage";
 import { ACTIVE_PROMOTIONS } from "../lib/promotions";
 import { getProxiedImageUrl } from "../lib/utils";
@@ -37,6 +37,10 @@ export default function ProductDetail() {
       .then((d) => { if (d?.whatsappNumber) setWaNumber(String(d.whatsappNumber).replace(/\D/g, "")); })
       .catch(() => { /* se queda el de respaldo */ });
   }, []);
+
+  // Visor ampliado: las imagenes son afiches verticales con especificaciones
+  // y contenido de la caja. En pantalla pequeña no se alcanzan a leer.
+  const [ampliada, setAmpliada] = useState(false);
 
   const [mostrarBarra, setMostrarBarra] = useState(false);
   useEffect(() => {
@@ -147,18 +151,26 @@ export default function ProductDetail() {
       </div>
 
       <main className="max-w-6xl mx-auto px-4 py-5 sm:py-10">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-12">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-12 items-start">
           {/* Imagen: en móvil se limita la altura para que el precio y el botón
               queden a la vista sin tener que hacer scroll. */}
-          <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="relative">
-            <div className="relative w-full h-[46vh] max-h-[380px] sm:h-auto sm:aspect-square rounded-3xl overflow-hidden bg-white/5 border border-white/10">
+          <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="relative lg:sticky lg:top-24">
+            <button
+              type="button"
+              onClick={() => setAmpliada(true)}
+              className="relative w-full rounded-3xl overflow-hidden bg-white/5 border border-white/10 block cursor-zoom-in"
+            >
               <img
                 src={getProxiedImageUrl(product.imageUrl)}
                 alt={product.name}
-                className="w-full h-full object-cover"
+                fetchPriority="high"
+                className="w-full h-auto object-contain"
                 onError={(e) => { e.currentTarget.src = "/images/logo.jpeg"; }}
               />
-            </div>
+              <span className="absolute bottom-3 right-3 flex items-center gap-1.5 text-[10px] font-bold text-white/90 bg-black/65 backdrop-blur px-2.5 py-1.5 rounded-full">
+                <ZoomIn size={12} /> Toca para ampliar
+              </span>
+            </button>
             <span className="absolute top-3 left-3 text-[10px] font-black uppercase tracking-wider bg-amber-500 text-black px-3 py-1.5 rounded-full shadow-lg">
               {product.badge}
             </span>
@@ -255,6 +267,18 @@ export default function ProductDetail() {
               </ul>
             )}
 
+            <div className="glass-card rounded-3xl border border-emerald-500/25 p-4">
+              <p className="text-emerald-400 font-black text-sm flex items-center gap-2">
+                <CreditCard size={16} /> Hoy no pagas nada
+              </p>
+              <p className="text-slate-300 text-[13px] leading-relaxed mt-1.5">
+                No pedimos tarjeta, no transfieres, no dejas datos de pago. El repartidor
+                llega hasta tu puerta, abres el paquete, lo revisas, y{" "}
+                <strong className="text-white">pagas ahi mismo</strong>. Si no te convence,
+                no lo recibes y no pagas nada.
+              </p>
+            </div>
+
             <div className="grid grid-cols-3 gap-2 text-center">
               {[
                 { icon: <Truck size={17} />, t: "Envío gratis", s: "A toda Colombia" },
@@ -270,6 +294,87 @@ export default function ProductDetail() {
             </div>
           </motion.div>
         </div>
+
+        {/* Visor ampliado. El afiche del producto trae especificaciones y el
+            contenido de la caja en letra pequeña; sin poder ampliarlo, esa
+            información no se lee y es justo la que responde las dudas. */}
+        {ampliada && (
+          <div
+            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center p-3 overflow-auto"
+            onClick={() => setAmpliada(false)}
+          >
+            <button
+              type="button"
+              onClick={() => setAmpliada(false)}
+              className="fixed top-4 right-4 z-10 bg-white/10 hover:bg-white/20 text-white rounded-full p-2.5 transition-colors"
+              aria-label="Cerrar"
+            >
+              <X size={20} />
+            </button>
+            <img
+              src={getProxiedImageUrl(product.imageUrl)}
+              alt={product.name}
+              className="max-w-full h-auto rounded-2xl"
+              onClick={(e) => e.stopPropagation()}
+            />
+          </div>
+        )}
+
+        {/* Cómo lo recibe. La duda que frena en contraentrega no es el precio,
+            es no saber qué pasa después de tocar el botón. Contarlo en tres
+            pasos concretos quita esa incertidumbre. */}
+        <section className="mt-12 sm:mt-16">
+          <h2 className="text-xl sm:text-3xl font-black uppercase tracking-tight mb-1">
+            Así lo <span className="text-gradient-gold">recibes</span>
+          </h2>
+          <p className="text-slate-400 text-xs sm:text-sm mb-5">Sin tarjetas, sin transferencias, sin sorpresas.</p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            {[
+              { n: "1", icon: <Zap size={18} />, t: "Pides aquí", d: "Nombre, celular y dirección. Un minuto y listo." },
+              { n: "2", icon: <Truck size={18} />, t: "Despachamos", d: "Llega en 2 a 4 días hábiles a toda Colombia. Envío gratis." },
+              { n: "3", icon: <CreditCard size={18} />, t: "Pagas al recibir", d: "Abres el paquete, lo revisas, y pagas en la puerta." },
+            ].map((x) => (
+              <div key={x.n} className="glass-card rounded-3xl border border-white/10 p-5 flex flex-col gap-2.5">
+                <div className="flex items-center gap-2.5">
+                  <span className="w-8 h-8 rounded-full bg-amber-500 text-black font-black text-sm flex items-center justify-center shrink-0">
+                    {x.n}
+                  </span>
+                  <span className="text-amber-400">{x.icon}</span>
+                </div>
+                <h3 className="font-black text-white leading-tight">{x.t}</h3>
+                <p className="text-slate-400 text-[13px] leading-relaxed">{x.d}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Objeciones. Cada una de estas es una razón real por la que alguien
+            cierra la página sin escribir nada. Responderlas antes de que las
+            piense es más barato que perseguirlo después. */}
+        <section className="mt-12 sm:mt-16">
+          <h2 className="text-xl sm:text-3xl font-black uppercase tracking-tight mb-1">
+            Antes de que <span className="text-gradient-gold">preguntes</span>
+          </h2>
+          <p className="text-slate-400 text-xs sm:text-sm mb-5">Lo que todo el mundo quiere saber.</p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {[
+              { q: "¿Tengo que pagar algo por adelantado?", a: "No. Ni un peso. Pagas completo cuando el producto esté en tus manos." },
+              { q: "¿Cuánto demora en llegar?", a: "Entre 2 y 4 días hábiles, a cualquier parte de Colombia. El envío va incluido en el precio." },
+              { q: "¿Puedo revisarlo antes de pagar?", a: "Sí. Abres el paquete delante del repartidor. Si no es lo que esperabas, no lo recibes." },
+              { q: "¿Y si me sale defectuoso?", a: "Tienes 30 días de garantía. Nos escribes por WhatsApp y lo resolvemos." },
+              { q: "¿Cómo sé que no es una estafa?", a: "Porque no te pedimos plata por adelantado. Nosotros asumimos el riesgo del envío, no tú." },
+              { q: "¿Puedo pedir más de uno?", a: "Claro. Y si armas combo con otro producto, sale más barato — míralos abajo." },
+            ].map((x, i) => (
+              <div key={i} className="glass-card rounded-2xl border border-white/10 p-4">
+                <p className="font-black text-white text-[13px] flex items-start gap-2 leading-snug">
+                  <HelpCircle size={15} className="text-amber-400 mt-0.5 shrink-0" />
+                  {x.q}
+                </p>
+                <p className="text-slate-400 text-[13px] leading-relaxed mt-2 pl-[23px]">{x.a}</p>
+              </div>
+            ))}
+          </div>
+        </section>
 
         {combos.length > 0 && (
           <section className="mt-12 sm:mt-16">
