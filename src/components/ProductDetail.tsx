@@ -154,7 +154,7 @@ export default function ProductDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-12 items-start">
           {/* Imagen: en móvil se limita la altura para que el precio y el botón
               queden a la vista sin tener que hacer scroll. */}
-          <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="relative lg:sticky lg:top-24">
+          <motion.div initial={{ opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }} className="relative">
             <button
               type="button"
               onClick={() => setAmpliada(true)}
@@ -164,7 +164,7 @@ export default function ProductDetail() {
                 src={getProxiedImageUrl(product.imageUrl)}
                 alt={product.name}
                 fetchPriority="high"
-                className="w-full h-auto object-contain"
+                className="w-full max-h-[74vh] object-contain mx-auto"
                 onError={(e) => { e.currentTarget.src = "/images/logo.jpeg"; }}
               />
               <span className="absolute bottom-3 right-3 flex items-center gap-1.5 text-[10px] font-bold text-white/90 bg-black/65 backdrop-blur px-2.5 py-1.5 rounded-full">
@@ -376,6 +376,40 @@ export default function ProductDetail() {
           </div>
         </section>
 
+        {/* Cierre. Quien leyó las objeciones ya resolvió sus dudas: obligarlo a
+            subir de nuevo a buscar el botón es perder el pedido justo cuando
+            estaba decidido. */}
+        <section className="mt-12 sm:mt-16">
+          <div className="glass-card rounded-3xl border border-amber-500/30 p-6 sm:p-9 flex flex-col items-center text-center gap-3">
+            <h2 className="text-xl sm:text-3xl font-black uppercase tracking-tight">
+              ¿Te lo <span className="text-gradient-gold">llevas?</span>
+            </h2>
+            <p className="text-slate-300 text-sm sm:text-base max-w-lg leading-relaxed">
+              {product.name} por{" "}
+              <strong className="text-white">${product.price.toLocaleString()}</strong>, con envío gratis
+              incluido. Hoy no pagas nada: pagas cuando lo tengas en la mano.
+            </p>
+            <motion.button
+              onClick={pedirPorFormulario}
+              whileTap={{ scale: 0.97 }}
+              className="w-full max-w-md mt-2 bg-gradient-to-r from-amber-400 to-orange-500 text-black font-black text-sm sm:text-base uppercase tracking-widest py-4 sm:py-5 rounded-2xl flex items-center justify-center gap-2"
+            >
+              <Zap size={19} />
+              Lo quiero — Pedir ahora
+            </motion.button>
+            <button
+              onClick={comprar}
+              className="w-full max-w-md border border-[#25D366]/50 bg-[#25D366]/10 text-[#25D366] font-black text-xs uppercase tracking-widest py-3.5 rounded-2xl flex items-center justify-center gap-2 active:scale-95 transition-transform"
+            >
+              <MessageCircle size={17} />
+              Prefiero preguntar primero
+            </button>
+            <p className="text-slate-500 text-[11px] mt-1">
+              Quedan {product.stock} unidades · Garantía de 30 días
+            </p>
+          </div>
+        </section>
+
         {combos.length > 0 && (
           <section className="mt-12 sm:mt-16">
             <h2 className="text-xl sm:text-3xl font-black uppercase tracking-tight mb-1">
@@ -431,12 +465,12 @@ export default function ProductDetail() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
             {TRENDING_PRODUCTS.filter((p) => p.id !== product.id).slice(0, 4).map((p) => (
               <Link key={p.id} to={"/producto/" + p.id} className="glass-card rounded-2xl border border-white/10 overflow-hidden hover:border-amber-400/40 transition-colors">
-                <div className="aspect-square bg-white/5">
+                <div className="aspect-[4/5] bg-white/5 flex items-center justify-center p-1">
                   <img
                     src={getProxiedImageUrl(p.imageUrl)}
                     alt={p.name}
                     loading="lazy"
-                    className="w-full h-full object-cover"
+                    className="w-full h-full object-contain"
                     onError={(e) => { e.currentTarget.src = "/images/logo.jpeg"; }}
                   />
                 </div>
