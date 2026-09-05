@@ -4866,6 +4866,26 @@ async function syncCatalogFromSheet(): Promise<void> {
   return;
 }
 
+// El precio que queda en lastProductList es una foto del momento en que se le
+// mostro el catalogo al cliente. Si despues cambian los precios, esa foto queda
+// vieja y el carrito se arma con el valor de antes: la persona toca el boton de
+// una lista de la semana pasada y se le cobra lo que ya no vale.
+//
+// Por eso el precio nunca se toma del guardado, se vuelve a leer del catalogo.
+// Si la lectura falla se conserva el guardado, que es preferible a cobrar cero.
+async function precioVigente(nombre: string, guardado: any, storeId: string): Promise<number> {
+  try {
+    const norm = (x: any) => String(x || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+    const catalogo = await loadProductsForStore(storeId);
+    const hallado = catalogo.find((p: any) => norm(p?.name) === norm(nombre));
+    const actual = Number(hallado?.price);
+    if (Number.isFinite(actual) && actual > 0) return actual;
+  } catch (e: any) {
+    console.error("[Precio] No se pudo refrescar el precio de", nombre, e?.message);
+  }
+  return Number(guardado) || 0;
+}
+
 // Carga el catálogo de productos de una tienda (con fallback a JSON local si Supabase falla).
 // Extraída para reutilizarla tanto en el flujo normal de IA como en la confirmación por botón.
 async function loadProductsForStore(assignedStoreId: string): Promise<any[]> {
@@ -8627,7 +8647,7 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
             if (existing) {
               existing.cantidad = (existing.cantidad || 1) + 1;
             } else {
-              currentCart.push({ name: picked.name, price: picked.price, cantidad: 1 });
+              currentCart.push({ name: picked.name, price: await precioVigente(picked.name, picked.price, assignedStoreId), cantidad: 1 });
             }
             await updateDoc(doc(db, "customers", customerProfileId), { cart: currentCart });
 
@@ -8853,7 +8873,7 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
           if (existing) {
             existing.cantidad = (existing.cantidad || 1) + 1;
           } else {
-            currentCart.push({ name: picked.name, price: picked.price, cantidad: 1 });
+            currentCart.push({ name: picked.name, price: await precioVigente(picked.name, picked.price, assignedStoreId), cantidad: 1 });
           }
           await updateDoc(doc(db, "customers", customerProfileId), { cart: currentCart });
 
