@@ -8783,6 +8783,14 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         // y le responde "tu carrito esta vacio" a alguien que acaba de mandar
         // su carrito lleno. Paso el 5 de septiembre y se perdio la venta.
         const esPedidoDesdeLanding = /pedido desde la landing/i.test(String(messageBody || ""));
+        // Los mensajes que arman NUESTROS botones (la landing y la ficha de
+        // producto) traen el producto escrito. No son ordenes del carrito de
+        // WhatsApp ni respuestas a una lista, y si se dejan caer en esas
+        // compuertas se pierde el cierre: el de la landing terminaba en
+        // "tu carrito esta vacio" y el de la ficha metia el producto al
+        // carrito por un lado en vez de arrancar el flujo de venta.
+        const vieneDeNuestraWeb = esPedidoDesdeLanding
+          || /vengo de la pagina del producto/i.test(normalizeCatText(String(messageBody || "")));
 
         // 0) ¿Está en medio de un flujo de "quitar producto" que arrancó con
         //    el botón 🗑️? Si es así, resolvemos ESO primero, antes que
@@ -8866,6 +8874,10 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         //    producto de la última lista que le mostramos?
         let matchedIdx = -1;
         const asNumber = parseInt(normalizedMsg, 10);
+        if (vieneDeNuestraWeb) {
+          // Se salta el emparejamiento con la ultima lista: el producto ya
+          // viene dicho en el mensaje y lo atiende el flujo de venta.
+        } else
         if (!isNaN(asNumber) && asNumber >= 1 && asNumber <= lastList.length) {
           matchedIdx = asNumber - 1;
         } else if (normalizedMsg.length > 2) {

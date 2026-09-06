@@ -1224,7 +1224,17 @@ export default function LandingPage() {
   };
 
   const handleWhatsAppOrder = (directPaymentMode?: "contraentrega" | "anticipado") => {
-    if (cart.length === 0) return toast.error("El carrito está vacío.");
+    const telefonoBot = officialBotNumber || "15072233213";
+
+    // Los botones de la barra de arriba y del pie ("¿Dudas? Escríbenos") usan
+    // esta misma función. Quien los toca sin nada en el carrito no está
+    // pidiendo: está preguntando. Hasta hoy le salía un error rojo de carrito
+    // vacío y WhatsApp no se abría, así que ese contacto se perdía entero.
+    if (cart.length === 0) {
+      const consulta = "¡Hola Jan Sel Shop! 👋 Tengo una duda sobre sus productos, ¿me pueden ayudar?";
+      window.open(`https://wa.me/${telefonoBot}?text=${encodeURIComponent(consulta)}`, "_blank");
+      return;
+    }
     const selectedMode = directPaymentMode || paymentMethod;
     // Si el pedido viene de un combo hay que nombrarlo: antes el bot solo recibia
     // los productos sueltos y confirmaba otro total, asi que el cliente pedia el
@@ -1240,9 +1250,21 @@ export default function LandingPage() {
     const modeLabel = selectedMode === "anticipado"
       ? "🔴 *Pago Anticipado (Nequi / Daviplata / Banco de Bogotá) - ¡Descuento aplicado!*"
       : "🟢 *Pago Contraentrega (Pagas al recibir en efectivo)*";
-    const msg = `¡Hola Jan Sel Shop! 👋 Quiero realizar el siguiente pedido desde la Landing Page:\n\n🛒 *CARRITO:*\n${itemsText}\n\n⚙️ *DESGLOSE:*\n• *Subtotal:* $${subtotal.toLocaleString()} COP${discountText}${prepayText}${referralText}${ruletaText}\n🚚 *Envío:* ¡COMPLETAMENTE GRATIS! 🇨🇴\n💰 *TOTAL:* $${finalTotal.toLocaleString()} COP\n\n💳 *PAGO:* ${modeLabel}\n\n👤 *DATOS:*\n• *Nombre:* ${formData.customerName || "Por definir"}\n• *Celular:* ${formData.customerPhone || "Por definir"}\n• *Ciudad:* ${formData.city || "Por definir"}\n• *Dirección:* ${formData.address || "Por definir"}\n• *Indicaciones:* ${formData.addressIndicator || "Ninguna"}\n\n¡Por favor agendar mi despacho hoy! 🚀`;
-    const phone = officialBotNumber || "15072233213";
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, "_blank");
+    // Cuando el pedido es de un solo producto se encabeza con su nombre entre
+    // asteriscos. Es el formato que el detector del bot reconoce mejor -- el
+    // mismo que manda el botón de la ficha de producto -- y con él arranca el
+    // flujo de venta de ese producto en vez de responder algo genérico.
+    // La frase "pedido desde la Landing Page" se conserva intacta: el servidor
+    // la usa para saber que esto no es una orden del carrito de WhatsApp.
+    const unico = cart.length === 1 && combosVigentes.length === 0 ? cart[0].product.name : "";
+    const encabezado = unico
+      ? `¡Hola Jan Sel Shop! 👋 Me interesa: *${unico}*
+
+Quiero realizar el siguiente pedido desde la Landing Page:`
+      : "¡Hola Jan Sel Shop! 👋 Quiero realizar el siguiente pedido desde la Landing Page:";
+
+    const msg = `${encabezado}\n\n🛒 *CARRITO:*\n${itemsText}\n\n⚙️ *DESGLOSE:*\n• *Subtotal:* $${subtotal.toLocaleString()} COP${discountText}${prepayText}${referralText}${ruletaText}\n🚚 *Envío:* ¡COMPLETAMENTE GRATIS! 🇨🇴\n💰 *TOTAL:* $${finalTotal.toLocaleString()} COP\n\n💳 *PAGO:* ${modeLabel}\n\n👤 *DATOS:*\n• *Nombre:* ${formData.customerName || "Por definir"}\n• *Celular:* ${formData.customerPhone || "Por definir"}\n• *Ciudad:* ${formData.city || "Por definir"}\n• *Dirección:* ${formData.address || "Por definir"}\n• *Indicaciones:* ${formData.addressIndicator || "Ninguna"}\n\n¡Por favor agendar mi despacho hoy! 🚀`;
+    window.open(`https://wa.me/${telefonoBot}?text=${encodeURIComponent(msg)}`, "_blank");
 
     // Track Contact Event — mismo eventId en el pixel del navegador y en el CAPI del backend
     // para que Meta reciba doble señal sin duplicar el conteo.
