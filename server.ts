@@ -8148,6 +8148,38 @@ _El pedido ya se guardó y está listo en tu tablero._`;
        return res.status(200).send("");
     }
 
+    // ⚠️ IDENTIDAD ENMASCARADA. A veces WhatsApp entrega el remitente como una
+    // identidad opaca (ej. "whatsapp:CO.28039769919049650") en vez del numero
+    // real. No es un telefono: no se le puede responder por la API (da error
+    // 21211) y el cliente se perdia en silencio (paso el 6-sep con "carlo").
+    // Cuando pasa: se intenta responder a la identidad TAL CUAL (por si Twilio
+    // mantiene la sesion) y se avisa al admin para que lo rescate a mano desde
+    // la bandeja de Meta. Se detecta por tener letras donde deberia ir el numero.
+    {
+      const remitenteSinPrefijo = String(from).replace(/whatsapp:/i, "").trim();
+      const esIdentidadEnmascarada = /[a-z]/i.test(remitenteSinPrefijo);
+      if (esIdentidadEnmascarada) {
+        console.warn(`[WhatsApp] Identidad enmascarada (sin numero real): ${from}. Body: ${String(messageBody).slice(0, 120)}`);
+        // 1) Intento a la identidad cruda (best-effort, no rompe nada si falla).
+        try {
+          if (twilioClient) {
+            await (twilioClient as any).messages.create({
+              from: normalizePhone(to),
+              to: from.startsWith("whatsapp:") ? from : `whatsapp:${from}`,
+              body: "¡Hola! 👋 Gracias por escribir a Jansel Shop. En un momento te atiende un asesor. Si quieres agilizar, cuéntame qué producto te interesa. 🚀"
+            });
+          }
+        } catch (e: any) {
+          console.warn("[WhatsApp] No se pudo responder a la identidad enmascarada:", e?.message);
+        }
+        // 2) Aviso al admin para rescate manual (usa plantilla, llega siempre).
+        try {
+          await sendAdminAlert(`⚠️ Un cliente escribio pero WhatsApp NO dio su numero real (identidad enmascarada). Queria: "${String(messageBody).replace(/\s+/g, " ").slice(0, 140)}". Buscalo en la bandeja de WhatsApp de Meta y respondele tu.`);
+        } catch { /* no romper el webhook por el aviso */ }
+        return res.status(200).send("");
+      }
+    }
+
     // IGNORE MESSAGES FROM SELF (TWILIO ECHOES OR LOOPBACKS)
     const normBot = normalizePhone(TWILIO_FROM_NUMBER || "+14155238886");
     const normTo = normalizePhone(to);
