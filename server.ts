@@ -1352,6 +1352,23 @@ function getTimeGreeting(): string {
   }
 }
 
+// Cuantas horas dura una pausa de IA antes de reactivarse sola. Un asesor que
+// toma un chat tiene esta ventana para atenderlo; pasada, el bot vuelve a
+// responder solo, para que ningun cliente quede mudo para siempre (que era lo
+// que estaba pasando: cada chat que se "tomaba" desde la app quedaba callado
+// y nunca se reactivaba). Configurable con AI_PAUSE_HORAS.
+const AI_PAUSE_HORAS = Math.max(1, Number(process.env.AI_PAUSE_HORAS) || 6);
+
+function pausaDeIaVencida(d: any): boolean {
+  if (!d || d.aiPaused !== true) return false;
+  // Un asesor humano activo NO se vence: si hay manualAgent tomando el chat,
+  // se respeta. Solo vencen las pausas "huerfanas" sin asesor.
+  const marca = d.aiPausedAt || d.updatedAt || d.lastInterventionAt;
+  const t = marca ? new Date(typeof marca === "number" ? marca : String(marca)).getTime() : NaN;
+  if (!Number.isFinite(t)) return true;               // sin hora valida -> vencida
+  return (Date.now() - t) > AI_PAUSE_HORAS * 3600 * 1000;
+}
+
 async function checkIsCustomerAiPaused(cleanFrom: string, storeId: string = "default"): Promise<{ isPaused: boolean; reason?: string; customerData?: any; convoData?: any }> {
   if (!cleanFrom) return { isPaused: false };
   const digitsOnly = cleanFrom.replace(/\D/g, "");
@@ -1377,7 +1394,7 @@ async function checkIsCustomerAiPaused(cleanFrom: string, storeId: string = "def
         const d = snap.data();
         if (d) {
           if (!convoData) convoData = d;
-          if (d.aiPaused === true) {
+          if (d.aiPaused === true && !pausaDeIaVencida(d)) {
             return { isPaused: true, reason: `conversations key=${key}`, convoData: d };
           }
         }
@@ -1402,7 +1419,7 @@ async function checkIsCustomerAiPaused(cleanFrom: string, storeId: string = "def
             // asesor de madrugada, nadie contestaba y el bot enmudecia. Encima volvia
             // inalcanzable el contexto de acompañamiento que ya existe (asesoriaContext).
             // Cuando el asesor toma el chat se marca aiPaused, y ahi si el bot calla.
-            if (d.aiPaused === true) {
+            if (d.aiPaused === true && !pausaDeIaVencida(d)) {
               return { isPaused: true, reason: `customers key=${custRefId}`, customerData: d };
             }
           }
@@ -1431,6 +1448,7 @@ async function setCustomerAiPauseState(cleanFrom: string, storeId: string = "def
     try {
       await setDoc(doc(db, "conversations", key), {
         aiPaused: !!pause,
+        aiPausedAt: pause ? new Date().toISOString() : null,
         updatedAt: serverTimestamp()
       }, { merge: true });
     } catch (e) {}
@@ -1446,6 +1464,7 @@ async function setCustomerAiPauseState(cleanFrom: string, storeId: string = "def
       try {
         await setDoc(doc(db, "customers", customerDocId(sId, key)), {
           aiPaused: !!pause,
+          aiPausedAt: pause ? new Date().toISOString() : null,
           ...(pause ? { etapa: "asesoria_solicitada" } : { etapa: "interesado" }),
           lastInteractionAt: serverTimestamp()
         }, { merge: true });
@@ -6107,6 +6126,7 @@ async function startServer() {
     await setDoc(doc(db, "conversations", cleanPhone), {
       phone: cleanPhone,
       aiPaused: true,
+      aiPausedAt: new Date().toISOString(),
       lastInterventionBy: agentName,
       updatedAt: serverTimestamp()
     }, { merge: true });
@@ -8792,6 +8812,13 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         const vieneDeNuestraWeb = esPedidoDesdeLanding
           || /vengo de la pagina del producto/i.test(normalizeCatText(String(messageBody || "")));
 
+        // Un cliente en medio del cierre (el bot le pidio confirmar sus datos)
+        // no esta dando ordenes al carrito de WhatsApp: esta respondiendo al
+        // cierre. Sus mensajes deben pasar de largo las compuertas de carrito y
+        // llegar al manejador del checkout, o cae en "tu carrito esta vacio".
+        const enCierreDeVenta = !!(customerData && customerData.checkoutStep);
+        const saltarCompuertasCarrito = vieneDeNuestraWeb || enCierreDeVenta;
+
         // 0) ¿Está en medio de un flujo de "quitar producto" que arrancó con
         //    el botón 🗑️? Si es así, resolvemos ESO primero, antes que
         //    cualquier otra interpretación del texto (evita ambigüedad).
@@ -8874,7 +8901,7 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         //    producto de la última lista que le mostramos?
         let matchedIdx = -1;
         const asNumber = parseInt(normalizedMsg, 10);
-        if (vieneDeNuestraWeb) {
+        if (saltarCompuertasCarrito) {
           // Se salta el emparejamiento con la ultima lista: el producto ya
           // viene dicho en el mensaje y lo atiende el flujo de venta.
         } else
@@ -8927,7 +8954,7 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         }
 
         // 2) Palabras clave de acciones de carrito por texto libre
-        if (!esPedidoDesdeLanding && /\bagregar\b/.test(normalizedMsg)) {
+        if (!saltarCompuertasCarrito && /\bagregar\b/.test(normalizedMsg)) {
           await sendCategoriesMenu(from, to);
           if (activityRefId) {
             await updateDoc(doc(db, "activities", activityRefId), {
@@ -8938,7 +8965,7 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
           }
           return res.status(200).send("");
         }
-        if (!esPedidoDesdeLanding && /\bconfirmar\b/.test(normalizedMsg)) {
+        if (!saltarCompuertasCarrito && /\bconfirmar\b/.test(normalizedMsg)) {
           const currentCart: any[] = Array.isArray(customerData?.cart) ? customerData.cart : [];
           if (currentCart.length === 0) {
             const noItemsMsg = "Tu carrito está vacío todavía 🙂. Elige al menos un producto del catálogo.";
