@@ -190,27 +190,43 @@ export default function ProductDetail() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap">
-              <div className="flex items-center gap-0.5">
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <Star key={n} size={14} className={n <= Math.round(product.rating) ? "text-amber-400 fill-amber-400" : "text-slate-700"} />
-                ))}
+              <div className="flex items-center gap-1 bg-amber-500/10 border border-amber-500/25 rounded-full px-2.5 py-1">
+                <div className="flex items-center gap-0.5">
+                  {[1, 2, 3, 4, 5].map((n) => (
+                    <Star key={n} size={13} className={n <= Math.round(product.rating) ? "text-amber-400 fill-amber-400" : "text-slate-700"} />
+                  ))}
+                </div>
+                <span className="text-white text-xs font-black">{product.rating}</span>
               </div>
-              <span className="text-white text-xs font-bold">{product.rating}</span>
-              <span className="text-slate-400 text-xs">· {product.reviews} personas ya lo compraron</span>
+              <span className="text-emerald-400 text-xs font-bold">✅ {product.reviews} personas ya lo compraron</span>
             </div>
 
             {/* Precio: el bloque más importante de la página en móvil. */}
-            <div className="glass-card rounded-3xl border border-amber-500/25 p-4">
-              <div className="flex items-baseline gap-2.5 flex-wrap">
+            <div className="glass-card rounded-3xl border border-amber-500/30 p-4 relative overflow-hidden">
+              <motion.span
+                animate={{ scale: [1, 1.06, 1] }}
+                transition={{ duration: 1.6, repeat: Infinity }}
+                className="absolute top-3 right-3 text-xs font-black bg-red-500 text-white px-2.5 py-1 rounded-full shadow-lg"
+              >
+                -{descuento}% HOY
+              </motion.span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-red-400">⚡ Oferta por tiempo limitado</span>
+              <div className="flex items-baseline gap-2.5 flex-wrap mt-1">
                 <span className="text-slate-500 line-through text-base">${product.originalPrice.toLocaleString()}</span>
                 <span className="text-4xl sm:text-5xl font-black text-gradient-gold leading-none">
                   ${product.price.toLocaleString()}
                 </span>
               </div>
-              <p className="text-emerald-400 text-sm font-black mt-1.5">
-                🎉 Te ahorras ${ahorro.toLocaleString()} COP
+              <p className="text-emerald-400 text-base font-black mt-2">
+                🎉 Ahorras ${ahorro.toLocaleString()} COP
               </p>
-              <p className="text-slate-400 text-[11px] mt-1">Precio con envío incluido · Pagas cuando lo recibas</p>
+              <div className="mt-3 flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/25 rounded-2xl px-3 py-2.5">
+                <CreditCard size={17} className="text-emerald-400 shrink-0" />
+                <p className="text-[13px] font-bold text-emerald-300 leading-tight">
+                  Hoy no pagas nada · Pagas en efectivo <span className="text-white">cuando lo tengas en la mano</span>
+                </p>
+              </div>
+              <p className="text-slate-400 text-[11px] mt-2 text-center">🚚 Envío GRATIS incluido · Pedidos de hoy se despachan hoy</p>
             </div>
 
             {/* CTA principal, arriba del pliegue en móvil */}
@@ -219,10 +235,10 @@ export default function ProductDetail() {
               whileTap={{ scale: 0.97 }}
               animate={{ boxShadow: ["0 0 0 rgba(251,191,36,0)", "0 0 26px rgba(251,191,36,0.4)", "0 0 0 rgba(251,191,36,0)"] }}
               transition={{ duration: 2.2, repeat: Infinity }}
-              className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-black font-black text-sm sm:text-base uppercase tracking-widest py-4 sm:py-5 rounded-2xl flex items-center justify-center gap-2"
+              className="w-full bg-gradient-to-r from-amber-400 to-orange-500 text-black font-black text-base sm:text-lg uppercase tracking-widest py-4 sm:py-5 rounded-2xl flex flex-col items-center justify-center gap-0.5"
             >
-              <Zap size={19} />
-              Lo quiero — Pedir ahora
+              <span className="flex items-center gap-2"><Zap size={20} /> ¡Lo quiero ya!</span>
+              <span className="text-[10px] font-bold tracking-normal normal-case opacity-80">Pídelo en 1 minuto · Pago al recibir</span>
             </motion.button>
 
             <button
@@ -257,14 +273,19 @@ export default function ProductDetail() {
             <p className="text-slate-300 text-sm sm:text-base leading-relaxed">{product.description}</p>
 
             {bullets.length > 0 && (
-              <ul className="space-y-2">
-                {bullets.map((b, i) => (
-                  <li key={i} className="flex items-start gap-2 text-slate-300 text-sm">
-                    <Check size={16} className="text-emerald-400 mt-0.5 shrink-0" />
-                    <span>{b}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="space-y-2">
+                <p className="text-[11px] font-black uppercase tracking-widest text-amber-400">Por qué te va a encantar 👇</p>
+                <ul className="space-y-2">
+                  {bullets.map((b, i) => (
+                    <li key={i} className="flex items-start gap-2.5 text-slate-200 text-sm bg-white/[0.03] border border-white/8 rounded-2xl px-3 py-2.5">
+                      <span className="mt-0.5 shrink-0 w-5 h-5 rounded-full bg-emerald-500/20 flex items-center justify-center">
+                        <Check size={13} className="text-emerald-400" />
+                      </span>
+                      <span className="font-medium">{b}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             )}
 
             <div className="glass-card rounded-3xl border border-emerald-500/25 p-4">
