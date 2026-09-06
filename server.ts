@@ -8775,6 +8775,15 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
       try {
         const normalizedMsg = normalizeCatText(messageBody).trim();
 
+        // Los pedidos que llegan desde la landing traen el carrito entero
+        // escrito en el texto; no son ordenes del carrito de WhatsApp. Si caen
+        // en las palabras clave de mas abajo, cualquier "confirmar" suelto
+        // dentro del mensaje se lee como la orden CONFIRMAR, el bot mira el
+        // carrito de WhatsApp (vacio, porque el carrito vivia en el navegador)
+        // y le responde "tu carrito esta vacio" a alguien que acaba de mandar
+        // su carrito lleno. Paso el 5 de septiembre y se perdio la venta.
+        const esPedidoDesdeLanding = /pedido desde la landing/i.test(String(messageBody || ""));
+
         // 0) ¿Está en medio de un flujo de "quitar producto" que arrancó con
         //    el botón 🗑️? Si es así, resolvemos ESO primero, antes que
         //    cualquier otra interpretación del texto (evita ambigüedad).
@@ -8906,7 +8915,7 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         }
 
         // 2) Palabras clave de acciones de carrito por texto libre
-        if (/\bagregar\b/.test(normalizedMsg)) {
+        if (!esPedidoDesdeLanding && /\bagregar\b/.test(normalizedMsg)) {
           await sendCategoriesMenu(from, to);
           if (activityRefId) {
             await updateDoc(doc(db, "activities", activityRefId), {
@@ -8917,7 +8926,7 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
           }
           return res.status(200).send("");
         }
-        if (/\bconfirmar\b/.test(normalizedMsg)) {
+        if (!esPedidoDesdeLanding && /\bconfirmar\b/.test(normalizedMsg)) {
           const currentCart: any[] = Array.isArray(customerData?.cart) ? customerData.cart : [];
           if (currentCart.length === 0) {
             const noItemsMsg = "Tu carrito está vacío todavía 🙂. Elige al menos un producto del catálogo.";
