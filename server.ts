@@ -9612,8 +9612,17 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         "combo", "combos", "promo", "promos", "promocion", "promociones",
         "paquete", "paquetes", "oferta especial", "ofertas especiales"
       ].some(k => (cleanMsg || "").includes(k));
-      
-      if (isCombosRequest && from.startsWith("whatsapp:")) {
+
+      // Los mensajes que arman NUESTROS botones (pedido de la landing / ficha de
+      // producto) son intencion de compra de un producto puntual, NO un pedido de
+      // combos. Traen la palabra "combo" solo por la linea "Descuento Combo" que
+      // aparece al pedir 2+ unidades. Sin esta guarda, un cliente que pedia 2
+      // cargadores recibia la lista de combos en vez del flujo de venta, y se
+      // perdia la venta (paso el 6 de septiembre con un cliente real).
+      const esPedidoDeNuestraWeb = /pedido desde la landing|vengo de la pagina del producto|me interesa\s*:/i
+        .test(normalizeCatText(String(messageBody || "")));
+
+      if (isCombosRequest && !esPedidoDeNuestraWeb && from.startsWith("whatsapp:")) {
         console.log(`[WhatsApp Interceptor] Pedido de combos detectado desde ${from}`);
         const enviado = await sendCombosList(from, to, customerProfileId);
         if (enviado) {
