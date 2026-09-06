@@ -674,9 +674,17 @@ async function getMediaPersistent(id: string): Promise<{ data: Buffer, mimeType:
 const userRateLimitCache = new Map<string, { lastTime: number, msgCount: number }>();
 let currentAppUrl = process.env.APP_URL || "";
 
+// El header host puede venir como arreglo o como lista separada por comas
+// detras del proxy de Railway. Se toma el primer valor limpio para que la URL
+// que se arme sea siempre parseable.
+function hostLimpio(h: any): string {
+  const raw = Array.isArray(h) ? h[0] : String(h || "");
+  return raw.split(",")[0].trim();
+}
+
 function detectCurrentUrl(req: express.Request) {
-  const host = req.headers["x-forwarded-host"] || req.headers["host"];
-  const proto = req.headers["x-forwarded-proto"] || "https";
+  const host = hostLimpio(req.headers["x-forwarded-host"] || req.headers["host"]);
+  const proto = hostLimpio(req.headers["x-forwarded-proto"]) || "https";
   if (host && !host.includes("localhost")) {
     const newUrl = `${proto}://${host}`;
     if (currentAppUrl !== newUrl) {
@@ -1074,8 +1082,14 @@ function validateTwilioWebhookSignature(req: express.Request): boolean {
     return false;
   }
   try {
-    const base = (currentAppUrl || process.env.APP_URL || `${req.protocol}://${req.headers.host}`).replace(/\/$/, "");
+    let base = (currentAppUrl || process.env.APP_URL || `${req.protocol}://${hostLimpio(req.headers.host)}`).replace(/\/$/, "");
+    // Si la base quedo sin protocolo o con basura, se reconstruye desde el host
+    // limpio antes de parsear, para no lanzar "Invalid URL".
+    if (!/^https?:\/\//i.test(base)) base = `https://${hostLimpio(req.headers["x-forwarded-host"] || req.headers.host)}`;
     const fullUrl = `${base}${req.originalUrl}`;
+    // URL parseable ANTES de pasarla a Twilio. Si no lo es, en modo auditoria
+    // (no estricto) se deja pasar sin ensuciar los logs con un throw.
+    try { new URL(fullUrl); } catch { return !STRICT_TWILIO_SIGNATURE_VALIDATION; }
     const isValid = twilio.validateRequest(TWILIO_AUTH_TOKEN, twilioSignature, fullUrl, req.body || {});
     if (!isValid) {
       console.warn(`[Twilio Security] Firma inválida para ${fullUrl}. IP: ${req.ip}`);
@@ -6104,8 +6118,8 @@ async function startServer() {
   // Global Middleware
   app.use((req, res, next) => {
     if (!currentAppUrl) {
-      const host = req.headers["x-forwarded-host"] || req.headers["host"];
-      const proto = req.headers["x-forwarded-proto"] || "https";
+      const host = hostLimpio(req.headers["x-forwarded-host"] || req.headers["host"]);
+      const proto = hostLimpio(req.headers["x-forwarded-proto"]) || "https";
       currentAppUrl = `${proto}://${host}`;
       console.log(`[Jan Dashboard] Captured APP_URL: ${currentAppUrl}`);
     }
@@ -8128,8 +8142,8 @@ _El pedido ya se guardó y está listo en tu tablero._`;
 
     // Dynamic URL detection for status callbacks
     if (!currentAppUrl) {
-      const host = req.headers["x-forwarded-host"] || req.headers["host"];
-      const proto = req.headers["x-forwarded-proto"] || "https";
+      const host = hostLimpio(req.headers["x-forwarded-host"] || req.headers["host"]);
+      const proto = hostLimpio(req.headers["x-forwarded-proto"]) || "https";
       currentAppUrl = `${proto}://${host}`;
       console.log(`[Twilio Webhook] Detected APP_URL: ${currentAppUrl}`);
     }
