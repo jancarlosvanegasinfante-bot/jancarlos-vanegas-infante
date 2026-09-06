@@ -92,6 +92,7 @@ import {
   signInWithPhoneOtp,
   verifyPhoneOtp,
   signUpWithEmailAndPassword,
+  adminAuthHeaders,
   SupabaseUser as FirebaseUser
 } from "./supabase";
 import { cn, getProxiedImageUrl } from "./lib/utils";
@@ -679,7 +680,7 @@ function JanAdmin() {
     try {
       const res = await fetch("/api/admin/clear-transactions", { 
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...adminAuthHeaders() },
         body: JSON.stringify({ storeId: userStore?.id || "default" })
       });
       const data = await res.json();
@@ -790,7 +791,7 @@ function JanAdmin() {
     try {
       const res = await fetch("/api/admin/seed", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" , ...adminAuthHeaders() },
         body: JSON.stringify({ force: true, storeId: targetStore })
       });
       const data = await res.json();
@@ -1984,7 +1985,7 @@ function ReportsTab({
       
       const res = await fetch("/api/admin/send-message", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...adminAuthHeaders() },
         body: JSON.stringify({ 
            to: selectedUser, 
            message: messageToSend, 
@@ -2806,7 +2807,7 @@ function OrdersTab({ orders, onUpdateStatus, userStore }: { orders: Order[], onU
                         toast.loading("Enviando plantilla de confirmación con botones a WhatsApp...", { id: "req_conf_" + activeOrder.id });
                         const res = await fetch("/api/admin/request-order-confirmation", {
                           method: "POST",
-                          headers: { "Content-Type": "application/json" },
+                          headers: { "Content-Type": "application/json", ...adminAuthHeaders() },
                           body: JSON.stringify({ orderId: activeOrder.id })
                         });
                         const data = await res.json();
@@ -3424,7 +3425,7 @@ function InventoryTab({ products, onUpdateStock, onReset, isResetting, userStore
       const catalog = JSON.parse(manualJson);
       const res = await fetch("/api/admin/seed", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" , ...adminAuthHeaders() },
         body: JSON.stringify({ catalog, storeId: userStore?.id || "default" })
       });
       const data = await res.json();
@@ -3447,7 +3448,7 @@ function InventoryTab({ products, onUpdateStock, onReset, isResetting, userStore
     try {
       const res = await fetch("/api/admin/seed", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json" , ...adminAuthHeaders() },
         body: JSON.stringify({ catalog: { products: catalog }, storeId: userStore?.id || "default" })
       });
       const data = await res.json();

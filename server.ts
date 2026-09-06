@@ -6169,6 +6169,9 @@ async function startServer() {
 
   // Manual Admin Send Message Endpoint
   app.post("/api/admin/send-message", express.json(), async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) {
+      return res.status(401).json({ success: false, error: "No autorizado" });
+    }
     try {
       const { to, message, mediaUrl, platform, pageId, offeredProduct, offeredPrice, offeredQuantity } = req.body;
       if (!to || (!message && !mediaUrl)) {
@@ -6252,6 +6255,9 @@ async function startServer() {
   });
 
   app.post("/api/admin/bulk-notify", async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) {
+      return res.status(401).json({ success: false, error: "No autorizado" });
+    }
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: "Missing message" });
     
@@ -6287,6 +6293,9 @@ async function startServer() {
 
   // Admin Seed Trigger
   app.post("/api/admin/clear-transactions", async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) {
+      return res.status(401).json({ success: false, error: "No autorizado" });
+    }
     try {
       const { storeId } = req.body || {};
       const targetStore = storeId || "default";
@@ -6319,6 +6328,12 @@ async function startServer() {
   });
 
   app.post("/api/admin/seed", async (req, res) => {
+    // Este endpoint sobrescribe el catalogo (seedDatabase con force=true). Sin
+    // candado, cualquiera con la URL podia reemplazar productos y precios. En
+    // modo nube exige el token de admin; el panel ya lo manda (adminAuthHeaders).
+    if (!isAdminRequestAuthorized(req)) {
+      return res.status(401).json({ success: false, error: "No autorizado" });
+    }
     try {
       const { catalog, storeId } = req.body || {};
       await seedDatabase(true, catalog, storeId || "default");
@@ -6685,6 +6700,9 @@ async function startServer() {
   });
 
   app.post("/api/admin/reactivation-campaign", async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) {
+      return res.status(401).json({ success: false, error: "No autorizado" });
+    }
     try {
       const storeId = req.body?.storeId || "default";
       const dormantHours = Number(req.body?.dormantHours) || 12;
@@ -6700,6 +6718,9 @@ async function startServer() {
   });
 
   app.post("/api/admin/offer-custom-product", async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) {
+      return res.status(401).json({ success: false, error: "No autorizado" });
+    }
     try {
       const { phone, productName, price, quantity, notes } = req.body;
       if (!phone || !productName || !price) {
@@ -6748,6 +6769,9 @@ async function startServer() {
   });
 
   app.post("/api/admin/request-order-confirmation", async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) {
+      return res.status(401).json({ success: false, error: "No autorizado" });
+    }
     try {
       const { orderId } = req.body;
       if (!orderId) return res.status(400).json({ error: "orderId requerido" });
