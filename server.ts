@@ -8318,7 +8318,7 @@ _El pedido ya se guardó y está listo en tu tablero._`;
             await finalizeOrder(pending.jsonResponse, storeConfig, customerData, cleanFrom, assignedStoreId, products, db);
             await updateDoc(doc(db, "customers", customerProfileId), { pendingConfirmation: null });
             
-            const confMsg = "¡Listo! 🎉 Tu pedido quedó confirmado, ya te lo estamos alistando. ¡Gracias por tu compra!";
+            const confMsg = "¡Listo! 🎉 Tu pedido quedó confirmado, ya te lo estamos alistando. ¡Gracias por tu compra!\n\n🛍️ ¿Necesitas algo más? Cuando quieras, escríbeme un *hola* y te muestro otros productos del catálogo que te pueden interesar. 😊";
             await sendWhatsApp(from, confMsg, undefined, activityRefId, to);
             if (activityRefId) {
               await updateDoc(doc(db, "activities", activityRefId), {
@@ -9537,7 +9537,7 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
                 etapa: "finalizado"
               }, { merge: true });
               
-              await sendWhatsApp(from, "¡Listo! 🎉 Tu pedido quedó confirmado, ya te lo estamos alistando para despacho hoy mismo. ¡Muchísimas gracias por confiar en Jan Sel Shop! 👋", undefined, activityRef.id, to);
+              await sendWhatsApp(from, "¡Listo! 🎉 Tu pedido quedó confirmado, ya te lo estamos alistando para despacho hoy mismo. ¡Muchísimas gracias por confiar en Jan Sel Shop! 👋\n\n🛍️ ¿Necesitas algo más? Cuando quieras, escríbeme un *hola* y te muestro otros productos del catálogo que te pueden interesar. 😊", undefined, activityRef.id, to);
             } else {
               await sendWhatsApp(from, "No encontramos ningún pedido pendiente de confirmación. 😊 ¿En qué más te puedo colaborar?", undefined, activityRef.id, to);
             }
