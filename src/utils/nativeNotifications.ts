@@ -2,6 +2,33 @@
 
 let audioCtx: AudioContext | null = null;
 
+// ── Voz: robustez contra los bugs de Chrome ─────────────────────────────────
+// Chrome tiene dos manías con speechSynthesis que hacían que la voz "dejara de
+// hablar sola":
+//  1. getVoices() llega VACÍO al cargar la página y se llena después (evento
+//     'voiceschanged'). Si se consulta en el momento equivocado, no hay voz.
+//  2. El motor se "duerme" tras un rato abierto y speak() ya no suena hasta que
+//     se le hace resume(). Por eso funcionaba un rato y luego se callaba.
+// Solución: cacheamos las voces cuando lleguen y mantenemos el motor despierto
+// con un resume() periódico. Es aditivo y no cambia el comportamiento normal.
+let cachedVoices: SpeechSynthesisVoice[] = [];
+function refreshVoices() {
+  try {
+    const v = window.speechSynthesis.getVoices();
+    if (v && v.length) cachedVoices = v;
+  } catch { /* noop */ }
+}
+if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+  refreshVoices();
+  try { window.speechSynthesis.addEventListener('voiceschanged', refreshVoices); } catch { /* noop */ }
+  // Keep-alive: cada 8s revive el motor si Chrome lo dejó en pausa/dormido.
+  setInterval(() => {
+    try {
+      if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+    } catch { /* noop */ }
+  }, 8000);
+}
+
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (!audioCtx) {
@@ -109,8 +136,10 @@ export function speakVoiceAlert(text: string, prioritario = false) {
     // cancel() se reserva para la venta, que es lo unico que puede interrumpir.
     if (prioritario) window.speechSynthesis.cancel();
 
-    // Si quedo suspendido de una vez anterior, se reanuda.
-    if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+    // Chrome a veces deja el motor "dormido" (en pausa, o trabado sin pausa
+    // aparente) y speak() no suena. Un resume() aquí lo despierta; si no estaba
+    // en pausa, no hace nada. Esto es lo que evita que la voz se quede muda.
+    try { window.speechSynthesis.resume(); } catch { /* noop */ }
 
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = 'es-CO';
@@ -118,7 +147,8 @@ export function speakVoiceAlert(text: string, prioritario = false) {
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
 
-    const voices = window.speechSynthesis.getVoices();
+    // Usamos las voces cacheadas (que sí están listas); si aún no, pedimos en vivo.
+    const voices = (cachedVoices.length ? cachedVoices : window.speechSynthesis.getVoices()) || [];
     const spanishVoice = voices.find(v => v.lang.startsWith('es'));
     if (spanishVoice) utterance.voice = spanishVoice;
 
