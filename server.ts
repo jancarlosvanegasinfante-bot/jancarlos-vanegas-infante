@@ -4795,6 +4795,7 @@ async function finalizeOrder(
       city: jsonResponse.datos_pedido?.ciudad || "No especificada",
       addressIndicator: jsonResponse.datos_pedido?.referencia || "N/A",
       notes: jsonResponse.datos_pedido?.notes || "",
+      origin: "whatsapp",
       status: 'pendiente',
       shopifyStatus: 'no_enviado',
       dropiStatus: 'no_enviado',
@@ -4804,6 +4805,42 @@ async function finalizeOrder(
     const orderRef = await addDoc(collection(dbRef, "orders"), orderInfo);
     const newOrderId = orderRef.id;
     console.log(`[Server AI] Pedido guardado en base de datos con ID: ${newOrderId}`);
+
+    // 🎯 Atribución de VENTA por WhatsApp a Meta (Click-to-WhatsApp).
+    // Si el cliente llegó por un anuncio de WhatsApp, en el webhook se guardó su
+    // ctwa_clid; aquí le mandamos el evento Purchase a Meta para que la campaña
+    // de VENTAS aprenda de compras reales y atribuya la venta al anuncio.
+    // 100% aditivo y con try/catch: si algo falla, el pedido YA quedó guardado y
+    // notificado arriba, así que no rompe el flujo ni la venta.
+    try {
+      const ctwaClid = customerProfile?.ctwaClid || "";
+      const ctwaAgeOk = customerProfile?.ctwaClidAt
+        ? (Date.now() - Number(customerProfile.ctwaClidAt)) < 7 * 24 * 60 * 60 * 1000
+        : true;
+      const capiToken = storeConfig?.metaCapiAccessToken || process.env.META_CAPI_ACCESS_TOKEN || "";
+      if (ctwaClid && ctwaAgeOk && storeConfig?.metaPixelId && capiToken) {
+        sendMetaCapiEvent({
+          pixelId: storeConfig.metaPixelId,
+          accessToken: capiToken,
+          eventName: "Purchase",
+          eventId: `wa_purchase_${newOrderId}`,
+          actionSource: "business_messaging",
+          messagingChannel: "whatsapp",
+          ctwaClid,
+          customerPhone: orderInfo.customerPhone,
+          customData: {
+            currency: "COP",
+            value: orderInfo.totalPrice,
+            content_ids: [orderInfo.productId],
+            content_type: "product",
+            num_items: orderInfo.quantity,
+          },
+        }).catch(() => {});
+        console.log(`[CTWA] Evento Purchase (WhatsApp) enviado a Meta para pedido ${newOrderId}.`);
+      }
+    } catch (e: any) {
+      console.error("[CTWA] No se pudo enviar Purchase de WhatsApp (no crítico):", e?.message);
+    }
 
     if (storeConfig?.shopifyAutoSync && storeConfig?.shopifyDomain && storeConfig?.shopifyAccessToken) {
       console.log("[Server AI] Shopify Auto Sync activo. Sincronizando pedido...");
@@ -4971,10 +5008,13 @@ interface MetaCapiParams {
   clientIp?: string;
   userAgent?: string;
   customData?: Record<string, any>;
+  actionSource?: string;      // "website" (default) o "business_messaging" (Click-to-WhatsApp)
+  ctwaClid?: string;          // id del click del anuncio Click-to-WhatsApp
+  messagingChannel?: string;  // "whatsapp" cuando actionSource = business_messaging
 }
 
 async function sendMetaCapiEvent(params: MetaCapiParams): Promise<void> {
-  const { eventName, eventId, eventSourceUrl, customerPhone, fbp, fbc, clientIp, userAgent, customData } = params;
+  const { eventName, eventId, eventSourceUrl, customerPhone, fbp, fbc, clientIp, userAgent, customData, actionSource, ctwaClid, messagingChannel } = params;
   // Se limpian espacios: el id del pixel llego a estar guardado como
   // " 841277818494170", y con un id mal formado Meta descarta los eventos, que
   // es justo lo que la campana necesita para optimizar.
@@ -4994,20 +5034,27 @@ async function sendMetaCapiEvent(params: MetaCapiParams): Promise<void> {
     if (fbc) userData.fbc = fbc;
     if (clientIp) userData.client_ip_address = clientIp;
     if (userAgent) userData.client_user_agent = userAgent;
+    // Click-to-WhatsApp: el id del click es la llave que usa Meta para atribuir
+    // la venta al anuncio de WhatsApp.
+    if (ctwaClid) userData.ctwa_clid = ctwaClid;
 
-    const eventPayload = {
-      data: [
-        {
-          event_name: eventName,
-          event_time: Math.floor(Date.now() / 1000),
-          event_id: eventId,
-          action_source: "website",
-          event_source_url: eventSourceUrl,
-          user_data: userData,
-          custom_data: customData || {},
-        },
-      ],
+    const fuente = actionSource || "website";
+    const evento: Record<string, any> = {
+      event_name: eventName,
+      event_time: Math.floor(Date.now() / 1000),
+      event_id: eventId,
+      action_source: fuente,
+      user_data: userData,
+      custom_data: customData || {},
     };
+    // Web: lleva la URL de origen (como siempre). Click-to-WhatsApp: no hay URL,
+    // lleva el canal de mensajería. Así el camino web queda idéntico a antes.
+    if (fuente === "business_messaging") {
+      if (messagingChannel) evento.messaging_channel = messagingChannel;
+    } else if (eventSourceUrl) {
+      evento.event_source_url = eventSourceUrl;
+    }
+    const eventPayload = { data: [evento] };
 
     const url = `https://graph.facebook.com/v19.0/${pixelId}/events?access_token=${accessToken}`;
     await axios.post(url, eventPayload);
@@ -8295,6 +8342,28 @@ _El pedido ya se guardó y está listo en tu tablero._`;
     const cxSnap = await getDoc(doc(db, "customers", customerProfileId));
     const customerData = cxSnap.exists() ? cxSnap.data() : null;
     const pending = customerData?.pendingConfirmation;
+
+    // 📩 Click-to-WhatsApp: si el cliente llega tocando un anuncio de WhatsApp,
+    // Twilio incluye ReferralCtwaClid (el id del click). Lo guardamos en su
+    // perfil para poder atribuirle la VENTA a ese anuncio cuando cierre (ver
+    // finalizeOrder → Meta CAPI). Es 100% aditivo: si no viene, no hace nada, y
+    // va en try/catch para nunca frenar la atención del cliente.
+    try {
+      const ctwaClidIn = req.body?.ReferralCtwaClid || req.body?.referralCtwaClid || "";
+      if (ctwaClidIn && customerProfileId) {
+        const ctwaPatch: any = { ctwaClid: String(ctwaClidIn), ctwaClidAt: Date.now() };
+        const ctwaSourceId = req.body?.ReferralSourceId || req.body?.referralSourceId || "";
+        if (ctwaSourceId) ctwaPatch.ctwaSourceId = String(ctwaSourceId);
+        await setDoc(doc(db, "customers", customerProfileId), ctwaPatch, { merge: true });
+        if (customerData) {
+          customerData.ctwaClid = ctwaPatch.ctwaClid;
+          customerData.ctwaClidAt = ctwaPatch.ctwaClidAt;
+        }
+        console.log(`[CTWA] Click de anuncio WhatsApp capturado para ${cleanFrom} (clid ${String(ctwaClidIn).slice(0, 12)}...)`);
+      }
+    } catch (e: any) {
+      console.error("[CTWA] No se pudo guardar el ctwa_clid (no crítico):", e?.message);
+    }
 
     // CHECK IF AI IS PAUSED OR HUMAN ADVISOR WAS REQUESTED FOR THIS CUSTOMER
     const pauseCheck = await checkIsCustomerAiPaused(cleanFrom, assignedStoreId);
