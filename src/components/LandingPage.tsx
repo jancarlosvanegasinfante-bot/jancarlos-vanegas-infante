@@ -51,7 +51,7 @@ export const TRENDING_PRODUCTS = [
     name: "Modulador Cargador Aromatizante 4 en 1",
     category: "Autos",
     description: "Cables enredados y olor a encierro, resueltos de una. Carga 4 dispositivos con cables que se recogen solos, aromatiza y da luces RGB. Incluye 3 esencias.",
-    price: 89900,
+    price: 99900,
     originalPrice: 139900,
     imageUrl: "/images/cargador-aromatizante-carro.jpg",
     rating: 4.9,
