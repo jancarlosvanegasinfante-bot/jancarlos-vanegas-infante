@@ -4810,6 +4810,24 @@ async function finalizeOrder(
     const newOrderId = orderRef.id;
     console.log(`[Server AI] Pedido guardado en base de datos con ID: ${newOrderId}`);
 
+    // 🔔 Actividad de VENTA para que la app SUENE/AVISE también cuando el pedido
+    // entra por WhatsApp (antes solo la landing creaba esta actividad, por eso a
+    // veces no llegaba la notificación al tablero). No debe tumbar el pedido.
+    try {
+      await addDoc(collection(dbRef, "activities"), {
+        type: "order_completed",
+        customerName: orderInfo.customerName,
+        message: `🎉 ¡VENTA! ${orderInfo.customerName} pidió ${orderInfo.productName} por $${Number(orderInfo.totalPrice || 0).toLocaleString("es-CO")}`,
+        timestamp: serverTimestamp(),
+        storeId: assignedStoreId,
+        contentName: orderInfo.productName,
+        value: Number(orderInfo.totalPrice) || 0,
+        orderId: newOrderId,
+      });
+    } catch (actErr: any) {
+      console.error("[Server AI] No se pudo registrar la actividad de venta (no crítico):", actErr?.message);
+    }
+
     // 🎯 Atribución de VENTA por WhatsApp a Meta (Click-to-WhatsApp).
     // Si el cliente llegó por un anuncio de WhatsApp, en el webhook se guardó su
     // ctwa_clid; aquí le mandamos el evento Purchase a Meta para que la campaña

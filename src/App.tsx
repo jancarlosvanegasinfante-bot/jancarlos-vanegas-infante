@@ -2565,6 +2565,45 @@ function OrdersTab({ orders, onUpdateStatus, userStore }: { orders: Order[], onU
   // Selected Order for Master-Detail Layout
   const [selectedOrderId, setSelectedOrderId] = useState<string | null>(null);
 
+  // ── Gestión manual de pedidos (crear / editar / eliminar) ──
+  const [crudMode, setCrudMode] = useState<null | "add" | "edit">(null);
+  const [crudForm, setCrudForm] = useState<any>({});
+  const emptyForm = () => ({ productName: "", customerName: "", customerPhone: "", city: "", address: "", addressIndicator: "", quantity: 1, totalPrice: 0 });
+  const abrirNuevo = () => { setCrudForm(emptyForm()); setCrudMode("add"); };
+  const abrirEditar = (o: any) => {
+    if (!o) return;
+    setCrudForm({ productName: o.productName || "", customerName: o.customerName || "", customerPhone: o.customerPhone || "", city: o.city || "", address: o.address || "", addressIndicator: o.addressIndicator || "", quantity: o.quantity || 1, totalPrice: o.totalPrice || 0 });
+    setCrudMode("edit");
+  };
+  const guardarCrud = async (activeId?: string) => {
+    try {
+      const payload = {
+        productName: crudForm.productName || "Sin nombre",
+        customerName: crudForm.customerName || "Sin nombre",
+        customerPhone: crudForm.customerPhone || "",
+        city: crudForm.city || "",
+        address: crudForm.address || "",
+        addressIndicator: crudForm.addressIndicator || "",
+        quantity: Number(crudForm.quantity) || 1,
+        totalPrice: Number(crudForm.totalPrice) || 0,
+      };
+      if (crudMode === "add") {
+        await addDoc(collection(db, "orders"), { ...payload, productId: "manual", origin: "manual", canal: "manual", status: "pendiente", shopifyStatus: "no_enviado", dropiStatus: "no_enviado", createdAt: serverTimestamp() });
+        toast.success("✅ Pedido creado");
+      } else if (crudMode === "edit" && activeId) {
+        await updateDoc(doc(db, "orders", activeId), payload);
+        toast.success("✏️ Pedido actualizado");
+      }
+      setCrudMode(null);
+    } catch (e: any) { toast.error("Error: " + (e?.message || "no se pudo guardar")); }
+  };
+  const eliminarPedido = async (id?: string) => {
+    if (!id) return;
+    if (!window.confirm("¿Eliminar este pedido? Esta acción no se puede deshacer.")) return;
+    try { await deleteDoc(doc(db, "orders", id)); toast.success("🗑️ Pedido eliminado"); }
+    catch (e: any) { toast.error("Error: " + (e?.message || "no se pudo eliminar")); }
+  };
+
   // Normalize phone number for universal wa.me link
   const normalizePhone = (phone: string) => {
     if (!phone) return "";
@@ -2680,6 +2719,42 @@ function OrdersTab({ orders, onUpdateStatus, userStore }: { orders: Order[], onU
           Descargar para Dropi (CSV)
         </button>
       </div>
+
+      {/* ── Barra de gestión manual de pedidos ── */}
+      <div className="flex flex-wrap gap-2">
+        <button onClick={abrirNuevo} className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-xl text-[11px] font-black uppercase transition active:scale-95">➕ Nuevo pedido</button>
+        <button onClick={() => abrirEditar(activeOrder)} disabled={!activeOrder} className="flex items-center gap-2 bg-neutral-800 hover:bg-neutral-700 text-white px-4 py-2 rounded-xl text-[11px] font-black uppercase transition active:scale-95 disabled:opacity-30">✏️ Editar seleccionado</button>
+        <button onClick={() => eliminarPedido(activeOrder?.id)} disabled={!activeOrder} className="flex items-center gap-2 bg-red-600/80 hover:bg-red-600 text-white px-4 py-2 rounded-xl text-[11px] font-black uppercase transition active:scale-95 disabled:opacity-30">🗑️ Eliminar seleccionado</button>
+      </div>
+
+      {/* ── Modal crear / editar pedido ── */}
+      {crudMode && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)", zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setCrudMode(null)}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#141414", border: "1px solid #2a2a2a", borderRadius: 16, padding: 20, width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto" }}>
+            <h3 style={{ color: "#fff", margin: "0 0 12px", fontSize: 16, fontWeight: 800 }}>{crudMode === "add" ? "➕ Nuevo pedido" : "✏️ Editar pedido"}</h3>
+            {([["productName", "Producto"], ["customerName", "Nombre del cliente"], ["customerPhone", "Teléfono"], ["city", "Ciudad"], ["address", "Dirección"], ["addressIndicator", "Referencia"]] as [string, string][]).map(([k, label]) => (
+              <div key={k} style={{ marginBottom: 8 }}>
+                <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 3 }}>{label}</label>
+                <input value={crudForm[k] || ""} onChange={(e) => setCrudForm((f: any) => ({ ...f, [k]: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", background: "#0b0b0b", border: "1px solid #2a2a2a", borderRadius: 8, padding: "8px 10px", color: "#fff", fontSize: 13 }} />
+              </div>
+            ))}
+            <div style={{ display: "flex", gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 3 }}>Cantidad</label>
+                <input type="number" value={crudForm.quantity ?? 1} onChange={(e) => setCrudForm((f: any) => ({ ...f, quantity: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", background: "#0b0b0b", border: "1px solid #2a2a2a", borderRadius: 8, padding: "8px 10px", color: "#fff", fontSize: 13 }} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: "block", fontSize: 11, color: "#9ca3af", marginBottom: 3 }}>Total (COP)</label>
+                <input type="number" value={crudForm.totalPrice ?? 0} onChange={(e) => setCrudForm((f: any) => ({ ...f, totalPrice: e.target.value }))} style={{ width: "100%", boxSizing: "border-box", background: "#0b0b0b", border: "1px solid #2a2a2a", borderRadius: 8, padding: "8px 10px", color: "#fff", fontSize: 13 }} />
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={() => setCrudMode(null)} style={{ flex: 1, background: "#2a2a2a", color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>Cancelar</button>
+              <button onClick={() => guardarCrud(activeOrder?.id)} style={{ flex: 1, background: "#10b981", color: "#fff", border: "none", borderRadius: 8, padding: "10px", fontWeight: 700, cursor: "pointer" }}>{crudMode === "add" ? "Crear" : "Guardar"}</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* MASTER-DETAIL GRID */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
