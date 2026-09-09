@@ -58,7 +58,7 @@ export default function PersonalWhatsApp() {
       firstLoadRef.current = false;
     };
     tick();
-    const iv = setInterval(tick, 4000);
+    const iv = setInterval(tick, 2000);
     return () => { vivo = false; clearInterval(iv); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

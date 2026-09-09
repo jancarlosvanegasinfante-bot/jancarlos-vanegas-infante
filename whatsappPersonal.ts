@@ -45,8 +45,6 @@ const status: WaStatus = {
 
 let sock: any = null;
 let starting = false;
-let reconnectDelay = 3000;
-const MAX_RECONNECT_DELAY = 60000;
 
 // Estado por chat: "tracked" (sigue pedidos) | "ignored" (personal, se suelta)
 type ChatState = { estado: "nuevo" | "tracked" | "ignored"; strikes: number; textos: string[]; pedidoGuardado: boolean; ultimoExtract: number };
@@ -233,7 +231,13 @@ async function useSupabaseAuthState(baileys: any) {
   const { initAuthCreds, BufferJSON, proto } = baileys;
   const writeData = async (id: string, value: any) => {
     if (!sb) return;
-    await sb.from("wa_personal_auth").upsert({ id, data: JSON.stringify(value, BufferJSON.replacer), updated_at: new Date().toISOString() });
+    // Nunca dejar que un hipo de la base tumbe el emparejamiento: las llaves
+    // igual quedan en caché en memoria durante la sesión (makeCacheableSignalKeyStore).
+    try {
+      await sb.from("wa_personal_auth").upsert({ id, data: JSON.stringify(value, BufferJSON.replacer), updated_at: new Date().toISOString() });
+    } catch (e: any) {
+      console.warn("[WA Personal] No se pudo guardar sesión (no crítico):", e?.message);
+    }
   };
   const readData = async (id: string): Promise<any | null> => {
     if (!sb) return null;
@@ -323,7 +327,6 @@ export async function startPersonalWhatsApp(): Promise<void> {
           status.connecting = false;
           status.qr = null;
           status.lastConnectedAt = Date.now();
-          reconnectDelay = 3000;
           try { status.phone = (sock?.user?.id || "").split(":")[0].split("@")[0] || null; } catch {}
           console.log(`[WA Personal] ✅ Conectado como ${status.phone || "?"}`);
         }
@@ -340,10 +343,13 @@ export async function startPersonalWhatsApp(): Promise<void> {
             try { await clearAll(); } catch {}
             // No reconecta solo: hay que re-escanear desde la app.
           } else {
-            // Reconexión con backoff acotado.
-            const d = reconnectDelay;
-            reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
-            setTimeout(() => { startPersonalWhatsApp().catch(() => {}); }, d);
+            // 408 = timeout de emparejamiento (nadie escaneó el QR a tiempo).
+            // Limpiamos el QR muerto y regeneramos RÁPIDO uno fresco (2.5s), así
+            // en la app siempre hay un QR válido para escanear (antes había huecos
+            // largos con un QR ya vencido → escaneabas y no pasaba nada).
+            status.qr = null;
+            status.connecting = true;
+            setTimeout(() => { startPersonalWhatsApp().catch(() => {}); }, 2500);
           }
         }
       } catch (e: any) {
