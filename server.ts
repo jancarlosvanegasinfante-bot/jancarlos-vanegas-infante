@@ -13,6 +13,10 @@ import { getSystemInstruction } from "./src/lib/janAgent.js";
 import { ACTIVE_PROMOTIONS } from "./src/lib/promotions.js";
 import { obtenerInforme, paginaInforme } from "./src/lib/informe.js";
 import crypto from "crypto";
+// Módulo AISLADO de WhatsApp personal (Baileys). Import seguro: su tope solo usa
+// axios/supabase/qrcode (ya presentes); Baileys se carga con import() dinámico
+// dentro de start(), así que esto NO puede romper el arranque del server.
+import { startPersonalWhatsApp, getPersonalWaStatus, logoutPersonalWa } from "./whatsappPersonal.js";
 
 // 1. Initialize Supabase / Local JSON File Storage
 const cwd = process.cwd();
@@ -5948,6 +5952,16 @@ async function startServer() {
     console.warn("[Database] Details:", err.message);
   }
 
+  // 📲 WhatsApp personal (Baileys) — módulo AISLADO. Si no hay sesión aún, queda
+  // esperando el QR desde la app. Va en su propio try/catch: si falla, el bot de
+  // Twilio y todo lo demás sigue funcionando igual.
+  try {
+    startPersonalWhatsApp().catch((e: any) =>
+      console.warn("[WA Personal] No arrancó al boot (no crítico):", e?.message));
+  } catch (e: any) {
+    console.warn("[WA Personal] Excepción al arrancar (ignorada):", e?.message);
+  }
+
   // Auto-provisionar el template de botones de confirmación de pedido (una sola vez,
   // sin necesidad de tocar la consola de Twilio). Si falla, no bloquea el arranque:
   // el bot cae de vuelta a confirmación por texto normal.
@@ -6174,6 +6188,34 @@ async function startServer() {
   });
 
   // Manual Intervention Endpoint
+  // ── WhatsApp personal (Baileys) — estado/QR, logout, mensajes capturados ──
+  app.get("/api/admin/personal-wa/status", (req, res) => {
+    if (!isAdminRequestAuthorized(req)) return res.status(401).json({ error: "no autorizado" });
+    try { return res.json(getPersonalWaStatus()); }
+    catch (e: any) { return res.status(500).json({ error: e?.message }); }
+  });
+
+  app.post("/api/admin/personal-wa/logout", express.json(), async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) return res.status(401).json({ error: "no autorizado" });
+    try { await logoutPersonalWa(); return res.json({ ok: true }); }
+    catch (e: any) { return res.status(500).json({ error: e?.message }); }
+  });
+
+  app.get("/api/admin/personal-wa/messages", async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) return res.status(401).json({ error: "no autorizado" });
+    try {
+      if (!supabaseServer) return res.json({ messages: [] });
+      const { data, error } = await supabaseServer
+        .from("personal_wa_messages")
+        .select("*")
+        .order("updatedAt", { ascending: false })
+        .limit(200);
+      if (error) return res.json({ messages: [] });
+      const messages = (data || []).map((r: any) => ({ id: r.id, ...(r.data || {}) }));
+      return res.json({ messages });
+    } catch (e: any) { return res.status(500).json({ error: e?.message, messages: [] }); }
+  });
+
   app.post("/api/whatsapp/intervene", async (req, res) => {
     const { phone, agentName } = req.body;
     if (!phone || !agentName) return res.status(400).json({ error: "Missing phone or agentName" });

@@ -52,6 +52,7 @@ import {
   Download,
   BarChart3
 } from "lucide-react";
+import PersonalWhatsApp from "./components/PersonalWhatsApp";
 import { 
   requestNotificationPermission, 
   playSoundAlert, 
@@ -242,7 +243,7 @@ function JanAdmin() {
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [isClearing, setIsClearing] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'informes' | 'crm' | 'orders' | 'inventory' | 'reports' | 'config' | 'recovery' | 'monitor'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'informes' | 'crm' | 'orders' | 'inventory' | 'reports' | 'config' | 'recovery' | 'monitor' | 'whatsapp_personal'>('dashboard');
 
   // Native System & Voice Notifications (Windows / Android / Mac)
   const [nativeNotificationsEnabled, setNativeNotificationsEnabled] = useState<boolean>(() => {
@@ -288,6 +289,36 @@ function JanAdmin() {
     nativeNotificationsEnabledRef.current = nativeNotificationsEnabled;
     localStorage.setItem("native_notifications_enabled", String(nativeNotificationsEnabled));
   }, [nativeNotificationsEnabled]);
+
+  // 📲 Voz GLOBAL con DIFERENCIA para pedidos capturados por el WhatsApp personal
+  // (Baileys). Suena desde cualquier pantalla y con un mensaje distinto al del
+  // bot, para que se distinga al oído de dónde viene. No toca el flujo del bot.
+  const personalWaCapturadosRef = useRef<number | null>(null);
+  useEffect(() => {
+    let vivo = true;
+    const check = async () => {
+      if (!vivo) return;
+      try {
+        const r = await fetch("/api/admin/personal-wa/status", { headers: { ...adminAuthHeaders() } });
+        if (!r.ok) return;
+        const s = await r.json();
+        const n = typeof s?.capturados === "number" ? s.capturados : 0;
+        if (personalWaCapturadosRef.current !== null && n > personalWaCapturadosRef.current) {
+          triggerNativeEventAlert({
+            title: "📲 ¡Pedido por WhatsApp Personal!",
+            body: "Se capturó un pedido nuevo desde tu WhatsApp personal.",
+            voiceText: "¡Atención! Nuevo pedido capturado por tu WhatsApp personal. Revísalo en la sección de pedidos.",
+            type: "order",
+            enabled: nativeNotificationsEnabledRef.current,
+          });
+        }
+        personalWaCapturadosRef.current = n;
+      } catch { /* noop */ }
+    };
+    check();
+    const iv = setInterval(check, 8000);
+    return () => { vivo = false; clearInterval(iv); };
+  }, []);
 
   const [userStore, setUserStore] = useState<any>(null);
   const [userStores, setUserStores] = useState<any[]>([]);
@@ -996,6 +1027,7 @@ function JanAdmin() {
           <NavItem active={activeTab === 'recovery'} onClick={() => setActiveTab('recovery')} icon={<Zap size={18} />} label="Recuperación" />
           <NavItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={<Truck size={18} />} label="Pedidos" count={orders.filter(o => o.status === 'pendiente').length} />
           <NavItem active={activeTab === 'inventory'} onClick={() => setActiveTab('inventory')} icon={<Box size={18} />} label="Inventario" />
+          <NavItem active={activeTab === 'whatsapp_personal'} onClick={() => setActiveTab('whatsapp_personal')} icon={<Smartphone size={18} />} label="WhatsApp Personal" />
           <NavItem active={activeTab === 'config'} onClick={() => setActiveTab('config')} icon={<Settings size={18} />} label="Configuración" />
         </nav>
 
@@ -1075,6 +1107,7 @@ function JanAdmin() {
                {activeTab === 'recovery' && 'Activación de Ventas Abandonadas'}
                {activeTab === 'orders' && 'Ventana de Pedidos WhatsApp'}
                {activeTab === 'inventory' && 'Control de Stock Inteligente'}
+               {activeTab === 'whatsapp_personal' && 'WhatsApp Personal — Captura de Pedidos'}
                {activeTab === 'config' && 'Ajustes del Sistema'}
              </h2>
           </div>
@@ -1219,6 +1252,7 @@ function JanAdmin() {
                     userStore={userStore}
                   />}
                   {activeTab === 'monitor' && <MonitorTab key="monitor" activities={filteredActivities} />}
+                 {activeTab === 'whatsapp_personal' && <PersonalWhatsApp key="wapp" />}
                  {activeTab === 'recovery' && <RecoveryTab 
                     key="recovery" 
                     activities={filteredActivities} 
