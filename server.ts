@@ -4840,15 +4840,12 @@ async function finalizeOrder(
         ? (Date.now() - Number(customerProfile.ctwaClidAt)) < 7 * 24 * 60 * 60 * 1000
         : true;
       const capiToken = storeConfig?.metaCapiAccessToken || process.env.META_CAPI_ACCESS_TOKEN || "";
-      if (ctwaClid && ctwaAgeOk && storeConfig?.metaPixelId && capiToken) {
-        sendMetaCapiEvent({
+      if (storeConfig?.metaPixelId && capiToken) {
+        const purchaseBase: any = {
           pixelId: storeConfig.metaPixelId,
           accessToken: capiToken,
           eventName: "Purchase",
           eventId: `wa_purchase_${newOrderId}`,
-          actionSource: "business_messaging",
-          messagingChannel: "whatsapp",
-          ctwaClid,
           customerPhone: orderInfo.customerPhone,
           customData: {
             currency: "COP",
@@ -4857,8 +4854,18 @@ async function finalizeOrder(
             content_type: "product",
             num_items: orderInfo.quantity,
           },
-        }).catch(() => {});
-        console.log(`[CTWA] Evento Purchase (WhatsApp) enviado a Meta para pedido ${newOrderId}.`);
+        };
+        if (ctwaClid && ctwaAgeOk) {
+          // Venta ATRIBUIDA al anuncio de WhatsApp (Click-to-WhatsApp).
+          sendMetaCapiEvent({ ...purchaseBase, actionSource: "business_messaging", messagingChannel: "whatsapp", ctwaClid }).catch(() => {});
+        } else {
+          // Venta por WhatsApp SIN click de anuncio (ej. llegó por la landing y
+          // cerró en el chat): igual la enviamos para que Meta APRENDA de TODAS
+          // las compras reales (hace match por el teléfono del cliente). No se
+          // atribuye a un anuncio puntual, pero alimenta la optimización.
+          sendMetaCapiEvent({ ...purchaseBase }).catch(() => {});
+        }
+        console.log(`[CTWA] Purchase enviado a Meta para pedido ${newOrderId} (atribuido a anuncio: ${!!ctwaClid}).`);
       }
     } catch (e: any) {
       console.error("[CTWA] No se pudo enviar Purchase de WhatsApp (no crítico):", e?.message);
