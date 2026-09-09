@@ -7502,7 +7502,7 @@ _El pedido ya se guardó y está listo en tu tablero._`;
             break;
 
           case "confirmado":
-            messageText = `✅ *¡Tu pedido ha sido confirmado!* 🛒\n\nHola *${customerName}*, tu pedido de *${productName}* fue verificado correctamente y pasó a empaque para su posterior despacho a *${city}*.\n\n💰 *Total a pagar:* $${totalPrice} COP (Pago Contra Entrega)\n\nTe notificaremos tan pronto sea entregado a la transportadora. ¡Gracias por elegir *Jan Sel Shop*! 📦✨`;
+            messageText = `✅ *¡Tu pedido ha sido confirmado!* 🛒\n\nHola *${customerName}*, tu pedido de *${productName}* fue verificado y pasó a empaque para su despacho a *${city}*.\n\n💰 *Total a pagar:* $${totalPrice} COP *(Pago Contra Entrega)*\n\n📦 A medida que cambie el estado de tu pedido te iré notificando por aquí. Mantente muy pendiente de mensajes de texto o de WhatsApp de la transportadora *COORDINADORA* — ellos te enviarán la *hoja de ruta* con los datos de tu entrega.\n\n⚠️ *IMPORTANTE, para tu seguridad:* NO realices *ningún pago* ni le envíes dinero a NADIE hasta que el paquete esté *en tus manos* y hayas *revisado el contenido*. Solo le pagas al mensajero cuando ya tengas tu producto. Te dejo este aviso para protegerte de estafas de personas inmorales. 🙏\n\nFue un gusto atenderte 🙌 Hablaste con *Jan Vanegas*, jefe de ventas de *Jan Sel Shop*. ¡Que disfrutes tu producto, muchas gracias y un excelente resto de día! ✨`;
             break;
 
           case "cancelado":
