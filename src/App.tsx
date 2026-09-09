@@ -773,7 +773,17 @@ function JanAdmin() {
   const updateOrderStatus = async (orderId: string, status: Order['status'], notifyCustomer: boolean = true) => {
     try {
       const targetOrder = orders.find(o => o.id === orderId);
-      await updateDoc(doc(db, "orders", orderId), { status });
+
+      // Al CONFIRMAR le preguntamos al admin qué transportadora, para armar el
+      // mensaje del cliente con la correcta (no siempre es la misma).
+      let transportadora = "";
+      if (status === "confirmado" && notifyCustomer) {
+        const resp = window.prompt("¿Qué transportadora envía este pedido? (se lo diremos al cliente)", "Coordinadora");
+        if (resp === null) return; // canceló → no confirmamos el pedido
+        transportadora = resp.trim();
+      }
+
+      await updateDoc(doc(db, "orders", orderId), { status, ...(transportadora ? { transportadora } : {}) });
 
       if (notifyCustomer) {
         toast.loading("Enviando WhatsApp de actualización al cliente...", { id: "status_notify_" + orderId });
@@ -785,7 +795,8 @@ function JanAdmin() {
             orderId,
             status,
             notifyCustomer: true,
-            orderData: targetOrder
+            orderData: targetOrder,
+            transportadora
           })
         });
         const data = await res.json();

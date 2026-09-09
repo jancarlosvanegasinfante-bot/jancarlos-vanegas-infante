@@ -7449,7 +7449,12 @@ _El pedido ya se guardó y está listo en tu tablero._`;
   // ==============================================
   app.post("/api/orders/update-status", express.json(), async (req, res) => {
     try {
-      const { orderId, status, notifyCustomer = true, orderData } = req.body;
+      const { orderId, status, notifyCustomer = true, orderData, transportadora } = req.body;
+      // Frase de transportadora: si el admin la indicó al confirmar, se nombra;
+      // si no, se usa una redacción neutra (no siempre es la misma transportadora).
+      const transportadoraTxt = (transportadora && String(transportadora).trim())
+        ? `la transportadora *${String(transportadora).trim()}*`
+        : "la transportadora asignada";
 
       if (!orderId || !status) {
         return res.status(400).json({ success: false, error: "Faltan parámetros obligatorios: orderId o status." });
@@ -7502,7 +7507,7 @@ _El pedido ya se guardó y está listo en tu tablero._`;
             break;
 
           case "confirmado":
-            messageText = `✅ *¡Tu pedido ha sido confirmado!* 🛒\n\nHola *${customerName}*, tu pedido de *${productName}* fue verificado y pasó a empaque para su despacho a *${city}*.\n\n💰 *Total a pagar:* $${totalPrice} COP *(Pago Contra Entrega)*\n\n📦 A medida que cambie el estado de tu pedido te iré notificando por aquí. Mantente muy pendiente de mensajes de texto o de WhatsApp de la transportadora *COORDINADORA* — ellos te enviarán la *hoja de ruta* con los datos de tu entrega.\n\n⚠️ *IMPORTANTE, para tu seguridad:* NO realices *ningún pago* ni le envíes dinero a NADIE hasta que el paquete esté *en tus manos* y hayas *revisado el contenido*. Solo le pagas al mensajero cuando ya tengas tu producto. Te dejo este aviso para protegerte de estafas de personas inmorales. 🙏\n\nFue un gusto atenderte 🙌 Hablaste con *Jan Vanegas*, jefe de ventas de *Jan Sel Shop*. ¡Que disfrutes tu producto, muchas gracias y un excelente resto de día! ✨`;
+            messageText = `✅ *¡Tu pedido ha sido confirmado!* 🛒\n\nHola *${customerName}*, tu pedido de *${productName}* fue verificado y pasó a empaque para su despacho a *${city}*.\n\n💰 *Total a pagar:* $${totalPrice} COP *(Pago Contra Entrega)*\n\n📦 A medida que cambie el estado de tu pedido te iré notificando por aquí. Mantente muy pendiente de mensajes de texto o de WhatsApp de ${transportadoraTxt} — ellos te enviarán la *hoja de ruta* con los datos de tu entrega.\n\n⚠️ *IMPORTANTE, para tu seguridad:* NO realices *ningún pago* ni le envíes dinero a NADIE hasta que el paquete esté *en tus manos* y hayas *revisado el contenido*. Solo le pagas al mensajero cuando ya tengas tu producto. Te dejo este aviso para protegerte de estafas de personas inmorales. 🙏\n\nFue un gusto atenderte 🙌 Hablaste con *Jan Vanegas*, jefe de ventas de *Jan Sel Shop*. ¡Que disfrutes tu producto, muchas gracias y un excelente resto de día! ✨`;
             break;
 
           case "cancelado":
