@@ -29,6 +29,32 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
   }, 8000);
 }
 
+// 🔓 Desbloqueo automático de la voz.
+// Chrome NO deja hablar a speechSynthesis hasta que el usuario interactúa con la
+// página (regla de autoplay). Por eso el PRIMER aviso del día no sonaba si el
+// admin abría el panel y no tocaba nada. Aquí "primamos" el motor con el primer
+// clic/tecla/toque en cualquier parte: hablamos una locución muda para dejarlo
+// habilitado, y desde ahí todos los avisos automáticos suenan solos.
+let voicePrimed = false;
+function primeVoice() {
+  if (voicePrimed) return;
+  voicePrimed = true;
+  try {
+    window.speechSynthesis.resume();
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0; // mudo: solo sirve para desbloquear el motor
+    window.speechSynthesis.speak(u);
+  } catch { /* noop */ }
+  ["pointerdown", "keydown", "click", "touchstart"].forEach((ev) => {
+    try { window.removeEventListener(ev, primeVoice, true); } catch { /* noop */ }
+  });
+}
+if (typeof window !== "undefined" && "speechSynthesis" in window) {
+  ["pointerdown", "keydown", "click", "touchstart"].forEach((ev) => {
+    try { window.addEventListener(ev, primeVoice, { capture: true, passive: true } as AddEventListenerOptions); } catch { /* noop */ }
+  });
+}
+
 function getAudioContext(): AudioContext | null {
   if (typeof window === 'undefined') return null;
   if (!audioCtx) {
