@@ -189,6 +189,32 @@ export const TRENDING_PRODUCTS = [
     stock: 35,
     badge: "🔋 ARRANQUE RÁPIDO",
   },
+  {
+    id: "shilajit-vitalidad-x2",
+    name: "Shilajit Himalayan Organics — Combo x2",
+    category: "Bienestar",
+    description: "Combo x2 de Shilajit auténtico del Himalaya con arándano, guaraná, noni, borojó y chontaduro. Incluye kit de obsequios. Energía, vitalidad y bienestar diario.",
+    price: 149900,
+    originalPrice: 199900,
+    imageUrl: "/images/shilajit-vitalidad-x2.jpg",
+    rating: 4.9,
+    reviews: 143,
+    stock: 30,
+    badge: "🏔️ HIMALAYA",
+  },
+  {
+    id: "aguaje-hinojo-maca-triple",
+    name: "Aguaje Hinojo Maca Triple x100",
+    category: "Bienestar",
+    description: "Fórmula triple Natural Medix con Aguaje amazónico, Hinojo y Maca peruana. 100 cápsulas. Bienestar femenino, energía y balance hormonal natural.",
+    price: 69900,
+    originalPrice: 99900,
+    imageUrl: "/images/aguaje-hinojo-maca-triple.png",
+    rating: 4.8,
+    reviews: 92,
+    stock: 98,
+    badge: "🌸 BIENESTAR FEMENINO",
+  },
 ];
 
 // El descuento por invitar exige llevar 2+ productos: en un pedido de dos el
@@ -196,7 +222,7 @@ export const TRENDING_PRODUCTS = [
 // la ganancia de una venta suelta.
 const REFERRAL_MIN_ITEMS = 2;
 
-const CATEGORIES = ["Todos", "Motos", "Autos", "Tecnología"];
+const CATEGORIES = ["Todos", "Motos", "Autos", "Tecnología", "Bienestar"];
 
 const TESTIMONIALS = [
   {
