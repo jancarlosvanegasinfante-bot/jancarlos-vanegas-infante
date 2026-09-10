@@ -2021,6 +2021,30 @@ function ReportsTab({
     return processedUserConversations[selectedCanonicalPhone] || null;
   }, [processedUserConversations, selectedCanonicalPhone]);
 
+  // ⏰ Ventana de 24h de WhatsApp Business API.
+  // Fuera de esa ventana WhatsApp BLOQUEA los mensajes de texto libres — solo
+  // pasan los templates pre-aprobados por Meta. Antes Twilio decía "sent" pero
+  // el mensaje nunca llegaba y quedaba silenciosamente perdido. Aquí calculamos
+  // cuánto lleva el cliente sin escribir y avisamos en el composer para que Jan
+  // no gaste clicks pensando que se está enviando algo cuando no.
+  const windowStatus = useMemo(() => {
+    if (!activeUserConv?.messages || !Array.isArray(activeUserConv.messages)) {
+      return { hasCustomerMsg: false, hoursSince: Infinity, outside: false };
+    }
+    let lastTs = 0;
+    for (const m of activeUserConv.messages) {
+      const isBotOrAdmin = m.senderType === 'bot' || m.senderType === 'admin' || m.senderType === 'agent' || !!m.manualAgent || m.from?.includes('14155238886') || m.from?.includes('15072233213');
+      if (isBotOrAdmin) continue;
+      const raw = m.timestamp || m.receivedAt || m.createdAt;
+      if (!raw) continue;
+      const ts = raw?.toDate ? raw.toDate().getTime() : new Date(raw).getTime();
+      if (Number.isFinite(ts) && ts > lastTs) lastTs = ts;
+    }
+    if (!lastTs) return { hasCustomerMsg: false, hoursSince: Infinity, outside: true };
+    const hoursSince = (Date.now() - lastTs) / (1000 * 60 * 60);
+    return { hasCustomerMsg: true, hoursSince, outside: hoursSince > 24 };
+  }, [activeUserConv]);
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedUser) return;
@@ -2589,10 +2613,31 @@ function ReportsTab({
               <div ref={messagesEndRef} />
             </div>
 
+            {/* ⏰ Aviso de ventana de 24h — si el cliente lleva más de 24h sin escribir,
+                WhatsApp BLOQUEA cualquier mensaje de texto libre (aunque Twilio diga
+                "sent") y solo pasan los templates pre-aprobados. */}
+            {windowStatus.outside && (
+              <div className="px-4 py-2.5 border-t border-red-900/50 bg-gradient-to-r from-red-950/60 to-red-900/30">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle size={14} className="text-red-500 shrink-0 mt-0.5" />
+                  <div className="flex-1">
+                    <div className="text-[9px] font-black uppercase tracking-widest text-red-400 mb-0.5">
+                      ⚠️ Fuera de la ventana de 24 horas de WhatsApp
+                    </div>
+                    <div className="text-[11px] text-neutral-200 leading-snug">
+                      {windowStatus.hasCustomerMsg
+                        ? <>El cliente no escribe hace <strong>{Math.floor(windowStatus.hoursSince)} h</strong>. WhatsApp <strong>bloquea</strong> los mensajes libres — Twilio dirá "enviado" pero <strong>no llegará</strong>. Usa un <strong>template pre-aprobado</strong> para reactivar.</>
+                        : <>Este cliente <strong>nunca ha escrito</strong> al bot. WhatsApp solo permite mandarle un <strong>template pre-aprobado</strong>.</>}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Input Area */}
             <div className="p-6 border-t border-neutral-800 bg-black/40 backdrop-blur-md">
-              <input 
-                type="file" 
+              <input
+                type="file"
                 ref={fileInputRef} 
                 onChange={handleFileUpload} 
                 className="hidden" 

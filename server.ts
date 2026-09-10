@@ -5146,8 +5146,16 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string | string
     return;
   }
 
-  // Derive base URL for status callbacks
-  const appUrl = currentAppUrl || process.env.APP_URL || "";
+  // Derive base URL for status callbacks. Si no hay APP_URL en env, caemos al
+  // dominio de Railway y, en última instancia, al host público conocido. Sin
+  // esta URL, Twilio no puede reportar el estado real del mensaje
+  // (delivered/read/failed) y los mensajes quedaban en "sent" para siempre —
+  // no había forma de saber si le llegaban al cliente o si WhatsApp los
+  // rechazó (ej. fuera de la ventana de 24h).
+  const railwayHost = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${String(process.env.RAILWAY_PUBLIC_DOMAIN).replace(/^https?:\/\//, "")}`
+    : "";
+  const appUrl = currentAppUrl || process.env.APP_URL || railwayHost || "https://chatbotjanadsia.up.railway.app";
   
   const finalTo = normalizePhone(to);
   const finalFrom = normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886");
@@ -6400,15 +6408,11 @@ async function startServer() {
         console.log(`[Admin Send Message] Oferta pendiente guardada para ${cleanPhone}: ${offeredProduct} @ ${offeredPrice}`);
       }
 
-      let sendResult: any = false;
-      if (targetPlatform === "whatsapp" || formattedPhone.startsWith("whatsapp:")) {
-        sendResult = await sendWhatsApp(formattedPhone, message || "", mediaUrl || undefined, undefined, botNumber);
-      } else {
-        await sendMetaMessage(to, message || "", targetPlatform, pageId);
-        sendResult = true;
-      }
-
-      // 2. Register activity in Firestore so it appears in chat UI
+      // 1. Register activity FIRST so we can pass its ID as statusCallback param.
+      //    Antes se registraba DESPUÉS del envío, sin activityId → Twilio no podía
+      //    reportar delivered/read/failed y los mensajes se quedaban en "sent" para
+      //    siempre (bug real: no sabíamos si le llegaban al cliente o si WhatsApp
+      //    los bloqueaba fuera de la ventana de 24h). Ahora sí llegan los callbacks.
       // IMPORTANTE: "from" debe ser el teléfono del CLIENTE (no el del bot),
       // porque getCrmContext() arma el historial de la IA filtrando por
       // from == customerPhone. Si aquí se guardaba from=botNumber, el mensaje
@@ -6430,9 +6434,19 @@ async function startServer() {
         timestamp: serverTimestamp(),
         receivedAt: serverTimestamp()
       };
-      await addDoc(collection(db, "activities"), activityData);
+      const actRef = await addDoc(collection(db, "activities"), activityData);
 
-      console.log(`[Admin Send Message] Manual message sent to ${cleanPhone}`);
+      // 2. Enviar — pasando el activityId para que Twilio reporte el status real
+      //    (delivered/read/failed) al endpoint /api/webhook/whatsapp/status.
+      let sendResult: any = false;
+      if (targetPlatform === "whatsapp" || formattedPhone.startsWith("whatsapp:")) {
+        sendResult = await sendWhatsApp(formattedPhone, message || "", mediaUrl || undefined, actRef.id, botNumber);
+      } else {
+        await sendMetaMessage(to, message || "", targetPlatform, pageId);
+        sendResult = true;
+      }
+
+      console.log(`[Admin Send Message] Manual message sent to ${cleanPhone} (activityId=${actRef.id})`);
       res.json({ success: true });
     } catch (e: any) {
       console.error("[Admin Send Message Error]", e);
