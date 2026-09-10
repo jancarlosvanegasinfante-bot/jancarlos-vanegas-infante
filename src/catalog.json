@@ -175,6 +175,22 @@
       "originalPrice": 139900,
       "videoUrl": "",
       "dropiId": "2210256"
+    },
+    {
+      "id": "shilajit-vitalidad-x2",
+      "name": "Shilajit Himalayan Organics — Combo x2",
+      "category": "bienestar",
+      "cost": 65000,
+      "stock": 30,
+      "freight": 20000,
+      "imageUrl": "/images/logo.jpeg",
+      "currency": "COP",
+      "provider": "Dropi",
+      "description": "Combo doble de Shilajit Himalayan Organics con INVIMA, extraído de las montañas del Himalaya, sabor idéntico al natural a Malta con arándano, guaraná, noni, borojó y chontaduro. 10 porciones por envase. Rico en minerales y compuestos bioactivos que apoyan tu energía, vitalidad y rutina diaria de bienestar. Modo de uso: una porción diaria mezclada con agua tibia o leche, preferiblemente en la mañana. Contraindicaciones: no recomendado para personas con presión arterial baja o afecciones cardíacas. Incluye kit de obsequios sorpresa. Producto natural con estándares altos de calidad.",
+      "price": 149900,
+      "originalPrice": 199900,
+      "videoUrl": "",
+      "dropiId": "1879163"
     }
   ]
 }
