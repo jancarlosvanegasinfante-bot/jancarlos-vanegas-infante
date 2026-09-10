@@ -5964,6 +5964,34 @@ _El inventario ya fue descontado automáticamente._`;
   await sendAdminAlert(message);
 }
 
+// Responde una duda/objeción del cliente DURANTE el checkout: corto, cálido y
+// para cerrar. Usa IA si hay clave; si no, un mensaje de respaldo. Nunca lanza.
+async function responderDudaCheckout(productoNombre: string, pregunta: string): Promise<string> {
+  const respaldo = "¡Con gusto! 🙌 Recuerda que es *pago contra entrega*: recibes, *revisas* y solo pagas si estás conforme. Cualquier duda, aquí estoy. 😊";
+  const apiKey = process.env.OPENROUTER_API_KEY || process.env.NVIDIA_API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) return respaldo;
+  const system = "Eres un vendedor amable de Jansel Shop (Colombia, pago contraentrega, envío gratis). Responde la duda del cliente en 1-2 frases, cálido y directo, SIN inventar datos. Recuerda: es contraentrega (revisa antes de pagar). NO pidas datos, solo responde la duda. Máximo 40 palabras.";
+  const prompt = `El cliente está comprando *${productoNombre}* y preguntó: "${pregunta}". Responde su duda breve y amable.`;
+  try {
+    let txt = "";
+    if (process.env.OPENROUTER_API_KEY) {
+      const r = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
+        model: "google/gemini-2.5-flash",
+        messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+        temperature: 0.5, max_tokens: 150,
+      }, { headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" }, timeout: 12000 });
+      txt = r.data?.choices?.[0]?.message?.content || "";
+    } else if (process.env.GEMINI_API_KEY) {
+      const r = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+        contents: [{ role: "user", parts: [{ text: `${system}\n\n${prompt}` }] }],
+        generationConfig: { temperature: 0.5 },
+      }, { headers: { "Content-Type": "application/json" }, timeout: 12000 });
+      txt = r.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+    }
+    return (txt || "").trim() || respaldo;
+  } catch { return respaldo; }
+}
+
 async function startServer() {
   const app = express();
   const PORT = Number(process.env.PORT) || 3000;
@@ -9484,6 +9512,43 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
               response: distractionMsg,
               respondedAt: serverTimestamp()
             });
+            return res.status(200).send("");
+          }
+        }
+
+        // 🆕 Preguntas / objeciones / pedir FOTO durante el checkout.
+        // (Detectado 10-sep: leads del anuncio preguntaban "puedo revisar antes
+        // de pagar" o "mándame una foto" y el bot las guardaba como nombre/
+        // teléfono/ciudad y el cliente se iba sin respuesta. Ahora respondemos y
+        // volvemos a pedir el dato, SIN guardar la pregunta como dato.)
+        if (isDataStep) {
+          const pideFoto = /\b(foto|fotos|imagen|imagenes|im[aá]genes|video|muestra|mu[eé]strame|ense[nñ]ame|ver el producto|como se ve|mas fotos)\b/i.test(cleanMsg) && !(numMedia > 0);
+          const objecionPago = /\b(revisar|abrir|destapar|ver el paquete|antes de pagar|antes de recibir|como pago|forma de pago|contra ?entrega|contraentrega|es seguro|es confiable|estafa|es real|es original|garant[ií]a|de buena calidad)\b/i.test(cleanMsg);
+          const otraPregunta = /\?/.test(String(finalMessage || "")) || /\b(puedo|se puede|me puede|me puedes|trae|traes|incluye|viene con|cuanto vale|cuanto cuesta|que precio|sirve para|para que sirve|de que color|que color|tienen mas|hay mas|es nuevo)\b/i.test(cleanMsg);
+          if (pideFoto || objecionPago || otraPregunta) {
+            try {
+              if (pideFoto) {
+                const productos = await loadProductsForStore(assignedStoreId);
+                const prod = detectarProductoUnico(String(checkoutData.producto || ""), productos)
+                  || productos.find((p: any) => (p.name || "").toLowerCase().includes(String(checkoutData.producto || "").toLowerCase()));
+                const base = (currentAppUrl && !currentAppUrl.includes("localhost") ? currentAppUrl : (process.env.APP_URL || "https://chatbotjanadsia.up.railway.app")).replace(/\/+$/, "");
+                if (prod?.id) {
+                  await sendWhatsApp(from, `¡Claro! 📸 Mira tu *${checkoutData.producto || prod.name}* con fotos, video y todos los detalles aquí 👉 ${base}/producto/${prod.id}\n\n¿Seguimos para despachártelo hoy? 🚚`, undefined, activityRef.id, to);
+                } else {
+                  await sendWhatsApp(from, `¡Claro! 📸 Es un excelente producto. ¿Seguimos con tu pedido para despachártelo hoy? 🚚`, undefined, activityRef.id, to);
+                }
+              } else if (objecionPago) {
+                await sendWhatsApp(from, `¡Tranqui, es súper seguro! 😊 Es *pago contra entrega*: el mensajero te lo lleva, *lo revisas*, y solo pagas si te gusta. Cero riesgo. 🙌`, undefined, activityRef.id, to);
+              } else {
+                const r = await responderDudaCheckout(String(checkoutData.producto || "tu producto"), String(finalMessage || ""));
+                await sendWhatsApp(from, r, undefined, activityRef.id, to);
+              }
+            } catch (e: any) {
+              console.error("[Checkout Duda] Error respondiendo (no crítico):", e?.message);
+            }
+            // Volvemos a pedir el dato actual, SIN guardar la pregunta como dato.
+            await new Promise(rr => setTimeout(rr, 700));
+            await resendCurrentCheckoutStepPrompt(from, to, customerData, activityRef.id);
             return res.status(200).send("");
           }
         }
