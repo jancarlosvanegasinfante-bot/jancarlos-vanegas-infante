@@ -5964,6 +5964,50 @@ _El inventario ya fue descontado automáticamente._`;
   await sendAdminAlert(message);
 }
 
+// ── Manejo de OBJECIONES / preguntas frecuentes durante el checkout ─────────
+// Cada entrada: patrón (sobre texto en minúsculas y SIN tildes) + respuesta.
+// El bot detecta la objeción, responde y sigue pidiendo el dato del pedido.
+// Ampliable: agrega más entradas aquí sin tocar nada más.
+const OBJECIONES_CHECKOUT: { re: RegExp; resp: string }[] = [
+  // — Confianza / seguridad / contraentrega —
+  { re: /revisar|abrir|destapar|antes de pagar|antes de recibir|ver el paquete|probar antes|checar antes|mirar antes/, resp: "¡Claro que sí! 😊 Es *pago contra entrega*: recibes el paquete, *lo revisas y lo pruebas*, y solo pagas si estás conforme. Cero riesgo. 🙌" },
+  { re: /estafa|es real|sera verdad|es verdad|engano|enganan|confiable|es seguro|me da miedo|desconfi|no confio|sera cierto|es cierto|robo|roban|fraude/, resp: "¡Súper seguro! 🔒 Es *contra entrega*: NO pagas NADA por adelantado. El mensajero te lo lleva, lo revisas, y pagas solo si te gusta. Es imposible que pierdas. 🙌" },
+  { re: /es original|es de marca|buena calidad|es de calidad|es bueno|es malo|de calidad|es fino|es corriente|es chino|sera bueno/, resp: "¡Sí! Es de *excelente calidad* ✅ y ya lo tienen miles de clientes felices ⭐. Y como es contra entrega, lo revisas ANTES de pagar. 🙌" },
+  { re: /garantia/, resp: "¡Tranquilo, tiene *garantía*! 🛡️ Si te llega con algún defecto, te lo cambiamos sin problema. Y recuerda: pagas solo al recibir y revisar. 😊" },
+  // — Envío / entrega —
+  { re: /envio gratis|cuanto.*envio|vale el envio|cobran envio|costo de envio|pago envio|el envio es|cuanto es el envio/, resp: "¡El *envío es GRATIS* a todo Colombia! 🇨🇴🚚 No pagas ni un peso de más." },
+  { re: /cuanto.*demora|cuando llega|tiempo de entrega|dias.*llegar|se demora|cuanto tarda|para cuando|en cuanto llega/, resp: "Llega en *1 a 3 días hábiles* 🚚 dependiendo de tu ciudad. ¡Rapidito!" },
+  { re: /envian a|hacen envios|llega a mi ciudad|a todo el pais|cobertura|mandan a|entregan en|llega a mi pueblo|zona rural|vereda/, resp: "¡Sí! Enviamos a *todo Colombia* 🇨🇴, a cualquier ciudad, municipio o vereda." },
+  // — Pago —
+  { re: /como.*paga|forma de pago|metodo de pago|con que pago|pago en efectivo|se paga al recibir|contra ?entrega/, resp: "El pago es *contra entrega en efectivo* 💵 — le pagas al mensajero cuando recibes tu pedido. Fácil y seguro. 😊" },
+  { re: /tarjeta|nequi|daviplata|transferencia|consignacion|bancolombia|pago anticipado|puedo pagar por/, resp: "El pago normal es *contra entrega en efectivo* 💵. Si prefieres pagar anticipado (Nequi/Daviplata) hasta te damos un *descuento* — pero no es obligatorio, tú eliges. 😊" },
+  // — Precio / plata —
+  { re: /descuento|mas barato|rebaja|precio especial|me lo dejas en|econom|muy caro|esta caro|costoso|mucha plata|vale mucho|bajale/, resp: "El precio ya trae *envío GRATIS incluido* y es contra entrega (pagas al recibir) 🙌 Por lo que ofrece, es una súper inversión. ¿Te lo aseguro antes de que se agote? 🔥" },
+  { re: /no tengo plata|sin plata|no tengo dinero|estoy sin plata|cuando me paguen|hasta la quincena|no me alcanza ahora|ando corto/, resp: "¡No hay lío! Como es *contra entrega*, no pagas ahora — pagas cuando te llegue (en 1-3 días) 😊 Así tienes tiempo. ¿Te lo despacho? 🚚" },
+  { re: /lo pienso|lo consulto|mas tarde|manana te digo|luego te digo|no por ahora|dejame pensar|despues te aviso|lo voy a pensar/, resp: "¡Tranquilo! 😊 Solo te cuento: quedan *pocas unidades* y el envío gratis es por tiempo limitado. Si quieres te lo *aparto sin compromiso* (pagas solo al recibir). ¿Te lo guardo? 🔥" },
+  // — Game Stick —
+  { re: /cuantos juegos|que juegos|trae.*juego|top gear|mario|sonic|nintendo|sega|playstation|gta|fifa|pes|clasico/, resp: "¡Trae *+10.000 juegos* clásicos! 🎮 Mario, Sonic, Contra, PlayStation, Nintendo y muchísimos más. ¡Horas de diversión para toda la familia!" },
+  { re: /cuantos controles|control.*incluye|mandos|palancas|joystick/, resp: "¡Incluye *2 controles inalámbricos*! 🎮 Listos para jugar en pareja o con la familia." },
+  { re: /sirve.*tv|cualquier tele|que tv|se conecta|hdmi|4k|resolucion|lo conecto/, resp: "Se conecta por *HDMI a cualquier TV* 📺 y tiene salida *4K*. Conectas y juegas al instante." },
+  { re: /necesita internet|requiere internet|wifi para jugar|con internet/, resp: "¡No necesita internet! 📴 Los juegos ya vienen incluidos, juegas sin conexión." },
+  // — Cargador Aromatizante —
+  { re: /sirve.*carro|cualquier carro|mi carro|12v|24v|camioneta|para moto|en la moto|enciende dor/, resp: "¡Sirve en *cualquier carro, camioneta o SUV* (12V-24V)! 🚗 Se conecta al encendedor del carro." },
+  { re: /cuantas esencias|esencias|aromas|olores|fragancia/, resp: "¡Incluye *3 esencias aromáticas de regalo*! 🌿 Para que lo estrenes el mismo día." },
+  { re: /cuantos dispositivos|cuantos carga|cargar al tiempo|varios celulares|carga rapida|watts|w de carga/, resp: "¡Carga *4 dispositivos a la vez* con carga rápida! 🔌 El tuyo y los de tus acompañantes, sin cables enredados." },
+  // — Tienda / ubicación —
+  { re: /donde estan|donde queda|tienda fisica|tienen local|direccion de.*tienda|son de que ciudad|donde los ubico|tienen tienda/, resp: "Somos una *tienda online* 🛍️ y enviamos a todo Colombia contra entrega. ¡Te llega a la puerta de tu casa, no tienes que ir a ningún lado! 🏠" },
+  // — Cambios / devoluciones —
+  { re: /si no me gusta|puedo devolver|devolucion|cambio de producto|no me sirve|cambiar por otro|talla|no me queda/, resp: "¡Tranquilo! Como es contra entrega, *si al revisarlo no te convence, no lo recibes y listo* 😊 Sin compromiso." },
+];
+
+function matchObjecionCheckout(cleanMsg: string): string | null {
+  const t = String(cleanMsg || "");
+  for (const o of OBJECIONES_CHECKOUT) {
+    if (o.re.test(t)) return o.resp;
+  }
+  return null;
+}
+
 // Responde una duda/objeción del cliente DURANTE el checkout: corto, cálido y
 // para cerrar. Usa IA si hay clave; si no, un mensaje de respaldo. Nunca lanza.
 async function responderDudaCheckout(productoNombre: string, pregunta: string): Promise<string> {
@@ -9523,9 +9567,9 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         // volvemos a pedir el dato, SIN guardar la pregunta como dato.)
         if (isDataStep) {
           const pideFoto = /\b(foto|fotos|imagen|imagenes|im[aá]genes|video|muestra|mu[eé]strame|ense[nñ]ame|ver el producto|como se ve|mas fotos)\b/i.test(cleanMsg) && !(numMedia > 0);
-          const objecionPago = /\b(revisar|abrir|destapar|ver el paquete|antes de pagar|antes de recibir|como pago|forma de pago|contra ?entrega|contraentrega|es seguro|es confiable|estafa|es real|es original|garant[ií]a|de buena calidad)\b/i.test(cleanMsg);
+          const objResp = matchObjecionCheckout(cleanMsg);
           const otraPregunta = /\?/.test(String(finalMessage || "")) || /\b(puedo|se puede|me puede|me puedes|trae|traes|incluye|viene con|cuanto vale|cuanto cuesta|que precio|sirve para|para que sirve|de que color|que color|tienen mas|hay mas|es nuevo)\b/i.test(cleanMsg);
-          if (pideFoto || objecionPago || otraPregunta) {
+          if (pideFoto || objResp || otraPregunta) {
             try {
               if (pideFoto) {
                 const productos = await loadProductsForStore(assignedStoreId);
@@ -9537,8 +9581,8 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
                 } else {
                   await sendWhatsApp(from, `¡Claro! 📸 Es un excelente producto. ¿Seguimos con tu pedido para despachártelo hoy? 🚚`, undefined, activityRef.id, to);
                 }
-              } else if (objecionPago) {
-                await sendWhatsApp(from, `¡Tranqui, es súper seguro! 😊 Es *pago contra entrega*: el mensajero te lo lleva, *lo revisas*, y solo pagas si te gusta. Cero riesgo. 🙌`, undefined, activityRef.id, to);
+              } else if (objResp) {
+                await sendWhatsApp(from, objResp, undefined, activityRef.id, to);
               } else {
                 const r = await responderDudaCheckout(String(checkoutData.producto || "tu producto"), String(finalMessage || ""));
                 await sendWhatsApp(from, r, undefined, activityRef.id, to);
