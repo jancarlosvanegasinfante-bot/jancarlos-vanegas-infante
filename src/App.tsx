@@ -1697,6 +1697,54 @@ function ReportsTab({
     }
   };
 
+  // 📢 Reactivación con template pre-aprobado — para clientes fuera de la
+  // ventana de 24h. El server crea el template y lo somete a Meta al bootear.
+  // Meta tarda 1-24h en aprobarlo; consultamos el estado bajo demanda.
+  const [reactStatus, setReactStatus] = useState<{ exists: boolean; approvalStatus?: string | null; rejectionReason?: string | null } | null>(null);
+  const [sendingReact, setSendingReact] = useState(false);
+
+  const cargarEstadoReactivacion = async () => {
+    try {
+      const r = await fetch("/api/admin/reactivation-status", { headers: { ...adminAuthHeaders() } });
+      const data = await r.json();
+      if (data?.success) setReactStatus({ exists: !!data.exists, approvalStatus: data.approvalStatus, rejectionReason: data.rejectionReason });
+    } catch { /* noop */ }
+  };
+
+  const enviarReactivacion = async () => {
+    if (sendingReact || !selectedUser) return;
+    const nombreCliente = (activeUserConv?.customerName || "").toString().split(" ")[0] || "amig@";
+    const nombre = window.prompt("Nombre del cliente (primer nombre, ej: 'Daniel'):", nombreCliente);
+    if (nombre === null) return;
+    const producto = window.prompt("Producto por el que preguntó (ej: 'Game Stick Retro M8'):", "");
+    if (producto === null) return;
+    setSendingReact(true);
+    try {
+      const r = await fetch("/api/admin/send-reactivation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...adminAuthHeaders() },
+        body: JSON.stringify({ phone: selectedUser, nombre: nombre.trim(), producto: producto.trim() })
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.success) {
+        alert(`❌ No se pudo enviar: ${data?.error || "error desconocido"}${data?.code ? ` (code ${data.code})` : ""}`);
+      } else {
+        alert(`✅ Plantilla de reactivación enviada.\nEstado: ${data.status || "sent"}\nSID: ${data.sid}`);
+      }
+    } catch (e: any) {
+      alert(`❌ Error de red: ${e?.message || "desconocido"}`);
+    } finally {
+      setSendingReact(false);
+    }
+  };
+
+  // Cargamos el estado del template al montar el componente para tenerlo listo
+  // cuando aparezca el banner de "fuera de ventana".
+  useEffect(() => {
+    cargarEstadoReactivacion();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // 📜 Historial completo del cliente que tienes abierto ahora mismo. El
   // listener global de "activities" trae solo los últimos 200 mensajes de
   // TODOS los clientes juntos (para que el panel no se sature), así que un
@@ -2628,6 +2676,36 @@ function ReportsTab({
                       {windowStatus.hasCustomerMsg
                         ? <>El cliente no escribe hace <strong>{Math.floor(windowStatus.hoursSince)} h</strong>. WhatsApp <strong>bloquea</strong> los mensajes libres — Twilio dirá "enviado" pero <strong>no llegará</strong>. Usa un <strong>template pre-aprobado</strong> para reactivar.</>
                         : <>Este cliente <strong>nunca ha escrito</strong> al bot. WhatsApp solo permite mandarle un <strong>template pre-aprobado</strong>.</>}
+                    </div>
+                    {/* Estado del template + botón para enviar reactivación */}
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={enviarReactivacion}
+                        disabled={sendingReact || !reactStatus?.exists || reactStatus?.approvalStatus !== 'approved'}
+                        className="text-[10px] font-black uppercase tracking-tighter bg-red-600 hover:bg-red-500 text-white px-3 py-1.5 rounded-md transition-all disabled:bg-neutral-800 disabled:text-neutral-500 disabled:cursor-not-allowed flex items-center gap-1.5"
+                        title={
+                          !reactStatus?.exists ? "Aún se está creando el template en Twilio — espera al próximo boot"
+                          : reactStatus?.approvalStatus === 'approved' ? "Envía la plantilla pre-aprobada — funciona fuera de la ventana de 24h"
+                          : `El template está en estado: ${reactStatus?.approvalStatus || 'desconocido'} — no se puede enviar hasta que Meta lo apruebe`
+                        }
+                      >
+                        {sendingReact ? <RefreshCw size={10} className="animate-spin" /> : "📢"}
+                        {sendingReact ? "Enviando..." : "Enviar plantilla de reactivación"}
+                      </button>
+                      <span className="text-[9px] font-mono uppercase text-neutral-400">
+                        {!reactStatus ? "cargando..."
+                          : !reactStatus.exists ? "⏳ template aún no creado"
+                          : reactStatus.approvalStatus === 'approved' ? "✅ aprobado por Meta"
+                          : reactStatus.approvalStatus === 'pending' || reactStatus.approvalStatus === 'received' ? "⏳ pendiente de aprobación de Meta (1-24h)"
+                          : reactStatus.approvalStatus === 'rejected' ? `❌ rechazado${reactStatus.rejectionReason ? ': ' + reactStatus.rejectionReason : ''}`
+                          : `estado: ${reactStatus.approvalStatus || 'desconocido'}`}
+                      </span>
+                      <button
+                        onClick={cargarEstadoReactivacion}
+                        className="text-[9px] text-neutral-500 hover:text-white uppercase font-bold underline"
+                      >
+                        (refrescar)
+                      </button>
                     </div>
                   </div>
                 </div>

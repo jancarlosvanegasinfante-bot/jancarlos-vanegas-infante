@@ -2699,6 +2699,63 @@ async function ensureOrderConfirmationTemplate(): Promise<string | null> {
 }
 
 // ==============================================
+// 📢 TEMPLATE DE REACTIVACIÓN (para clientes FUERA de la ventana de 24h)
+// ==============================================
+// Cuando un cliente lleva más de 24h sin escribir, WhatsApp BLOQUEA cualquier
+// mensaje de texto libre. Solo pasan templates pre-aprobados por Meta. Esta
+// función se ejecuta al bootear: si aún no existe, crea el template y lo
+// somete a aprobación de WhatsApp con categoría MARKETING. Una vez aprobado
+// (Meta responde en 1 a 24h), queda disponible para enviárselo a cualquier
+// cliente frío desde el panel.
+const REACTIVATION_TEMPLATE_NAME = "jansel_reactivacion_v1";
+async function ensureReactivationTemplate(): Promise<string | null> {
+  if (!twilioClient) return null;
+  try {
+    const cfgSnap = await getDoc(doc(db, "config", "system"));
+    const existingSid = cfgSnap.exists() ? cfgSnap.data()?.reactivationTemplateSid : null;
+    if (existingSid) {
+      console.log(`[Reactivación] Usando template existente: ${existingSid}`);
+      return existingSid;
+    }
+
+    console.log("[Reactivación] Creando template nuevo de reactivación...");
+    const content = await (twilioClient as any).content.v1.contents.create({
+      friendlyName: `${REACTIVATION_TEMPLATE_NAME}_${Date.now()}`,
+      language: "es",
+      variables: { "1": "Jan", "2": "Modulador Cargador Aromatizante 4 en 1" },
+      types: {
+        "twilio/text": {
+          body: "¡Hola {{1}}! 👋 Notamos que quedaste pendiente con tu pedido de {{2}} en Jansel Shop. Todavía lo tenemos disponible con envío GRATIS y pago contra entrega (revisas antes de pagar, cero riesgo). ¿Te lo despachamos hoy? 🚚"
+        }
+      }
+    });
+    console.log(`[Reactivación] Template creado: ${content.sid}. Enviando a aprobación WhatsApp (MARKETING)...`);
+
+    // Sometemos a aprobación de WhatsApp. Meta responde en 1-24 horas. El SID
+    // ya queda guardado; el approval status se puede consultar aparte.
+    try {
+      await (twilioClient as any).content.v1.contents(content.sid).approvalCreate.create({
+        name: REACTIVATION_TEMPLATE_NAME,
+        category: "MARKETING"
+      });
+      console.log(`[Reactivación] Sometido a aprobación WhatsApp con name="${REACTIVATION_TEMPLATE_NAME}", category=MARKETING.`);
+    } catch (approvalErr: any) {
+      console.warn("[Reactivación] No se pudo someter a aprobación (se puede reintentar manualmente):", approvalErr.message);
+    }
+
+    await setDoc(doc(db, "config", "system"), {
+      reactivationTemplateSid: content.sid,
+      reactivationTemplateName: REACTIVATION_TEMPLATE_NAME,
+      reactivationSubmittedAt: new Date().toISOString()
+    }, { merge: true });
+    return content.sid;
+  } catch (e: any) {
+    console.error("[Reactivación] No se pudo crear/someter el template:", e.message);
+    return null;
+  }
+}
+
+// ==============================================
 // 🔘 BOTONES DE INTERÉS SOBRE PRODUCTO IDENTIFICADO POR IMAGEN
 // ==============================================
 // Cuando el cliente envía una FOTO y logramos identificar un producto real del
@@ -6074,6 +6131,13 @@ async function startServer() {
     console.warn("[WhatsApp Buttons] No se pudo pre-provisionar el template al arrancar:", e.message)
   );
 
+  // Auto-provisionar el template de REACTIVACIÓN para clientes fuera de la
+  // ventana de 24h. Meta lo aprueba en 1-24h; el SID queda guardado desde el
+  // primer boot para poder consultar el approval status más tarde.
+  ensureReactivationTemplate().catch(e =>
+    console.warn("[Reactivación] No se pudo pre-provisionar el template al arrancar:", e.message)
+  );
+
   app.use(express.urlencoded({ extended: true }));
   app.use(express.json({ limit: '10mb' }));
 
@@ -6573,6 +6637,92 @@ DEVUELVE EXACTAMENTE UN JSON válido con este shape (sin markdown, sin texto ext
     } catch (e: any) {
       console.error("[Sugerir Respuesta Error]", e);
       res.status(500).json({ success: false, error: e?.message || "error" });
+    }
+  });
+
+  // 📢 Estado del template de reactivación (para saber si ya lo aprobó Meta y
+  // habilitar el botón en el panel).
+  app.get("/api/admin/reactivation-status", async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) {
+      return res.status(401).json({ success: false, error: "No autorizado" });
+    }
+    try {
+      const cfgSnap = await getDoc(doc(db, "config", "system"));
+      const sid = cfgSnap.exists() ? cfgSnap.data()?.reactivationTemplateSid : null;
+      const name = cfgSnap.exists() ? cfgSnap.data()?.reactivationTemplateName : null;
+      const submittedAt = cfgSnap.exists() ? cfgSnap.data()?.reactivationSubmittedAt : null;
+      if (!sid) return res.json({ success: true, exists: false });
+      let approvalStatus: string | null = null;
+      let rejectionReason: string | null = null;
+      try {
+        const approval = await (twilioClient as any).content.v1.contents(sid).approvalFetch().fetch();
+        const wa = approval?.whatsapp || approval?.approvals?.whatsapp;
+        approvalStatus = wa?.status || null;
+        rejectionReason = wa?.rejection_reason || wa?.rejectionReason || null;
+      } catch (fetchErr: any) {
+        console.warn("[Reactivación] No se pudo consultar approval status:", fetchErr?.message);
+      }
+      return res.json({ success: true, exists: true, sid, name, submittedAt, approvalStatus, rejectionReason });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e?.message || "error" });
+    }
+  });
+
+  // 📢 Enviar el template de reactivación a un cliente (funciona AUNQUE esté
+  // fuera de la ventana de 24h, siempre que Meta ya lo haya aprobado).
+  app.post("/api/admin/send-reactivation", express.json(), async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) {
+      return res.status(401).json({ success: false, error: "No autorizado" });
+    }
+    try {
+      const { phone, nombre, producto } = req.body || {};
+      if (!phone) return res.status(400).json({ success: false, error: "Falta phone" });
+      const cleanPhone = String(phone).replace("whatsapp:", "").replace(/^\+/, "").trim();
+      const formatted = `whatsapp:+${cleanPhone}`;
+      const nombreFinal = String(nombre || "").trim().slice(0, 40) || "amig@";
+      const productoFinal = String(producto || "").trim().slice(0, 60) || "tu pedido";
+
+      const cfgSnap = await getDoc(doc(db, "config", "system"));
+      const sid = cfgSnap.exists() ? cfgSnap.data()?.reactivationTemplateSid : null;
+      if (!sid) return res.status(400).json({ success: false, error: "Template no provisionado aún — reinicia el server o espera al próximo boot" });
+
+      const botNumber = TWILIO_FROM_NUMBER || "whatsapp:+14155238886";
+      const from = botNumber.startsWith("whatsapp:") ? botNumber : `whatsapp:${botNumber}`;
+      const assignedStoreId = await determineStoreId(cleanPhone, "").catch(() => "default");
+
+      // Registramos activity ANTES para capturar el statusCallback con el activityId
+      const bodyPreview = `¡Hola ${nombreFinal}! 👋 Notamos que quedaste pendiente con tu pedido de ${productoFinal}...`;
+      const actRef = await addDoc(collection(db, "activities"), {
+        from: formatted, to: from, recipient: formatted,
+        customerPhone: cleanPhone, storeId: assignedStoreId,
+        message: "[Reactivación]", response: bodyPreview,
+        status: "respondido", whatsappStatus: "sent",
+        senderType: "bot", manualAgent: "Reactivación",
+        timestamp: serverTimestamp(), receivedAt: serverTimestamp()
+      });
+
+      // Enviamos el template con las 2 variables
+      try {
+        const railwayHost = process.env.RAILWAY_PUBLIC_DOMAIN
+          ? `https://${String(process.env.RAILWAY_PUBLIC_DOMAIN).replace(/^https?:\/\//, "")}`
+          : "";
+        const appUrl = currentAppUrl || process.env.APP_URL || railwayHost || "https://chatbotjanadsia.up.railway.app";
+        const msg = await twilioClient!.messages.create({
+          from, to: formatted,
+          contentSid: sid,
+          contentVariables: JSON.stringify({ "1": nombreFinal, "2": productoFinal }),
+          statusCallback: `${appUrl.replace(/\/$/, "")}/api/webhook/whatsapp/status?activityId=${actRef.id}`
+        } as any);
+        console.log(`[Reactivación] Enviado a ${cleanPhone} (SID=${msg.sid}, status=${msg.status})`);
+        return res.json({ success: true, sid: msg.sid, status: msg.status, activityId: actRef.id });
+      } catch (sendErr: any) {
+        console.error("[Reactivación] Error al enviar:", sendErr?.message);
+        // Actualizamos la activity a failed para reflejarlo en el panel
+        try { await updateDoc(doc(db, "activities", actRef.id), { whatsappStatus: "failed", statusUpdateAt: serverTimestamp() }); } catch { /* noop */ }
+        return res.status(500).json({ success: false, error: sendErr?.message || "error al enviar", code: sendErr?.code });
+      }
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e?.message || "error" });
     }
   });
 
