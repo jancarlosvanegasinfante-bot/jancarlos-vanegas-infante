@@ -1663,6 +1663,40 @@ function ReportsTab({
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const lastSelectedUserRef = useRef<string | null>(null);
 
+  // 💡 Sugerencias de respuesta con IA experta en cierre (gatillos + sesgos).
+  // Aparecen como chips debajo de los atajos rápidos. Click en una = se pega en
+  // el composer para que revises/edites antes de enviar (no envía sola).
+  const [sugerencias, setSugerencias] = useState<Array<{ titulo: string; texto: string }>>([]);
+  const [loadingSug, setLoadingSug] = useState(false);
+  const [sugError, setSugError] = useState<string | null>(null);
+
+  const pedirSugerenciasIA = async () => {
+    if (loadingSug) return;
+    const phone = selectedUser || null;
+    if (!phone) return;
+    setLoadingSug(true);
+    setSugError(null);
+    try {
+      const r = await fetch("/api/admin/sugerir-respuesta", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...adminAuthHeaders() },
+        body: JSON.stringify({ phone })
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.success) {
+        setSugError(data?.error || "No se pudieron generar sugerencias");
+        setSugerencias([]);
+      } else {
+        setSugerencias(Array.isArray(data.sugerencias) ? data.sugerencias : []);
+      }
+    } catch (e: any) {
+      setSugError(e?.message || "Error de red");
+      setSugerencias([]);
+    } finally {
+      setLoadingSug(false);
+    }
+  };
+
   // 📜 Historial completo del cliente que tienes abierto ahora mismo. El
   // listener global de "activities" trae solo los últimos 200 mensajes de
   // TODOS los clientes juntos (para que el panel no se sature), así que un
@@ -2325,13 +2359,57 @@ function ReportsTab({
                   >
                     <AlertTriangle size={8} className="text-orange-500" /> {userStore?.btnQuick2Label || "Cierre"}
                   </button>
-                  <button 
-                    onClick={() => sendManualMessage(userStore?.btnQuick3Message || "¡Buenas! El repartidor ya está cargando el camión VIP. Si transfiere ahorita, su pedido sale de primero. ¿Hacemos el negocio ya para que le llegue mañana?")} 
+                  <button
+                    onClick={() => sendManualMessage(userStore?.btnQuick3Message || "¡Buenas! El repartidor ya está cargando el camión VIP. Si transfiere ahorita, su pedido sale de primero. ¿Hacemos el negocio ya para que le llegue mañana?")}
                     className="whitespace-nowrap text-[7px] font-black uppercase tracking-tighter bg-neutral-900 border border-neutral-800 px-3 py-1 rounded-md hover:border-dark-accent transition-all flex items-center gap-1.5 grow-0 shrink-0"
                   >
                     <Truck size={8} className="text-blue-500" /> {userStore?.btnQuick3Label || "Prioridad"}
                   </button>
+                  <button
+                    onClick={pedirSugerenciasIA}
+                    disabled={loadingSug || !selectedUser}
+                    className="whitespace-nowrap text-[7px] font-black uppercase tracking-tighter bg-gradient-to-r from-dark-accent/20 to-purple-500/20 border border-dark-accent/50 text-dark-accent px-3 py-1 rounded-md hover:border-dark-accent transition-all flex items-center gap-1.5 grow-0 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Sugiere 3 respuestas expertas usando gatillos mentales y sesgos cognitivos, según el estado de la conversación."
+                  >
+                    {loadingSug ? <RefreshCw size={8} className="animate-spin" /> : <Cpu size={8} />}
+                    {loadingSug ? "Pensando..." : "💡 Sugerir con IA"}
+                  </button>
                 </div>
+
+                {/* 💡 Panel de sugerencias IA — click en una y se pega al composer */}
+                {(sugerencias.length > 0 || sugError) && (
+                  <div className="px-4 py-2 border-b border-neutral-800 bg-gradient-to-r from-black/60 to-dark-accent/5">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-[7px] font-black uppercase tracking-widest text-dark-accent">
+                        💡 Sugerencias del vendedor experto (click para editar y enviar)
+                      </span>
+                      <button
+                        onClick={() => { setSugerencias([]); setSugError(null); }}
+                        className="text-[8px] text-neutral-500 hover:text-white uppercase font-bold"
+                      >
+                        ✕ Cerrar
+                      </button>
+                    </div>
+                    {sugError && (
+                      <p className="text-[9px] text-red-400 font-mono">{sugError}</p>
+                    )}
+                    <div className="flex flex-col gap-1.5">
+                      {sugerencias.map((s, i) => (
+                        <button
+                          key={i}
+                          type="button"
+                          onClick={() => { setHumanMessage(s.texto); setSugerencias([]); }}
+                          className="text-left bg-neutral-900/70 hover:bg-neutral-800 border border-neutral-800 hover:border-dark-accent transition-all rounded-lg p-2.5"
+                        >
+                          <div className="text-[7px] font-black uppercase tracking-widest text-dark-accent mb-0.5">
+                            {i + 1}. {s.titulo}
+                          </div>
+                          <div className="text-[11px] text-neutral-200 leading-snug">{s.texto}</div>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
             {/* Messages Area */}
             <div ref={messagesContainerRef} className="flex-1 overflow-y-auto p-4 lg:p-8 flex flex-col gap-6 custom-scrollbar">

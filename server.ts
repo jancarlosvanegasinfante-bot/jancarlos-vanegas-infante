@@ -6440,6 +6440,128 @@ async function startServer() {
     }
   });
 
+  // 💡 Sugerir respuestas al asesor con IA experta en cierre (gatillos + sesgos).
+  // Aditivo, no toca el flujo del bot. Devuelve hasta 3 opciones cortas, cada una con
+  // un enfoque distinto, listas para pegar en el composer y editar antes de enviar.
+  app.post("/api/admin/sugerir-respuesta", express.json(), async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) {
+      return res.status(401).json({ success: false, error: "No autorizado" });
+    }
+    try {
+      const { phone } = req.body || {};
+      if (!phone) return res.status(400).json({ success: false, error: "Falta phone" });
+      const cleanPhone = String(phone).replace("whatsapp:", "").replace(/^\+/, "").trim();
+      const formatted = `whatsapp:+${cleanPhone}`;
+
+      // 1) Historial reciente — buscamos por variantes del "from" para no perder
+      //    mensajes por diferencias de formato (con/sin whatsapp:, con/sin +).
+      const variants = Array.from(new Set([
+        formatted, `whatsapp:${cleanPhone}`, `+${cleanPhone}`, cleanPhone
+      ]));
+      const seen = new Set<string>();
+      const acts: any[] = [];
+      for (const v of variants) {
+        try {
+          const q1 = query(collection(db, "activities"), where("from", "==", v), orderBy("timestamp", "desc"), limit(15));
+          const s1 = await getDocs(q1);
+          s1.docs.forEach(d => { if (!seen.has(d.id)) { seen.add(d.id); acts.push(d.data()); } });
+        } catch { /* noop */ }
+      }
+      try {
+        const q2 = query(collection(db, "activities"), where("customerPhone", "==", cleanPhone), orderBy("timestamp", "desc"), limit(15));
+        const s2 = await getDocs(q2);
+        s2.docs.forEach(d => { if (!seen.has(d.id)) { seen.add(d.id); acts.push(d.data()); } });
+      } catch { /* noop */ }
+
+      acts.sort((a, b) => {
+        const ta = new Date((a.timestamp?.toDate?.() || a.timestamp || a.receivedAt || 0) as any).getTime();
+        const tb = new Date((b.timestamp?.toDate?.() || b.timestamp || b.receivedAt || 0) as any).getTime();
+        return ta - tb;
+      });
+      const recent = acts.slice(-15);
+
+      const lines: string[] = [];
+      for (const m of recent) {
+        const isBot = m.senderType === "bot" || m.senderType === "admin" || m.senderType === "agent" || !!m.manualAgent;
+        const clientMsg = String(m.message || "").trim();
+        const botMsg = String(m.response || "").trim();
+        if (!isBot && clientMsg && !clientMsg.startsWith("📱")) lines.push(`CLIENTE: ${clientMsg}`);
+        if (botMsg) lines.push(`ASESOR: ${botMsg}`);
+        if (isBot && clientMsg && clientMsg !== "[Asesor Humano]" && !botMsg) lines.push(`ASESOR: ${clientMsg}`);
+      }
+      const transcript = lines.join("\n") || "(sin mensajes previos)";
+
+      // 2) Contexto de producto / paso del checkout
+      let ctxProducto = "";
+      try {
+        const profile = await getCustomerProfile(cleanPhone);
+        const cd = profile?.checkoutData || {};
+        if (cd.producto) ctxProducto += `\nProducto en checkout: ${cd.producto}. Paso: ${cd.step || "?"}.`;
+        if (profile?.pendingManualOffer) {
+          ctxProducto += `\nOferta pendiente del asesor: ${profile.pendingManualOffer.producto} @ ${profile.pendingManualOffer.valor}.`;
+        }
+      } catch { /* noop */ }
+
+      // 3) Prompt de experto en cierre — gatillos mentales + sesgos cognitivos
+      const system = `Eres el MEJOR vendedor de Jansel Shop en Colombia (dropshipping, pago contraentrega, envío GRATIS). Cierras ventas por WhatsApp usando GATILLOS MENTALES y SESGOS COGNITIVOS aplicados con naturalidad, sin sonar robótico.
+Gatillos que dominas: ESCASEZ (último del lote), URGENCIA (hoy sale despacho), PRUEBA SOCIAL (clientes esta semana), RECIPROCIDAD (detalle/beneficio), AUTORIDAD (asesor certificado), COMPROMISO (retomar lo que ya dijo), AVERSIÓN A LA PÉRDIDA (no lo pierdas), ANCLAJE de precio, CONTRASTE (normal vs VIP).
+Reglas: (1) tono cálido colombiano, tuteo o "usted" según el cliente; (2) SIEMPRE recuerda que es contraentrega, revisa antes de pagar, cero riesgo; (3) NUNCA inventes datos que no estén en la conversación; (4) NADA de menús ni listas de botones; (5) máximo 45 palabras por sugerencia; (6) siempre llevar al siguiente paso (el dato pendiente o el cierre); (7) emojis con moderación 🙌😊🚚⏰.
+DEVUELVE EXACTAMENTE UN JSON válido con este shape (sin markdown, sin texto extra, sin backticks):
+{"sugerencias":[{"titulo":"Empatía","texto":"..."},{"titulo":"Cierre directo","texto":"..."},{"titulo":"Urgencia + escasez","texto":"..."}]}`;
+      const prompt = `Historial de la conversación (más reciente al final):\n---\n${transcript}\n---${ctxProducto}\n\nGenera 3 sugerencias de respuesta para retomar y cerrar la venta. Cada una con enfoque distinto según su título.`;
+
+      const apiKey = process.env.OPENROUTER_API_KEY || process.env.GEMINI_API_KEY;
+      let raw = "";
+      if (apiKey) {
+        try {
+          if (process.env.OPENROUTER_API_KEY) {
+            const r = await axios.post("https://openrouter.ai/api/v1/chat/completions", {
+              model: "google/gemini-2.5-flash",
+              messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+              temperature: 0.8, max_tokens: 700,
+            }, { headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY}`, "Content-Type": "application/json" }, timeout: 15000 });
+            raw = r.data?.choices?.[0]?.message?.content || "";
+          } else if (process.env.GEMINI_API_KEY) {
+            const r = await axios.post(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
+              contents: [{ role: "user", parts: [{ text: `${system}\n\n${prompt}` }] }],
+              generationConfig: { temperature: 0.8 },
+            }, { headers: { "Content-Type": "application/json" }, timeout: 15000 });
+            raw = r.data?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+          }
+        } catch (e: any) {
+          console.warn("[Sugerir Respuesta] IA falló:", e?.message);
+        }
+      }
+
+      let sugerencias: Array<{ titulo: string; texto: string }> = [];
+      try {
+        const m = raw.match(/\{[\s\S]*\}/);
+        if (m) {
+          const parsed = JSON.parse(m[0]);
+          if (Array.isArray(parsed?.sugerencias)) {
+            sugerencias = parsed.sugerencias
+              .filter((s: any) => s && typeof s.texto === "string" && s.texto.trim())
+              .slice(0, 3)
+              .map((s: any) => ({ titulo: String(s.titulo || "Sugerencia").slice(0, 40), texto: String(s.texto).trim() }));
+          }
+        }
+      } catch { /* noop */ }
+
+      if (!sugerencias.length) {
+        sugerencias = [
+          { titulo: "Empatía", texto: "¡Rey! ¿Todo bien por acá? Recuerda que es pago contraentrega — usted recibe, revisa y solo paga si le gusta. Cero riesgo. ¿Le confirmo el pedido? 🙌" },
+          { titulo: "Cierre directo", texto: "¡Patrón! Le separo el suyo antes de que se agote. Solo me falta el dato pendiente y sale despachado hoy mismo. 🚚" },
+          { titulo: "Urgencia + escasez", texto: "¡Buenas! Quedan poquitas unidades para el despacho de mañana. Si me confirma en los próximos minutos, aseguro el suyo. ¿Cerramos? ⏰" }
+        ];
+      }
+
+      res.json({ success: true, sugerencias });
+    } catch (e: any) {
+      console.error("[Sugerir Respuesta Error]", e);
+      res.status(500).json({ success: false, error: e?.message || "error" });
+    }
+  });
+
   app.post("/api/admin/bulk-notify", async (req, res) => {
     if (!isAdminRequestAuthorized(req)) {
       return res.status(401).json({ success: false, error: "No autorizado" });
