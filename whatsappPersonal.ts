@@ -372,6 +372,60 @@ export function getPersonalWaStatus(): WaStatus {
   return { ...status };
 }
 
+// ✍️ Enviar un mensaje libre desde el WhatsApp Personal (Baileys).
+// Fuera de la ventana de 24h de WhatsApp Business, esta es la única forma
+// de escribirle "HOLA" o cualquier texto libre a un cliente. Riesgo:
+// WhatsApp puede banear el número si detecta patrón de spam, así que
+// aplicamos un rate-limit prudente: máx 15 mensajes/hora, máx 30/día por
+// número destino distinto (evita spamear al mismo cliente).
+const sentTimestamps: number[] = [];      // últimos envíos globales (para /hora)
+const sentPerRecipient = new Map<string, number[]>(); // por destinatario (para /día)
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+const MAX_PER_HOUR = 15;
+const MAX_PER_RECIPIENT_PER_DAY = 30;
+
+function pruneOld() {
+  const cutoffHour = Date.now() - HOUR;
+  while (sentTimestamps.length && sentTimestamps[0] < cutoffHour) sentTimestamps.shift();
+}
+
+export async function enviarPersonalWhatsApp(phone: string, mensaje: string): Promise<{ ok: boolean; error?: string }> {
+  if (!sock || !status.connected) {
+    return { ok: false, error: "WhatsApp Personal no está conectado. Escanea el QR primero." };
+  }
+  const clean = String(phone || "").replace(/[^\d]/g, "");
+  if (!clean || clean.length < 10) return { ok: false, error: "Número inválido" };
+  const texto = String(mensaje || "").trim();
+  if (!texto) return { ok: false, error: "Mensaje vacío" };
+  if (texto.length > 4000) return { ok: false, error: "Mensaje muy largo (máx 4000 chars)" };
+
+  // Rate limit global por hora
+  pruneOld();
+  if (sentTimestamps.length >= MAX_PER_HOUR) {
+    return { ok: false, error: `Rate limit: máx ${MAX_PER_HOUR} envíos por hora desde WA Personal (para evitar ban). Espera un rato.` };
+  }
+  // Rate limit por destinatario/día
+  const now = Date.now();
+  const history = sentPerRecipient.get(clean) || [];
+  const recent = history.filter(t => t > now - DAY);
+  if (recent.length >= MAX_PER_RECIPIENT_PER_DAY) {
+    return { ok: false, error: `Rate limit: ya se enviaron ${MAX_PER_RECIPIENT_PER_DAY} mensajes a este número en 24h.` };
+  }
+
+  const jid = `${clean}@s.whatsapp.net`;
+  try {
+    await sock.sendMessage(jid, { text: texto });
+    sentTimestamps.push(now);
+    sentPerRecipient.set(clean, [...recent, now]);
+    console.log(`[WA Personal] ✍️ Enviado libre a ${clean} (${texto.length} chars)`);
+    return { ok: true };
+  } catch (e: any) {
+    console.error("[WA Personal] Error al enviar:", e?.message);
+    return { ok: false, error: e?.message || "Error desconocido al enviar por Baileys" };
+  }
+}
+
 export async function logoutPersonalWa(): Promise<void> {
   try { if (sock) await sock.logout().catch(() => {}); } catch {}
   try { const clearAll = (startPersonalWhatsApp as any)._clearAll; if (clearAll) await clearAll(); } catch {}

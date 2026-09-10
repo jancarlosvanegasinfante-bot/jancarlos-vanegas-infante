@@ -16,7 +16,7 @@ import crypto from "crypto";
 // Módulo AISLADO de WhatsApp personal (Baileys). Import seguro: su tope solo usa
 // axios/supabase/qrcode (ya presentes); Baileys se carga con import() dinámico
 // dentro de start(), así que esto NO puede romper el arranque del server.
-import { startPersonalWhatsApp, getPersonalWaStatus, logoutPersonalWa } from "./whatsappPersonal.js";
+import { startPersonalWhatsApp, getPersonalWaStatus, logoutPersonalWa, enviarPersonalWhatsApp } from "./whatsappPersonal.js";
 
 // 1. Initialize Supabase / Local JSON File Storage
 const cwd = process.cwd();
@@ -2752,6 +2752,78 @@ async function ensureReactivationTemplate(): Promise<string | null> {
   } catch (e: any) {
     console.error("[Reactivación] No se pudo crear/someter el template:", e.message);
     return null;
+  }
+}
+
+// 📢 Otros templates útiles para reactivar clientes fríos (además del
+// jansel_reactivacion_v1 principal). Se someten a Meta al bootear; cuando los
+// apruebe (1-24h), quedan disponibles para elegir desde el panel.
+const EXTRA_REACTIVATION_TEMPLATES: Array<{
+  key: string; // clave interna
+  name: string; // nombre único global (para Meta)
+  body: string; // body con {{1}} nombre y {{2}} producto/contexto
+  category: "MARKETING" | "UTILITY";
+}> = [
+  {
+    key: "saludo",
+    name: "jansel_saludo_v1",
+    body: "¡Hola {{1}}! 👋 Un gusto saludarte desde Jansel Shop. ¿Todavía te interesa el {{2}} que estabas viendo? Recuerda: envío GRATIS y pago contra entrega. 🙌",
+    category: "MARKETING"
+  },
+  {
+    key: "oferta",
+    name: "jansel_oferta_v1",
+    body: "🔥 ¡{{1}}! Hoy tenemos precio especial en el {{2}}. Envío gratis contra entrega (revisas antes de pagar). ¿Te lo aparto antes de que se acabe?",
+    category: "MARKETING"
+  },
+  {
+    key: "seguimiento",
+    name: "jansel_seguimiento_v1",
+    body: "Hola {{1}}, ¿todo bien con tu pedido de {{2}}? Cualquier duda estoy aquí para ayudarte. 🙌",
+    category: "UTILITY"
+  },
+  {
+    key: "disculpa",
+    name: "jansel_disculpa_v1",
+    body: "¡Hola {{1}}! 🙏 Disculpa la demora en responderte. Ya estamos atendiéndote. ¿Sigue en pie tu interés en el {{2}}? Envío gratis contra entrega.",
+    category: "UTILITY"
+  }
+];
+
+async function ensureExtraReactivationTemplates(): Promise<void> {
+  if (!twilioClient) return;
+  const cfgSnap = await getDoc(doc(db, "config", "system"));
+  const existing = (cfgSnap.exists() ? cfgSnap.data()?.extraTemplates : null) || {};
+
+  for (const t of EXTRA_REACTIVATION_TEMPLATES) {
+    if (existing[t.key]?.sid) {
+      continue; // ya existe, no lo recreamos
+    }
+    try {
+      console.log(`[Templates Extra] Creando "${t.name}"...`);
+      const content = await (twilioClient as any).content.v1.contents.create({
+        friendlyName: `${t.name}_${Date.now()}`,
+        language: "es",
+        variables: { "1": "Jan", "2": "Cargador Aromatizante 4 en 1" },
+        types: { "twilio/text": { body: t.body } }
+      });
+      try {
+        await (twilioClient as any).content.v1.contents(content.sid).approvalCreate.create({
+          name: t.name, category: t.category
+        });
+        console.log(`[Templates Extra] "${t.name}" (${content.sid}) sometido a Meta (${t.category}).`);
+      } catch (approvalErr: any) {
+        console.warn(`[Templates Extra] No se pudo someter "${t.name}":`, approvalErr?.message);
+      }
+      existing[t.key] = { sid: content.sid, name: t.name, category: t.category, submittedAt: new Date().toISOString() };
+    } catch (createErr: any) {
+      console.error(`[Templates Extra] No se pudo crear "${t.name}":`, createErr?.message);
+    }
+  }
+  try {
+    await setDoc(doc(db, "config", "system"), { extraTemplates: existing }, { merge: true });
+  } catch (persistErr: any) {
+    console.warn("[Templates Extra] No se pudo persistir el índice:", persistErr?.message);
   }
 }
 
@@ -6137,6 +6209,12 @@ async function startServer() {
   ensureReactivationTemplate().catch(e =>
     console.warn("[Reactivación] No se pudo pre-provisionar el template al arrancar:", e.message)
   );
+  // Además del template principal, mandamos 4 templates extra a Meta (saludo,
+  // oferta, seguimiento, disculpa) para tener más opciones cuando estén
+  // aprobados. Idempotente: si ya existen, no los recrea.
+  ensureExtraReactivationTemplates().catch(e =>
+    console.warn("[Templates Extra] No se pudo pre-provisionar al arrancar:", e.message)
+  );
 
   app.use(express.urlencoded({ extended: true }));
   app.use(express.json({ limit: '10mb' }));
@@ -6383,6 +6461,50 @@ async function startServer() {
       const messages = (data || []).map((r: any) => ({ id: r.id, ...(r.data || {}) }));
       return res.json({ messages });
     } catch (e: any) { return res.status(500).json({ error: e?.message, messages: [] }); }
+  });
+
+  // ✍️ Enviar mensaje LIBRE desde el WhatsApp Personal (Baileys).
+  // Único camino para escribir texto arbitrario a clientes fuera de la
+  // ventana de 24h. El módulo aplica rate-limit interno (15/hora,
+  // 30/destinatario/día) para evitar que WhatsApp banee el número.
+  app.post("/api/admin/personal-wa/send", express.json(), async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) return res.status(401).json({ success: false, error: "no autorizado" });
+    try {
+      const { phone, message } = req.body || {};
+      if (!phone || !message) return res.status(400).json({ success: false, error: "Falta phone o message" });
+
+      const result = await enviarPersonalWhatsApp(String(phone), String(message));
+      if (!result.ok) return res.status(400).json({ success: false, error: result.error });
+
+      // Registramos activity para que el chat del panel muestre el envío
+      try {
+        const cleanPhone = String(phone).replace(/[^\d]/g, "");
+        const formatted = `whatsapp:+${cleanPhone}`;
+        const assignedStoreId = await determineStoreId(cleanPhone, String(message)).catch(() => "default");
+        await addDoc(collection(db, "activities"), {
+          from: formatted,
+          to: "personal:+573133647176",
+          recipient: formatted,
+          customerPhone: cleanPhone,
+          storeId: assignedStoreId,
+          message: "[WhatsApp Personal]",
+          response: String(message),
+          status: "respondido",
+          whatsappStatus: "sent",
+          senderType: "bot",
+          manualAgent: "WhatsApp Personal",
+          channel: "personal",
+          timestamp: serverTimestamp(),
+          receivedAt: serverTimestamp()
+        });
+      } catch (logErr: any) {
+        console.warn("[WA Personal Send] No se pudo registrar activity:", logErr?.message);
+      }
+
+      return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ success: false, error: e?.message || "error" });
+    }
   });
 
   app.post("/api/whatsapp/intervene", async (req, res) => {

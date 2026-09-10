@@ -1711,6 +1711,40 @@ function ReportsTab({
     } catch { /* noop */ }
   };
 
+  // ✍️ Enviar texto LIBRE desde el WhatsApp Personal (Baileys +573133647176).
+  // Es la única forma de mandar "HOLA" o cualquier cosa a un cliente que lleva
+  // >24h sin escribir. Riesgo: WhatsApp puede banear el número personal si
+  // detecta spam, por eso el server tiene un rate-limit interno.
+  const [sendingPersonal, setSendingPersonal] = useState(false);
+  const enviarPorPersonal = async () => {
+    if (sendingPersonal || !selectedUser) return;
+    const textoDefault = (humanMessage || "").trim();
+    const texto = window.prompt(
+      "Mensaje LIBRE a enviar desde tu WhatsApp Personal (+573133647176).\n\nSe envía tal cual — ideal para 'Hola', follow-ups, o cualquier cosa que no permita un template.",
+      textoDefault
+    );
+    if (!texto || !texto.trim()) return;
+    setSendingPersonal(true);
+    try {
+      const r = await fetch("/api/admin/personal-wa/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...adminAuthHeaders() },
+        body: JSON.stringify({ phone: selectedUser, message: texto.trim() })
+      });
+      const data = await r.json();
+      if (!r.ok || !data?.success) {
+        alert(`❌ No se pudo enviar por WA Personal:\n${data?.error || "error desconocido"}`);
+      } else {
+        alert(`✅ Enviado desde tu WhatsApp Personal (+573133647176).\n\nMensaje: "${texto.trim().slice(0, 100)}${texto.length > 100 ? '…' : ''}"`);
+        setHumanMessage("");
+      }
+    } catch (e: any) {
+      alert(`❌ Error de red: ${e?.message || "desconocido"}`);
+    } finally {
+      setSendingPersonal(false);
+    }
+  };
+
   const enviarReactivacion = async () => {
     if (sendingReact || !selectedUser) return;
     const nombreCliente = (activeUserConv?.customerName || "").toString().split(" ")[0] || "amig@";
@@ -2677,8 +2711,17 @@ function ReportsTab({
                         ? <>El cliente no escribe hace <strong>{Math.floor(windowStatus.hoursSince)} h</strong>. WhatsApp <strong>bloquea</strong> los mensajes libres — Twilio dirá "enviado" pero <strong>no llegará</strong>. Usa un <strong>template pre-aprobado</strong> para reactivar.</>
                         : <>Este cliente <strong>nunca ha escrito</strong> al bot. WhatsApp solo permite mandarle un <strong>template pre-aprobado</strong>.</>}
                     </div>
-                    {/* Estado del template + botón para enviar reactivación */}
+                    {/* Estado del template + botones para reactivar */}
                     <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <button
+                        onClick={enviarPorPersonal}
+                        disabled={sendingPersonal}
+                        className="text-[10px] font-black uppercase tracking-tighter bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-md transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+                        title="Envía CUALQUIER texto libre (ej: 'Hola') desde tu WhatsApp Personal +573133647176. Sin ventana de 24h. Rate limit para evitar ban."
+                      >
+                        {sendingPersonal ? <RefreshCw size={10} className="animate-spin" /> : "✍️"}
+                        {sendingPersonal ? "Enviando..." : "Enviar por WhatsApp Personal"}
+                      </button>
                       <button
                         onClick={enviarReactivacion}
                         disabled={sendingReact || !reactStatus?.exists || reactStatus?.approvalStatus !== 'approved'}
@@ -2690,7 +2733,7 @@ function ReportsTab({
                         }
                       >
                         {sendingReact ? <RefreshCw size={10} className="animate-spin" /> : "📢"}
-                        {sendingReact ? "Enviando..." : "Enviar plantilla de reactivación"}
+                        {sendingReact ? "Enviando..." : "Plantilla oficial (Meta)"}
                       </button>
                       <span className="text-[9px] font-mono uppercase text-neutral-400">
                         {!reactStatus ? "cargando..."
