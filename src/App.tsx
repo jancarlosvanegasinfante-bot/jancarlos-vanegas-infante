@@ -128,7 +128,7 @@ type Order = {
   productId: string;
   quantity: number;
   totalPrice: number;
-  status: 'pendiente' | 'confirmado' | 'despachado' | 'entregado' | 'cancelado';
+  status: 'pendiente' | 'confirmado' | 'despachado' | 'entregado' | 'cancelado' | 'garantia' | 'devolucion';
   createdAt: any;
   notes?: string;
 };
@@ -3070,6 +3070,8 @@ function OrdersTab({ orders, onUpdateStatus, userStore }: { orders: Order[], onU
                       o.status === 'confirmado' ? 'text-cyan-400 bg-cyan-500/5 border-cyan-500/25' :
                       o.status === 'despachado' ? 'text-blue-400 bg-blue-500/5 border-blue-500/25' :
                       o.status === 'entregado' ? 'text-green-400 bg-green-500/5 border-green-500/25' :
+                      o.status === 'garantia' ? 'text-orange-400 bg-orange-500/5 border-orange-500/25' :
+                      o.status === 'devolucion' ? 'text-purple-400 bg-purple-500/5 border-purple-500/25' :
                       'text-rose-400 bg-rose-500/5 border-rose-500/25'
                     )}>
                       {o.status}
@@ -3150,10 +3152,12 @@ function OrdersTab({ orders, onUpdateStatus, userStore }: { orders: Order[], onU
                     onChange={(e) => onUpdateStatus(activeOrder.id, e.target.value as any, true)}
                     className={cn(
                       "bg-black border border-neutral-800 rounded-xl px-3 py-2 text-[10px] uppercase font-black outline-none cursor-pointer hover:border-dark-accent transition-colors",
-                      activeOrder.status === 'pendiente' ? 'text-amber-400 border-amber-500/40' : 
-                      activeOrder.status === 'confirmado' ? 'text-cyan-400 border-cyan-500/40' : 
-                      activeOrder.status === 'despachado' ? 'text-blue-400 border-blue-500/40' : 
-                      activeOrder.status === 'entregado' ? 'text-green-400 border-green-500/40' : 
+                      activeOrder.status === 'pendiente' ? 'text-amber-400 border-amber-500/40' :
+                      activeOrder.status === 'confirmado' ? 'text-cyan-400 border-cyan-500/40' :
+                      activeOrder.status === 'despachado' ? 'text-blue-400 border-blue-500/40' :
+                      activeOrder.status === 'entregado' ? 'text-green-400 border-green-500/40' :
+                      activeOrder.status === 'garantia' ? 'text-orange-400 border-orange-500/40' :
+                      activeOrder.status === 'devolucion' ? 'text-purple-400 border-purple-500/40' :
                       'text-rose-400 border-rose-500/40'
                     )}
                   >
@@ -3161,6 +3165,8 @@ function OrdersTab({ orders, onUpdateStatus, userStore }: { orders: Order[], onU
                     <option value="confirmado">✅ Confirmado</option>
                     <option value="despachado">🚚 Despachado</option>
                     <option value="entregado">🎉 Entregado</option>
+                    <option value="garantia">🛡️ Garantía</option>
+                    <option value="devolucion">↩️ Devolución</option>
                     <option value="cancelado">❌ Cancelado</option>
                   </select>
 

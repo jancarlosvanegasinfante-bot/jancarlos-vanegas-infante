@@ -8001,6 +8001,14 @@ _El pedido ya se guardó y está listo en tu tablero._`;
             messageText = `❌ *Actualización de tu pedido* ❌\n\nHola *${customerName}*, te notificamos que tu pedido de *${productName}* ha sido cancelado.\n\nSi deseas reprogramar la entrega o solicitar asistencia, por favor escríbenos por este medio y con gusto te ayudaremos. 🤝`;
             break;
 
+          case "garantia":
+            messageText = `🛡️ *Trámite de garantía en proceso* 🛡️\n\nHola *${customerName}*, recibimos tu solicitud de garantía sobre tu pedido de *${productName}*.\n\n📋 *Cómo sigue el proceso:*\n1. Vamos a revisar tu caso y contactarte para coordinar la recogida del producto.\n2. Una vez que llegue a nuestras bodegas, lo verificamos con el proveedor.\n3. Si aplica la garantía, te enviamos un producto nuevo *sin ningún costo adicional*.\n\n⏱️ Tiempo estimado del proceso: 5 a 10 días hábiles.\n\nSi tienes alguna duda o quieres enviarnos fotos/videos del inconveniente, respóndenos por este mismo chat. Estamos para ayudarte. 🤝\n\n_Hablaste con Jan Vanegas, jefe de ventas de Jan Sel Shop._`;
+            break;
+
+          case "devolucion":
+            messageText = `↩️ *Solicitud de devolución registrada* ↩️\n\nHola *${customerName}*, hemos registrado tu solicitud de devolución para el pedido de *${productName}*.\n\n📋 *Pasos siguientes:*\n1. Te contactaremos en las próximas horas para coordinar la recogida del producto en *${city}*.\n2. Al llegar el paquete a nuestras bodegas, verificamos su estado.\n3. Si todo está en orden, gestionamos la devolución del dinero (si ya se pagó) o cancelamos el cobro pendiente.\n\n⏱️ Tiempo estimado: 3 a 7 días hábiles desde la recogida.\n\n💡 *Recuerda:* como el pago es contra entrega, si el producto no llegó a tus manos no debes preocuparte por el cobro. Cualquier duda, escríbenos por aquí. 🙏\n\n_Hablaste con Jan Vanegas, jefe de ventas de Jan Sel Shop._`;
+            break;
+
           case "pendiente":
           default:
             messageText = `⏳ *Estado de tu pedido: Pendiente* 📋\n\nHola *${customerName}*, tu pedido de *${productName}* está registrado y en proceso de verificación. Te avisaremos tan pronto sea procesado. ¡Gracias por preferirnos!`;
