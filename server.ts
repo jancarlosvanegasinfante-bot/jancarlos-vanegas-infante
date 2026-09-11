@@ -9859,6 +9859,36 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         return res.status(200).send("");
       }
 
+      // 🚨 Reclamos / devoluciones / PQR post-venta.
+      // Detectado 11-sep: un cliente que ya recibió su pedido escribió
+      // "Para hacer devolución", "recibí lo que no era", "Quiero la devolución"
+      // y el bot NO respondió — solo Jan lo atendió 40 min después. Aquí
+      // atrapamos las palabras típicas de reclamo, respondemos con empatía,
+      // pausamos la IA y alertamos a Jan para que intervenga.
+      // OJO: cleanMsg ya viene sin acentos y sin ñ (normalizado). Los regex deben
+      // usar formas ASCII: "danado" (no "dañado"), "devolucion" (no "devolución").
+      const esReclamoPostVenta = (
+        /\b(devolucion|devolver|reclam(o|ar|acion)|garantia|no era|no es lo que|equivocad[oa]|mal producto|producto malo|producto danado|producto defectuoso|producto roto|paquete roto|paquete danado|paquete malo|llego roto|llego danado|llego malo|llego mal|recibi.*(no|equivocad|sencill|diferente|otro|roto|malo|danado)|me llego.*(diferente|otro|equivocad|malo|roto|danado)|no me llego|no me sirve|no me funciona|danado|defectuoso|esta roto|esta malo|esta danado|no funciona|no sirve|cambio de producto|quiero devolver|quiero cambiar|habia pedido|habia comprado|hab[ií]a pedido|hab[ií]a comprado|entregaron.*(no era|otro|diferente|equivocad|roto|malo|danado))\b/i.test(cleanMsg)
+      );
+      if (esReclamoPostVenta) {
+        try {
+          const respPQR = `¡Hola! 🙏 Lamento mucho el inconveniente. Ya le paso tu caso a nuestro *asesor humano* para que te atienda personalmente y coordinemos la solución (cambio, garantía o devolución según sea el caso).\n\nMientras tanto, si puedes por favor cuéntame:\n1️⃣ ¿Qué recibiste vs qué habías pedido?\n2️⃣ Si es posible, mándame una *foto* del producto y del empaque 📸\n\nEn breve te contactamos por aquí para resolverlo. Gracias por tu paciencia. 🤝`;
+          await sendWhatsApp(from, respPQR, undefined, activityRef.id, to);
+          // Pausamos la IA para que Jan intervenga sin que el bot siga hablando
+          await setCustomerAiPauseState(cleanFrom, assignedStoreId, true);
+          // Aviso al admin
+          try {
+            await sendAdminAlert(`🚨 *RECLAMO/DEVOLUCIÓN* de ${from.replace("whatsapp:", "")}\nCliente: "${String(finalMessage || "").slice(0, 200)}"\nLa IA quedó en pausa. Entra al panel a atenderlo.`);
+          } catch (alertErr: any) {
+            console.warn("[Reclamo PQR] No se pudo alertar al admin:", alertErr?.message);
+          }
+          console.log(`[Reclamo PQR] Detectado y transferido a asesor humano: ${cleanFrom}`);
+        } catch (e: any) {
+          console.error("[Reclamo PQR] Error manejando reclamo:", e?.message);
+        }
+        return res.status(200).send("");
+      }
+
       // Bypass conditions for the deterministic state machine to let the IA process the message:
       let shouldBypassCheckout = false;
       const hasMedia = numMedia > 0 || (mediaItems && mediaItems.length > 0);
@@ -9984,8 +10014,24 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         if (isDataStep) {
           const pideFoto = /\b(foto|fotos|imagen|imagenes|im[aá]genes|video|muestra|mu[eé]strame|ense[nñ]ame|ver el producto|como se ve|mas fotos)\b/i.test(cleanMsg) && !(numMedia > 0);
           const objResp = matchObjecionCheckout(cleanMsg);
-          const otraPregunta = /\?/.test(String(finalMessage || "")) || /\b(puedo|se puede|me puede|me puedes|trae|traes|incluye|viene con|cuanto vale|cuanto cuesta|que precio|sirve para|para que sirve|de que color|que color|tienen mas|hay mas|es nuevo)\b/i.test(cleanMsg);
-          if (pideFoto || objResp || otraPregunta) {
+          // Preguntas típicas — incluyendo PALABRAS SUELTAS que los clientes
+          // escriben sin más contexto: "precios", "cuanto", "precio", "vale",
+          // "costo", "envio", "tiempo", etc. Antes se guardaban como nombre.
+          const otraPregunta = /\?/.test(String(finalMessage || "")) ||
+            /\b(puedo|se puede|me puede|me puedes|trae|traes|incluye|viene con|cuanto vale|cuanto cuesta|que precio|sirve para|para que sirve|de que color|que color|tienen mas|hay mas|es nuevo)\b/i.test(cleanMsg) ||
+            /^(precio|precios|cuanto|cuánto|vale|costo|envio|envío|tiempo|demora|cuando|donde|dónde|como|cómo|info|informacion|información|detalles|caracteristicas|características|pago|contraentrega|efectivo|nequi|daviplata)[\s\.\!\?\,]*$/i.test(cleanMsg.trim());
+          // Nombres sospechosos: chistes, palabras del menú o expresiones que
+          // NUNCA son nombres reales. Antes el bot los aceptaba como nombre y
+          // seguía con el checkout guardando basura. Ahora los rechaza.
+          const paso = String(currentStep || "").toLowerCase();
+          const nombreSospechoso = paso === "nombre" && (
+            /\b(gratis|regalame|reg[aá]lamelo|jajaj?|jejej?|jajaja|no gracias|de una|hola|sisas|ok|si|no|listo|dale|bueno|gracias|chao|adios|adi[oó]s)\b/i.test(cleanMsg) ||
+            /^(precio|precios|cuanto|cu[aá]nto|vale|costo|envio|env[ií]o|tiempo)[\s\.\!\?\,]*$/i.test(cleanMsg.trim()) ||
+            // Un "nombre" real casi siempre tiene 2+ palabras y solo letras/espacios
+            /[?!\.]{2,}$/.test(String(finalMessage || "").trim()) ||
+            /^[a-záéíóúñ\s]{1,2}$/i.test(cleanMsg.trim())  // 1-2 letras = no es nombre (permitimos Ana, Eva, etc.)
+          );
+          if (pideFoto || objResp || otraPregunta || nombreSospechoso) {
             try {
               if (pideFoto) {
                 const productos = await loadProductsForStore(assignedStoreId);
@@ -9999,6 +10045,8 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
                 }
               } else if (objResp) {
                 await sendWhatsApp(from, objResp, undefined, activityRef.id, to);
+              } else if (nombreSospechoso) {
+                await sendWhatsApp(from, `¡Hola! 😊 Para armar tu pedido necesito tu *nombre y apellido completo real* (como aparece en tu cédula). Así la transportadora puede entregarte sin problema. ✍️`, undefined, activityRef.id, to);
               } else {
                 const r = await responderDudaCheckout(String(checkoutData.producto || "tu producto"), String(finalMessage || ""));
                 await sendWhatsApp(from, r, undefined, activityRef.id, to);
