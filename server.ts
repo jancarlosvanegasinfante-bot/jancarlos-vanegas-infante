@@ -4734,7 +4734,10 @@ function textoVentaProducto(p: any): string {
   }
 
   l.push("");
-  l.push("¿Te lo despacho hoy? 🚀 Dime tu *Nombre y Apellido completo* para la guía de despacho 📝");
+  // Pregunta colchón: 88% de los leads del anuncio CTWA abandonaban aquí
+  // cuando el bot les pedía el nombre real de una. Con esta pregunta damos
+  // salida (dudas → conversa) o compromiso (apártalo → pide nombre).
+  l.push("¿Te lo *aparto y te lo despacho hoy* 📦 o tienes alguna *duda antes*? 🤔");
 
   return l.join("\n");
 }
@@ -4757,7 +4760,10 @@ async function sendProductSalesFlow(
     await sendWhatsApp(from, mensaje, undefined, activityId, to);
 
     await setDoc(doc(db, "customers", customerProfileId), {
-      checkoutStep: "nombre",
+      // Paso intermedio "confirmar_reserva": espera SI/NO/duda antes de pedir
+      // el nombre real. Antes ponía checkoutStep:"nombre" directo y 88% de
+      // los leads del anuncio CTWA abandonaban ahí. Ahora damos un colchón.
+      checkoutStep: "confirmar_reserva",
       checkoutData: {
         producto: producto.name,
         nombre: "",
@@ -10007,6 +10013,36 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         // botón no llegó y el cliente escribió "continuar" en texto plano)
         if (["continuar", "seguir", "continuar pedido", "seguir pedido"].some(k => cleanMsg === k || cleanMsg.startsWith(k))) {
           await resendCurrentCheckoutStepPrompt(from, to, customerData, activityRef.id);
+          return res.status(200).send("");
+        }
+
+        // 🎯 Paso "confirmar_reserva": nuevo colchón entre la ficha del producto
+        // y el pedido del nombre. Antes 88% de los leads del anuncio CTWA
+        // abandonaban al recibir "Dime tu nombre" de una. Ahora damos salida
+        // suave (dudas → conversa) o compromiso claro (sí → sigue al nombre).
+        if (currentStep === "confirmar_reserva") {
+          const diceSi = /\b(si|sii+|sisas|dale|de una|ok|okey|listo|va|apartar|ap[aá]rtalo|ap[aá]rtame|lo quiero|quiero uno|me lo llevo|env[ií]amelo|env[ií]alo|tirale|tirar|sigamos|seguir|conf[ií]rmalo|reservar|res[eé]rvalo|res[eé]rvame|comprar|adelante|hazlo|cerrado|hecho|hagamos|pidamos|pidelo)\b/i.test(cleanMsg) && !/\bno\b/i.test(cleanMsg);
+          if (diceSi) {
+            // Confirma → pasa al paso de nombre, pide el dato.
+            await updateDoc(doc(db, "customers", customerProfileId), {
+              checkoutStep: "nombre",
+              lastInteractionAt: serverTimestamp()
+            }).catch(() => {});
+            await sendWhatsApp(from, `¡Genial! 🙌 Para armar tu pedido, dime tu *Nombre y Apellido completo* como aparece en tu cédula 📝`, undefined, activityRef.id, to);
+            return res.status(200).send("");
+          }
+          // No dijo "sí" claro → tratamos su mensaje como duda/pregunta. La
+          // respondemos con la IA (que ya conoce el producto en foco), pausamos
+          // este colchón y volvemos a preguntar "aparto/duda".
+          try {
+            const productoNombre = String(checkoutData?.producto || customerData?.productoEnfocado || "tu producto");
+            const respIA = await responderDudaCheckout(productoNombre, String(finalMessage || cleanMsg || ""));
+            await sendWhatsApp(from, respIA, undefined, activityRef.id, to);
+            await new Promise(r => setTimeout(r, 700));
+            await sendWhatsApp(from, `¿Te lo *aparto y te lo despacho hoy* 📦 o tienes otra *duda antes*? 🤔`, undefined, undefined, to);
+          } catch (e: any) {
+            console.error("[Confirmar Reserva] Error respondiendo duda (no crítico):", e?.message);
+          }
           return res.status(200).send("");
         }
 
