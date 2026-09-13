@@ -10016,7 +10016,11 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
       // OJO: cleanMsg ya viene sin acentos y sin ñ (normalizado). Los regex deben
       // usar formas ASCII: "danado" (no "dañado"), "devolucion" (no "devolución").
       const esReclamoPostVenta = (
-        /\b(devolucion|devolver|reclam(o|ar|acion)|garantia|no era|no es lo que|equivocad[oa]|mal producto|producto malo|producto danado|producto defectuoso|producto roto|paquete roto|paquete danado|paquete malo|llego roto|llego danado|llego malo|llego mal|recibi.*(no|equivocad|sencill|diferente|otro|roto|malo|danado)|me llego.*(diferente|otro|equivocad|malo|roto|danado)|no me llego|no me sirve|no me funciona|danado|defectuoso|esta roto|esta malo|esta danado|no funciona|no sirve|cambio de producto|quiero devolver|quiero cambiar|habia pedido|habia comprado|hab[ií]a pedido|hab[ií]a comprado|entregaron.*(no era|otro|diferente|equivocad|roto|malo|danado))\b/i.test(cleanMsg)
+        // OJO: NO poner /\bgarantia\b/ suelto — atrapa "¿tiene garantía?" que
+        // es pregunta ANTES de comprar (va a la objeción GARANTIA normal).
+        // Solo detectamos reclamos DE garantía con verbos de acción real.
+        (/\b(quiero.*garantia|hacer.*garantia|activar.*garantia|solicitar.*garantia|pedir.*garantia|reclamar.*garantia|garantia del producto|garantia por|aplicar.*garantia)\b/i.test(cleanMsg) ||
+        /\b(devolucion|devolver|reclam(o|ar|acion)|no era|no es lo que|equivocad[oa]|mal producto|producto malo|producto danado|producto defectuoso|producto roto|paquete roto|paquete danado|paquete malo|llego roto|llego danado|llego malo|llego mal|recibi.*(no|equivocad|sencill|diferente|otro|roto|malo|danado)|me llego.*(diferente|otro|equivocad|malo|roto|danado)|no me llego|no me sirve|no me funciona|danado|defectuoso|esta roto|esta malo|esta danado|no funciona|no sirve|cambio de producto|quiero devolver|quiero cambiar|habia pedido|habia comprado|hab[ií]a pedido|hab[ií]a comprado|entregaron.*(no era|otro|diferente|equivocad|roto|malo|danado))\b/i.test(cleanMsg))
       );
       if (esReclamoPostVenta) {
         try {
