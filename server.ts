@@ -4527,6 +4527,11 @@ function detectarProductoUnico(mensaje: string, products: any[]): any | null {
   const texto = normalizarParaBuscar(mensaje);
   if (!texto) return null;
 
+  // Productos con `hidden: true` no se venden (agotados en Dropi). Se filtran
+  // aquí para que si un lead pregunta por ellos, el bot no arranque el
+  // checkout de un producto que no puede despachar.
+  products = (products || []).filter((p: any) => !p.hidden);
+
   // La ficha web manda el nombre entre asteriscos ("Me interesa: *NOMBRE*").
   // Cuando viene así es la señal más limpia que existe, por eso pesa el doble.
   const entreAsteriscos = String(mensaje || "").match(/\*([^*]{3,120})\*/);
@@ -5172,7 +5177,10 @@ async function loadProductsForStore(assignedStoreId: string): Promise<any[]> {
       console.error("Error reading local catalog fallback:", errFallback);
     }
   }
-  return products;
+  // Productos con `hidden: true` no se listan ni se venden (agotados en Dropi).
+  // Al filtrarlos aquí, TODO el bot deja de ofrecerlos: menús, tendencias,
+  // categorías, detectarProductoUnico y checkout — todos leen desde aquí.
+  return products.filter((p: any) => !p.hidden);
 }
 
 // ── Meta Conversions API (CAPI) Helpers ─────────────────────────────────────

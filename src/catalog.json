@@ -174,7 +174,8 @@
       "price": 99900,
       "originalPrice": 139900,
       "videoUrl": "",
-      "dropiId": "2210256"
+      "dropiId": "2210256",
+      "hidden": true
     },
     {
       "id": "shilajit-vitalidad-x2",

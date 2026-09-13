@@ -58,6 +58,7 @@ export const TRENDING_PRODUCTS = [
     reviews: 87,
     stock: 40,
     badge: "🆕 NUEVO",
+    hidden: true,
   },
   {
     id: "soporte-de-carga-magnetica",
@@ -1394,9 +1395,12 @@ Quiero realizar el siguiente pedido desde la Landing Page:`
     }
   };
 
+  // Productos con `hidden: true` no aparecen en el listado (ni con "Todos" ni por categoría).
+  // Se usa cuando un producto está agotado en Dropi y no quiero seguir tomando pedidos.
+  const productosVisibles = TRENDING_PRODUCTS.filter((p: any) => !p.hidden);
   const filteredProducts = activeTab === "Todos"
-    ? TRENDING_PRODUCTS
-    : TRENDING_PRODUCTS.filter((p) => p.category.toLowerCase() === activeTab.toLowerCase());
+    ? productosVisibles
+    : productosVisibles.filter((p) => p.category.toLowerCase() === activeTab.toLowerCase());
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
