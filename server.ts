@@ -4532,40 +4532,63 @@ function detectarProductoUnico(mensaje: string, products: any[]): any | null {
   const entreAsteriscos = String(mensaje || "").match(/\*([^*]{3,120})\*/);
   const textoFuerte = entreAsteriscos ? normalizarParaBuscar(entreAsteriscos[1]) : "";
 
-  let mejor: any = null;
-  let mejorPuntaje = 0;
-  let segundoPuntaje = 0;
-
+  // Palabras SIGNATURE: aparecen en solo UN producto del catálogo. Si el
+  // cliente escribe una de estas (ej. "shilajit", "aguaje", "aromatizante"),
+  // basta con eso para detectar el producto sin ambigüedad. Antes con nombres
+  // de una sola palabra distintiva ("Shilajit") el detector fallaba porque
+  // exigía 2 puntos mínimos — pero solo hay 1 palabra para sumar.
+  const palabrasPorProducto = new Map<string, string[]>();
+  const contadorPalabras = new Map<string, number>();
   for (const p of products) {
     const palabras = normalizarParaBuscar(p.name)
       .split(" ")
-      .filter(w => w.length > 2 && !PALABRAS_NO_DISTINTIVAS.has(w));
+      .filter(w => w.length > 3 && !PALABRAS_NO_DISTINTIVAS.has(w));
+    palabrasPorProducto.set(p.id, palabras);
+    for (const w of palabras) contadorPalabras.set(w, (contadorPalabras.get(w) || 0) + 1);
+  }
+
+  let mejor: any = null;
+  let mejorPuntaje = 0;
+  let mejorTieneSignature = false;
+  let segundoPuntaje = 0;
+
+  for (const p of products) {
+    const palabras = palabrasPorProducto.get(p.id) || [];
     if (palabras.length === 0) continue;
 
     let puntaje = 0;
+    let tieneSignature = false;
     for (const w of palabras) {
-      if (textoFuerte && textoFuerte.includes(w)) puntaje += 2;
-      else if (texto.includes(w)) puntaje += 1;
+      const esSignature = (contadorPalabras.get(w) || 0) === 1;
+      if (textoFuerte && textoFuerte.includes(w)) {
+        puntaje += 2;
+        if (esSignature) tieneSignature = true;
+      } else if (texto.includes(w)) {
+        puntaje += esSignature ? 2 : 1; // signature vale doble incluso sin asteriscos
+        if (esSignature) tieneSignature = true;
+      }
     }
 
     if (puntaje > mejorPuntaje) {
       segundoPuntaje = mejorPuntaje;
       mejorPuntaje = puntaje;
       mejor = p;
+      mejorTieneSignature = tieneSignature;
     } else if (puntaje > segundoPuntaje) {
       segundoPuntaje = puntaje;
     }
   }
 
-  // Dos condiciones, y las dos tienen que cumplirse:
-  //  1. Al menos 2 puntos, para que una sola palabra suelta no dispare nada.
-  //  2. Que le saque MÍNIMO el doble al segundo. Un umbral fijo no sirve:
-  //     "la aspiradora de mano" solo suma 2 y es inequívoco, mientras que
-  //     "el cargador" también sumaría pero lo contienen DOS productos distintos.
-  //     Lo que separa un caso del otro no es el puntaje, es la distancia.
-  //     Ante un empate preferimos no adivinar y dejar seguir el flujo normal.
+  // Reglas:
+  //  · Si el ganador tiene una palabra SIGNATURE (exclusiva del catálogo),
+  //    con 2+ puntos alcanza (ya sea 1 palabra signature = 2 pts, o 2 palabras
+  //    comunes = 2 pts). Sin signature, exige 2+ para no confundir.
+  //  · Además tiene que sacarle MÍNIMO el doble al segundo. Cuando la primera
+  //    palabra es signature única, el segundo va a ser 0 o muy bajo y la regla
+  //    se cumple sola.
   if (mejorPuntaje < 2) return null;
-  if (mejorPuntaje < segundoPuntaje * 2) return null;
+  if (!mejorTieneSignature && mejorPuntaje < segundoPuntaje * 2) return null;
+  if (mejorTieneSignature && mejorPuntaje <= segundoPuntaje) return null;
   return mejor;
 }
 
@@ -4630,6 +4653,18 @@ const PUNTOS_DE_VENTA: Record<string, string[]> = {
     "*Luz LED regulable en 3 niveles* para verte bien incluso de noche",
     "*Trípode con control remoto Bluetooth* hasta 10 metros",
     "*Gira 360°* y se pliega para llevarlo a donde sea"
+  ],
+  "shilajit-vitalidad-x2": [
+    "*2 frascos* de Shilajit auténtico del Himalaya — te alcanza para *20 porciones*",
+    "Sabor Malta con *arándano, guaraná, noni, borojó y chontaduro* — rico y fácil de tomar",
+    "Rutina de *energía y vitalidad* natural para el día a día",
+    "Con *registro INVIMA* y *kit de obsequios sorpresa* incluidos"
+  ],
+  "aguaje-hinojo-maca-triple": [
+    "Fórmula *triple*: Aguaje amazónico + Hinojo + Maca peruana",
+    "*100 cápsulas* por frasco — te rinde un mes completo con la dosis diaria",
+    "Ingredientes *100% naturales* usados tradicionalmente para el bienestar femenino",
+    "*Calidad premium* Natural Medix"
   ]
 };
 
@@ -4677,6 +4712,9 @@ function textoVentaProducto(p: any): string {
 
   if (p.id === "cargador-aromatizante-carro") {
     l.push("🎁 Y va con *3 esencias de regalo*");
+  }
+  if (p.id === "shilajit-vitalidad-x2") {
+    l.push("🎁 Y va con *kit de obsequios sorpresa* incluido");
   }
 
   l.push("");
