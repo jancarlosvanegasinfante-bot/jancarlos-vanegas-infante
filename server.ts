@@ -2841,6 +2841,65 @@ const TREND_YES_ID = "JAN_TREND_YES";
 const TREND_NO_ID = "JAN_TREND_NO";
 const UPSELL_YES_ID = "JAN_UPSELL_YES";
 const UPSELL_NO_ID = "JAN_UPSELL_NO";
+// Botones del paso "confirmar_reserva" (colchón entre ficha y pedido de nombre)
+const RESERVE_YES_ID = "JAN_RESERVE_YES";
+const RESERVE_DUDA_ID = "JAN_RESERVE_DUDA";
+
+async function ensureConfirmarReservaTemplate(): Promise<string | null> {
+  if (!twilioClient) return null;
+  try {
+    const cfgSnap = await getDoc(doc(db, "config", "system"));
+    const existingSid = cfgSnap.exists() ? cfgSnap.data()?.confirmarReservaTemplateSid : null;
+    if (existingSid) {
+      console.log(`[WhatsApp Buttons] Usando template de confirmar reserva existente: ${existingSid}`);
+      return existingSid;
+    }
+
+    console.log("[WhatsApp Buttons] No hay template de confirmar reserva aún. Creando uno nuevo...");
+    const content = await (twilioClient as any).content.v1.contents.create({
+      friendlyName: `jan_confirmar_reserva_${Date.now()}`,
+      language: "es",
+      variables: { "1": "Game Stick Retro M8" },
+      types: {
+        "twilio/quick-reply": {
+          body: "¿Te aparto tu *{{1}}* y te lo despacho hoy? 📦",
+          actions: [
+            { title: "Sí, apártalo ✅", id: RESERVE_YES_ID },
+            { title: "Tengo una duda 💬", id: RESERVE_DUDA_ID }
+          ]
+        },
+        "twilio/text": {
+          body: "¿Te aparto tu *{{1}}* y te lo despacho hoy 📦 o tienes alguna duda antes? 🤔"
+        }
+      }
+    });
+
+    await setDoc(doc(db, "config", "system"), { confirmarReservaTemplateSid: content.sid }, { merge: true });
+    console.log(`[WhatsApp Buttons] Template de confirmar reserva creado y guardado: ${content.sid}`);
+    return content.sid;
+  } catch (e: any) {
+    console.error("[WhatsApp Buttons] No se pudo crear/obtener template de confirmar reserva:", e.message);
+    return null;
+  }
+}
+
+async function sendConfirmarReservaButtons(to: string, from: string, productName: string): Promise<boolean> {
+  if (!twilioClient) return false;
+  const contentSid = await ensureConfirmarReservaTemplate();
+  if (!contentSid) return false;
+  try {
+    await (twilioClient as any).messages.create({
+      from: normalizePhone(from || TWILIO_FROM_NUMBER || "+14155238886"),
+      to: normalizePhone(to),
+      contentSid,
+      contentVariables: JSON.stringify({ "1": String(productName || "tu producto").slice(0, 60) })
+    });
+    return true;
+  } catch (e: any) {
+    console.warn("[WhatsApp Buttons] Botones confirmar_reserva fallaron, cae a texto plano:", e?.message);
+    return false;
+  }
+}
 
 async function ensureImageProductTemplate(): Promise<string | null> {
   if (!twilioClient) return null;
@@ -4759,6 +4818,15 @@ async function sendProductSalesFlow(
 
     await sendWhatsApp(from, mensaje, undefined, activityId, to);
 
+    // Botones interactivos "Sí, apártalo / Tengo una duda" con FALLBACK
+    // silencioso: si falla (template no aprobado, error Twilio, número fuera
+    // de ventana, etc.), la ficha ya termina con la misma pregunta en texto
+    // plano — o sea el cliente igual puede responder "sí" o su duda.
+    try {
+      await new Promise(r => setTimeout(r, 800));
+      await sendConfirmarReservaButtons(to, from, producto.name);
+    } catch { /* fallback: la ficha ya lleva el prompt en texto */ }
+
     await setDoc(doc(db, "customers", customerProfileId), {
       // Paso intermedio "confirmar_reserva": espera SI/NO/duda antes de pedir
       // el nombre real. Antes ponía checkoutStep:"nombre" directo y 88% de
@@ -6253,6 +6321,10 @@ async function startServer() {
   // el bot cae de vuelta a confirmación por texto normal.
   ensureOrderConfirmationTemplate().catch(e =>
     console.warn("[WhatsApp Buttons] No se pudo pre-provisionar el template al arrancar:", e.message)
+  );
+  // Template de botones "Aparto/Duda" para el paso confirmar_reserva.
+  ensureConfirmarReservaTemplate().catch(e =>
+    console.warn("[WhatsApp Buttons] No se pudo pre-provisionar template confirmar_reserva:", e.message)
   );
 
   // Auto-provisionar el template de REACTIVACIÓN para clientes fuera de la
@@ -9111,6 +9183,30 @@ _El pedido ya se guardó y está listo en tu tablero._`;
               status: "respondido",
               response: cancelImgMsg,
               respondedAt: serverTimestamp()
+            });
+          }
+        } else if (buttonPayload === RESERVE_YES_ID) {
+          // Cliente tocó "Sí, apártalo ✅" → pasa a paso "nombre" y lo pide.
+          await updateDoc(doc(db, "customers", customerProfileId), {
+            checkoutStep: "nombre",
+            lastInteractionAt: serverTimestamp()
+          }).catch(() => {});
+          const okMsg = `¡Genial! 🙌 Para armar tu pedido, dime tu *Nombre y Apellido completo* como aparece en tu cédula 📝`;
+          await sendWhatsApp(from, okMsg, undefined, activityRefId, to);
+          if (activityRefId) {
+            await updateDoc(doc(db, "activities", activityRefId), {
+              status: "respondido", response: okMsg, respondedAt: serverTimestamp()
+            });
+          }
+        } else if (buttonPayload === RESERVE_DUDA_ID) {
+          // Cliente tocó "Tengo una duda 💬" → mantenemos el step y le
+          // preguntamos qué duda. Su próximo mensaje cae por texto libre y
+          // va al handler del step "confirmar_reserva" que responde con IA.
+          const dudaMsg = `¡Claro! 😊 Con gusto te ayudo. Cuéntame *qué duda tienes* sobre el producto y te respondo al toque.`;
+          await sendWhatsApp(from, dudaMsg, undefined, activityRefId, to);
+          if (activityRefId) {
+            await updateDoc(doc(db, "activities", activityRefId), {
+              status: "respondido", response: dudaMsg, respondedAt: serverTimestamp()
             });
           }
         } else if (buttonPayload === "MENU_CATALOG") {
