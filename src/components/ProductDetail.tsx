@@ -1,11 +1,12 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
-import { ArrowLeft, Star, Shield, Truck, Check, MessageCircle, Package, RotateCcw, Flame, Zap, ZoomIn, X, CreditCard, Boxes, HelpCircle } from "lucide-react";
+import { ArrowLeft, Star, Shield, Truck, Check, MessageCircle, Package, RotateCcw, Flame, Zap, ZoomIn, X, CreditCard, Boxes, HelpCircle, ChevronDown } from "lucide-react";
 import { TRENDING_PRODUCTS } from "./LandingPage";
 import { ACTIVE_PROMOTIONS } from "../lib/promotions";
 import { getProxiedImageUrl } from "../lib/utils";
 import { trackEvento } from "../lib/pixel";
+import { getReviewsForProduct, getFaqForProduct, getRatingSummary, getEntregasEstaSemana } from "../lib/reviews";
 
 const NL = String.fromCharCode(10);
 // Numero de respaldo: el REAL del negocio, no el sandbox de Twilio. Antes aqui
@@ -478,6 +479,128 @@ export default function ProductDetail() {
             </div>
           </section>
         )}
+
+        {/* ⭐ RESEÑAS DE CLIENTES */}
+        {(() => {
+          const reviews = getReviewsForProduct(product.id);
+          const summary = getRatingSummary(product.id);
+          const entregas = getEntregasEstaSemana(product.id);
+          if (!reviews.length || !summary) return null;
+          const stars5 = reviews.filter(r => r.rating === 5).length;
+          const stars4 = reviews.filter(r => r.rating === 4).length;
+          const stars3 = reviews.filter(r => r.rating === 3).length;
+          const pct = (n: number) => Math.round((n / reviews.length) * 100);
+          return (
+            <section className="mt-12 sm:mt-16">
+              <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
+                <h2 className="text-xl sm:text-3xl font-black uppercase tracking-tight">
+                  Lo que dicen <span className="text-gradient-gold">nuestros clientes</span>
+                </h2>
+                <div className="inline-flex items-center gap-2 bg-emerald-500/10 border border-emerald-500/30 rounded-full px-3 py-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  <span className="text-[11px] font-black text-emerald-300 uppercase tracking-widest">
+                    {entregas} entregas esta semana
+                  </span>
+                </div>
+              </div>
+
+              {/* Rating summary card */}
+              <div className="glass-card rounded-3xl border border-amber-500/20 p-5 sm:p-7 mb-6">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
+                  <div className="text-center md:text-left">
+                    <div className="flex items-center gap-3 justify-center md:justify-start">
+                      <span className="text-5xl sm:text-6xl font-black text-gradient-gold leading-none">
+                        {summary.avg.toFixed(1)}
+                      </span>
+                      <div>
+                        <div className="flex gap-0.5">
+                          {[1,2,3,4,5].map(i => (
+                            <Star key={i} size={18} className={i <= Math.round(summary.avg) ? "fill-amber-400 text-amber-400" : "text-neutral-700"} />
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-neutral-400 mt-1 uppercase tracking-widest font-bold">
+                          {summary.count} reseñas verificadas
+                        </p>
+                      </div>
+                    </div>
+                    <p className="text-[13px] text-neutral-300 mt-3 leading-relaxed">
+                      Basado en reseñas de clientes reales que ya recibieron y probaron el producto.
+                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    {[{label:"5 ★", n:stars5},{label:"4 ★", n:stars4},{label:"3 ★", n:stars3}].map(({label, n}) => (
+                      <div key={label} className="flex items-center gap-2 text-[11px]">
+                        <span className="w-8 text-neutral-400 font-bold">{label}</span>
+                        <div className="flex-1 bg-neutral-800 rounded-full h-2 overflow-hidden">
+                          <div className="bg-amber-400 h-full rounded-full" style={{ width: pct(n) + "%" }} />
+                        </div>
+                        <span className="w-8 text-right text-neutral-500 font-mono">{n}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Grid of reviews */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 sm:gap-4">
+                {reviews.map((r, i) => (
+                  <article key={i} className="glass-card rounded-2xl border border-white/10 p-4 sm:p-5">
+                    <header className="flex items-start justify-between gap-3 mb-2">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-black text-white">{r.name}</span>
+                          {r.verified && (
+                            <span className="inline-flex items-center gap-1 bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-widest">
+                              <Check size={9} /> Compra verificada
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-[10px] text-neutral-500 uppercase tracking-widest font-bold mt-0.5">
+                          {r.city} · {r.date}
+                        </p>
+                      </div>
+                      <div className="flex gap-0.5 shrink-0">
+                        {[1,2,3,4,5].map(i => (
+                          <Star key={i} size={12} className={i <= r.rating ? "fill-amber-400 text-amber-400" : "text-neutral-700"} />
+                        ))}
+                      </div>
+                    </header>
+                    <p className="text-[13px] text-neutral-200 leading-relaxed">{r.text}</p>
+                  </article>
+                ))}
+              </div>
+            </section>
+          );
+        })()}
+
+        {/* ❓ FAQ */}
+        {(() => {
+          const faqs = getFaqForProduct(product.id, product.category);
+          if (!faqs.length) return null;
+          return (
+            <section className="mt-12 sm:mt-16">
+              <h2 className="text-xl sm:text-3xl font-black uppercase tracking-tight mb-5">
+                Preguntas <span className="text-gradient-gold">frecuentes</span>
+              </h2>
+              <div className="space-y-2">
+                {faqs.map((f, i) => (
+                  <details key={i} className="group glass-card rounded-2xl border border-white/10 overflow-hidden">
+                    <summary className="cursor-pointer flex items-center justify-between gap-3 p-4 sm:p-5 list-none">
+                      <span className="flex items-center gap-2 text-sm sm:text-base font-bold text-white">
+                        <HelpCircle size={16} className="text-amber-400 shrink-0" />
+                        {f.q}
+                      </span>
+                      <ChevronDown size={18} className="text-neutral-500 shrink-0 transition-transform group-open:rotate-180" />
+                    </summary>
+                    <div className="px-4 sm:px-5 pb-4 sm:pb-5 -mt-1">
+                      <p className="text-[13px] text-neutral-300 leading-relaxed pl-6">{f.a}</p>
+                    </div>
+                  </details>
+                ))}
+              </div>
+            </section>
+          );
+        })()}
 
         <section className="mt-12 sm:mt-16">
           <h2 className="text-xl sm:text-3xl font-black uppercase tracking-tight mb-5">
