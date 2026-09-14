@@ -1229,6 +1229,48 @@ function canReply(userId: string): boolean {
 /**
  * Seeding Function: Populates the products collection using Admin SDK to bypass rules
  */
+// 🔄 Sincroniza catalog.json → Supabase products SIN destruir nada.
+// Al bootear: si un producto del catalog.json no existe en la DB → lo inserta.
+// Si existe → lo actualiza (para propagar cambios como hidden, price, name, etc).
+// A diferencia de seedDatabase, este NO borra ni sale temprano si ya hay datos.
+// Bug motivador (14-sep): agregué Aguaje y Shilajit al catalog.json pero no
+// llegaron a Supabase → el bot no los reconocía y respondía menú genérico.
+async function syncCatalogFromLocal(storeId: string = "default"): Promise<void> {
+  try {
+    const catalogPath = path.join(cwd, "src", "catalog.json");
+    if (!existsSync(catalogPath)) return;
+    const raw = readFileSync(catalogPath, "utf-8");
+    const catalogData = JSON.parse(raw);
+    if (!catalogData?.products || !Array.isArray(catalogData.products)) return;
+
+    let insertados = 0, actualizados = 0;
+    for (const product of catalogData.products) {
+      const finalDocId = `${storeId}_${product.id}`;
+      const productData: any = {
+        ...product,
+        storeId,
+        stock: product.stock !== undefined ? product.stock : 20,
+        updatedAt: serverTimestamp()
+      };
+      try {
+        const existingSnap = await getDoc(doc(db, "products", finalDocId));
+        if (existingSnap.exists()) {
+          await updateDoc(doc(db, "products", finalDocId), productData);
+          actualizados++;
+        } else {
+          await setDoc(doc(db, "products", finalDocId), productData);
+          insertados++;
+        }
+      } catch (e: any) {
+        console.warn(`[Catalog Sync] Falló ${product.id}:`, e?.message);
+      }
+    }
+    console.log(`[Catalog Sync] catalog.json → DB: ${insertados} insertados, ${actualizados} actualizados (store=${storeId}).`);
+  } catch (e: any) {
+    console.error("[Catalog Sync] Error:", e?.message);
+  }
+}
+
 async function seedDatabase(force = false, customCatalog?: any, storeId: string = "default") {
   const productsColl = collection(db, "products");
   
@@ -6319,6 +6361,14 @@ async function startServer() {
   // Auto-provisionar el template de botones de confirmación de pedido (una sola vez,
   // sin necesidad de tocar la consola de Twilio). Si falla, no bloquea el arranque:
   // el bot cae de vuelta a confirmación por texto normal.
+  // 🔄 Auto-sync catalog.json → Supabase al bootear. Si aparece un producto
+  // nuevo en el JSON, se inserta en la DB; si existe, se actualiza. Así el bot
+  // siempre trabaja con el catálogo real (nunca más pasa lo del 14-sep con
+  // Aguaje y Shilajit que estaban en el JSON pero no en Supabase).
+  syncCatalogFromLocal("default").catch(e =>
+    console.warn("[Catalog Sync] No se pudo sincronizar catalog al arrancar:", e.message)
+  );
+
   ensureOrderConfirmationTemplate().catch(e =>
     console.warn("[WhatsApp Buttons] No se pudo pre-provisionar el template al arrancar:", e.message)
   );
