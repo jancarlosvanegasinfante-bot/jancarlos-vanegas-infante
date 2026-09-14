@@ -10649,6 +10649,25 @@ Solicitado haciendo click en el botón "Hablar con Asesor" 🙋‍♂️.`;
         // al cliente sin ninguna respuesta.
       }
 
+      // 🛡️ BLINDAJE: si el mensaje CLARAMENTE viene de nuestra landing/página
+      // del producto (formato "Me interesa: *X*" o "Vengo de la página del
+      // producto" o "🛒 CARRITO") PERO detectarProductoUnico falló, NO caemos
+      // al menú genérico (eso perdió a Lauren Katherine el 14-sep). En su
+      // lugar: alertamos al admin y respondemos algo útil que mantenga vivo
+      // el chat sin cambiar de producto.
+      if (esPedidoDeNuestraWeb && !productoPreguntado && from.startsWith("whatsapp:")) {
+        const nombreEntreAsteriscos = String(messageBody || "").match(/\*([^*]{3,120})\*/)?.[1]?.trim() || "el producto que viste";
+        console.error(`[WhatsApp Interceptor] ⚠️ Mensaje de la landing con producto NO detectado: "${nombreEntreAsteriscos}" — cliente ${from}`);
+        try {
+          await sendAdminAlert(`⚠️ *Producto NO detectado desde landing* para ${from.replace("whatsapp:","")}\nCliente pidio: "${nombreEntreAsteriscos}"\nRevisa el catalog.json y Supabase — no coincidieron. Entra al panel a atender.`);
+        } catch { /* no crítico */ }
+        // Pausamos IA (para que Jan atienda sin que el bot siga hablando)
+        try { await setCustomerAiPauseState(cleanFrom, assignedStoreId, true); } catch { /* noop */ }
+        const respSuave = `¡Hola! 👋 Vi que te interesa *${nombreEntreAsteriscos}*. Te paso con nuestro asesor humano *ya mismo* para atenderte personalmente y despachar tu pedido hoy. Un momento por favor 🙌`;
+        await sendWhatsApp(from, respSuave, undefined, activityRef.id, to);
+        return res.status(200).send("");
+      }
+
       if (isCatalogRequest && from.startsWith("whatsapp:")) {
         console.log(`[WhatsApp Interceptor] Catalog request detected from ${from}. Replying deterministically with trending products first...`);
 
