@@ -4831,6 +4831,40 @@ function CRMTab({ customers, selectedUser, onSelectUser }: { customers: any[], s
 }
 
 function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, webhookUrl, copied, onCopy, onReset, isResetting, onClearTransactions, isClearing }: any) {
+  // Backfill Meta Pixel: reenvía las ventas ya confirmadas de los últimos días
+  // a Meta CAPI para "recuperar" atribución en el administrador de anuncios.
+  // Meta acepta hasta 7 días de retroactivo y deduplica por event_id.
+  const [backfillLoading, setBackfillLoading] = useState<false | "dry" | "real">(false);
+  const [backfillResult, setBackfillResult] = useState<any>(null);
+  const runBackfill = async (dryRun: boolean) => {
+    if (backfillLoading) return;
+    if (!dryRun) {
+      const ok = window.confirm("¿Enviar las ventas confirmadas de los últimos 7 días a Meta Pixel?\n\nMeta deduplica por event_id, así que si ya se enviaron antes no las cuenta dos veces.");
+      if (!ok) return;
+    }
+    setBackfillLoading(dryRun ? "dry" : "real");
+    setBackfillResult(null);
+    try {
+      const r = await fetch("/api/admin/backfill-purchases", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...adminAuthHeaders() },
+        body: JSON.stringify({ days: 7, dryRun }),
+      });
+      const data = await r.json();
+      setBackfillResult(data);
+      if (data.success) {
+        toast.success(dryRun
+          ? `${data.count} ventas encontradas (simulación).`
+          : `📊 ${data.count} ventas enviadas a Meta.`);
+      } else {
+        toast.error(`Error: ${data.error || "sin detalle"}`);
+      }
+    } catch (e: any) {
+      toast.error(`Fallo de red: ${e.message}`);
+    } finally {
+      setBackfillLoading(false);
+    }
+  };
   const [storeData, setStoreData] = useState({
     name: userStore?.name || "",
     slug: userStore?.slug || "",
@@ -5454,7 +5488,7 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
               <h4 className="text-neutral-400 text-[10px] font-black uppercase tracking-widest mb-1">Sincronización Total</h4>
               <p className="text-neutral-600 text-[10px]">Actualiza el catálogo de productos desde el servidor.</p>
             </div>
-            <button 
+            <button
               onClick={onReset}
               disabled={isResetting}
               className="w-full border border-neutral-800 hover:border-dark-accent text-neutral-400 hover:text-white px-4 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-50 flex items-center justify-center gap-2"
@@ -5463,6 +5497,62 @@ function ConfigTab({ user, userStore, userStores, setUserStore, setUserStores, w
               {isResetting ? "Reseteando..." : "Sincronizar Catálogo Ahora"}
             </button>
          </div>
+       </div>
+
+       {/* 🎯 Backfill Meta Pixel: recuperar atribución de ventas antiguas */}
+       <div className="mt-4 bg-[#111] border border-emerald-500/20 p-8 rounded-2xl space-y-4">
+         <div className="flex items-start justify-between gap-4">
+           <div>
+             <h4 className="text-emerald-400 text-[10px] font-black uppercase tracking-widest mb-1">📊 Reenviar ventas a Meta Pixel</h4>
+             <p className="text-neutral-500 text-[10px] leading-relaxed">
+               Manda al administrador de anuncios de Meta las ventas confirmadas de los últimos 7 días (WhatsApp, Landing, manuales).
+               Meta acepta retroactivo hasta 7 días y deduplica por event_id, así que puedes correrlo varias veces sin duplicar.
+             </p>
+           </div>
+         </div>
+         <div className="flex gap-2">
+           <button
+             onClick={() => runBackfill(true)}
+             disabled={!!backfillLoading}
+             className="flex-1 border border-neutral-800 hover:border-emerald-500/50 text-neutral-400 hover:text-emerald-400 px-4 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+           >
+             {backfillLoading === "dry" ? <RefreshCw className="animate-spin" size={14} /> : <RefreshCw size={14} />}
+             {backfillLoading === "dry" ? "Consultando..." : "Simular (dry-run)"}
+           </button>
+           <button
+             onClick={() => runBackfill(false)}
+             disabled={!!backfillLoading}
+             className="flex-1 bg-emerald-500 hover:bg-emerald-400 text-black px-4 py-3 rounded-xl text-[9px] font-black uppercase tracking-widest transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+           >
+             {backfillLoading === "real" ? <RefreshCw className="animate-spin" size={14} /> : <Zap size={14} />}
+             {backfillLoading === "real" ? "Enviando a Meta..." : "Reenviar a Meta ahora"}
+           </button>
+         </div>
+         {backfillResult && (
+           <div className="mt-2 bg-black/40 border border-neutral-800 rounded-xl p-3 max-h-72 overflow-y-auto">
+             <p className="text-[10px] text-emerald-400 font-black uppercase mb-2">
+               {backfillResult.success ? "✅" : "❌"} {backfillResult.count ?? 0} ventas · {backfillResult.dryRun ? "simulación" : "enviadas a Meta"}
+             </p>
+             {Array.isArray(backfillResult.results) && backfillResult.results.length > 0 ? (
+               <ul className="space-y-1.5">
+                 {backfillResult.results.map((r: any, i: number) => (
+                   <li key={i} className="text-[10px] text-neutral-300 flex items-center gap-2 border-b border-neutral-900 pb-1">
+                     <span className={r.ok || r.action === "dry-run" ? "text-emerald-400" : "text-red-400"}>
+                       {r.ok || r.action === "dry-run" ? "●" : "○"}
+                     </span>
+                     <span className="font-bold">{r.name || "—"}</span>
+                     <span className="text-neutral-500">{r.product}</span>
+                     <span className="ml-auto text-neutral-400 font-mono">${Number(r.total || 0).toLocaleString()}</span>
+                     {r.actionSource && <span className="text-[8px] px-1.5 py-0.5 rounded bg-neutral-800 text-neutral-400 uppercase">{r.actionSource}</span>}
+                     {r.reason && <span className="text-[8px] text-red-400">{r.reason}</span>}
+                   </li>
+                 ))}
+               </ul>
+             ) : (
+               <p className="text-[10px] text-neutral-500">Sin resultados.</p>
+             )}
+           </div>
+         )}
        </div>
     </motion.div>
   );
