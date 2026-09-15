@@ -5144,6 +5144,15 @@ async function finalizeOrder(
         const fbpGuardado = customerProfile?.fbp || undefined;
         const fbcGuardado = customerProfile?.fbc || undefined;
 
+        // Identificadores extra: Meta rechaza cuando solo hay 1 (phone).
+        // Con fn/ln/ct/country/external_id el evento se acepta aunque el
+        // cliente nunca haya tocado la landing (WhatsApp puro).
+        const nombreCompletoWa = String(orderInfo.customerName || "").trim().replace(/\s+/g, " ");
+        const partesNombreWa = nombreCompletoWa.split(" ").filter(Boolean);
+        const firstNameWa = partesNombreWa[0] || "";
+        const lastNameWa = partesNombreWa.length > 1 ? partesNombreWa.slice(1).join(" ") : "";
+        const phoneDigitsWa = String(orderInfo.customerPhone || "").replace(/\D/g, "");
+
         const purchaseBase: any = {
           pixelId: storeConfig.metaPixelId,
           accessToken: capiToken,
@@ -5154,6 +5163,11 @@ async function finalizeOrder(
           fbc: fbcGuardado,
           userAgent: customerProfile?.userAgent || undefined,
           clientIp: customerProfile?.clientIp || undefined,
+          firstName: firstNameWa,
+          lastName: lastNameWa,
+          city: String(orderInfo.city || "").trim(),
+          country: "co",
+          externalId: phoneDigitsWa,
           customData: {
             currency: "COP",
             value: orderInfo.totalPrice,
@@ -5351,10 +5365,18 @@ interface MetaCapiParams {
   ctwaClid?: string;          // id del click del anuncio Click-to-WhatsApp
   messagingChannel?: string;  // "whatsapp" cuando actionSource = business_messaging
   eventTime?: number;         // unix seconds; solo para backfill retroactivo (Meta acepta hasta 7d)
+  // Identificadores extra del cliente (todos hasheados por sendMetaCapiEvent).
+  // Meta rechaza el evento cuando solo hay 1 identificador (typical: solo phone),
+  // así que enviamos varios cuando estén disponibles.
+  firstName?: string;
+  lastName?: string;
+  city?: string;
+  country?: string;           // ISO-2 lowercase, ej. "co"
+  externalId?: string;        // id único del cliente (usamos el phone en dígitos)
 }
 
 async function sendMetaCapiEvent(params: MetaCapiParams): Promise<void> {
-  const { eventName, eventId, eventSourceUrl, customerPhone, fbp, fbc, clientIp, userAgent, customData, actionSource, ctwaClid, messagingChannel, eventTime } = params;
+  const { eventName, eventId, eventSourceUrl, customerPhone, fbp, fbc, clientIp, userAgent, customData, actionSource, ctwaClid, messagingChannel, eventTime, firstName, lastName, city, country, externalId } = params;
   // Se limpian espacios: el id del pixel llego a estar guardado como
   // " 841277818494170", y con un id mal formado Meta descarta los eventos, que
   // es justo lo que la campana necesita para optimizar.
@@ -5374,6 +5396,14 @@ async function sendMetaCapiEvent(params: MetaCapiParams): Promise<void> {
     if (fbc) userData.fbc = fbc;
     if (clientIp) userData.client_ip_address = clientIp;
     if (userAgent) userData.client_user_agent = userAgent;
+    // Identificadores adicionales del cliente — TODOS hasheados (SHA-256 con lower+trim).
+    // Meta necesita al menos 2 identificadores para aceptar el evento en ventas
+    // que llegan por WhatsApp puro (sin fbp/fbc de landing).
+    if (firstName) userData.fn = [sha256Hash(firstName)];
+    if (lastName)  userData.ln = [sha256Hash(lastName)];
+    if (city)      userData.ct = [sha256Hash(city.replace(/\s+/g, ""))];
+    if (country)   userData.country = [sha256Hash(country)];
+    if (externalId) userData.external_id = [sha256Hash(externalId)];
     // Click-to-WhatsApp: el id del click es la llave que usa Meta para atribuir
     // la venta al anuncio de WhatsApp.
     if (ctwaClid) userData.ctwa_clid = ctwaClid;
@@ -5478,6 +5508,15 @@ async function dispararPurchaseParaOrder(order: any, opts: { retroactive?: boole
       }
     }
 
+    // Descomponemos el nombre en first/last para dar a Meta más señales de match.
+    // Meta rechaza el evento si solo hay 1 identificador (el phone).
+    const nombreCompleto = String(order.customerName || "").trim().replace(/\s+/g, " ");
+    const partesNombre = nombreCompleto.split(" ").filter(Boolean);
+    const firstName = partesNombre[0] || "";
+    const lastName = partesNombre.length > 1 ? partesNombre.slice(1).join(" ") : "";
+    const ciudad = String(order.city || "").trim();
+    const phoneDigitsForExtId = String(order.customerPhone || "").replace(/\D/g, "");
+
     const purchaseBase: any = {
       pixelId,
       accessToken: capiToken,
@@ -5488,6 +5527,11 @@ async function dispararPurchaseParaOrder(order: any, opts: { retroactive?: boole
       fbc: customerProfile?.fbc || undefined,
       userAgent: customerProfile?.userAgent || undefined,
       clientIp: customerProfile?.clientIp || undefined,
+      firstName,
+      lastName,
+      city: ciudad,
+      country: "co",
+      externalId: phoneDigitsForExtId,
       customData: {
         currency: "COP",
         value: Number(order.totalPrice) || 0,
@@ -8065,6 +8109,13 @@ DEVUELVE EXACTAMENTE UN JSON válido con este shape (sin markdown, sin texto ext
       // 3a. Meta CAPI: server-side "Purchase" event, deduplicado con el pixel del navegador (mismo event_id)
       const capiAccessToken = storeConfig?.metaCapiAccessToken || process.env.META_CAPI_ACCESS_TOKEN || "";
       if (storeConfig?.metaPixelId && capiAccessToken && eventId) {
+        // Identificadores extra hasheados para mejor matching en Meta.
+        const nombreCompletoLp = String(orderInfo.customerName || "").trim().replace(/\s+/g, " ");
+        const partesNombreLp = nombreCompletoLp.split(" ").filter(Boolean);
+        const firstNameLp = partesNombreLp[0] || "";
+        const lastNameLp = partesNombreLp.length > 1 ? partesNombreLp.slice(1).join(" ") : "";
+        const phoneDigitsLp = String(orderInfo.customerPhone || "").replace(/\D/g, "");
+
         sendMetaCapiEvent({
           pixelId: storeConfig.metaPixelId,
           accessToken: capiAccessToken,
@@ -8076,6 +8127,11 @@ DEVUELVE EXACTAMENTE UN JSON válido con este shape (sin markdown, sin texto ext
           fbc,
           clientIp: getClientIp(req),
           userAgent: req.headers["user-agent"] as string,
+          firstName: firstNameLp,
+          lastName: lastNameLp,
+          city: String(orderInfo.city || "").trim(),
+          country: "co",
+          externalId: phoneDigitsLp,
           customData: {
             currency: "COP",
             value: orderInfo.totalPrice,
@@ -8083,7 +8139,7 @@ DEVUELVE EXACTAMENTE UN JSON válido con este shape (sin markdown, sin texto ext
             content_type: "product",
             num_items: orderInfo.quantity,
           },
-        }).catch(() => {});
+        } as any).catch(() => {});
       }
 
       // 🔗 Persistir fbp/fbc/user_agent/ip en el customer del cliente que acabó
