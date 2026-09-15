@@ -2645,8 +2645,21 @@ async function ensureAdminAlertTemplate(): Promise<string | null> {
 
 async function sendAdminAlert(message: string): Promise<void> {
   const admins = getAdminNumbers();
+  // 🛡️ Fallback: si Twilio falla (ventana 24h, template rechazado, error de
+  // API), reintentamos con el WhatsApp Personal (Baileys), que NO tiene ventana
+  // de 24 h — solo por rate-limit interno. Además le mandamos SIEMPRE una copia
+  // a Jan a su mismo número personal ("mensaje a sí mismo") para que aunque
+  // Twilio se caiga por completo, la notificación quede en su chat personal y
+  // no se pierda ningún pedido.
+  const personalStatus = getPersonalWaStatus();
+  const personalConectado = !!(personalStatus?.connected);
+  const jefeSelfWa = (personalStatus?.phone || "").replace(/\D/g, "");
+
   for (const num of admins) {
     const target = num.trim().startsWith("whatsapp:") ? num.trim() : `whatsapp:${num.trim()}`;
+    const cleanNumForPersonal = num.trim().replace("whatsapp:", "").replace(/\D/g, "");
+    let entregadoPorTwilio = false;
+
     try {
       const contentSid = await ensureAdminAlertTemplate();
       if (contentSid && twilioClient) {
@@ -2656,12 +2669,49 @@ async function sendAdminAlert(message: string): Promise<void> {
           contentSid,
           contentVariables: JSON.stringify({ "1": message.slice(0, 1024) })
         });
+        entregadoPorTwilio = true;
       } else {
         // Respaldo si el template falla por algún motivo
         await sendWhatsApp(target, message);
+        entregadoPorTwilio = true;
       }
     } catch (e: any) {
-      console.error(`[Admin Alert] Error enviando alerta a ${target}:`, e.message);
+      console.error(`[Admin Alert] Twilio falló para ${target}: ${e.message}. Intento por WhatsApp Personal (Baileys)...`);
+    }
+
+    // 🚨 Si Twilio no logró entregar, intentamos por el WhatsApp Personal.
+    // Si SÍ logró entregar, NO duplicamos (para no saturar al admin).
+    if (!entregadoPorTwilio && personalConectado && cleanNumForPersonal) {
+      try {
+        const marcado = `⚠️ *Aviso vía WhatsApp Personal* (Twilio bloqueado)\n\n${message}`;
+        const r = await enviarPersonalWhatsApp(cleanNumForPersonal, marcado);
+        if (r.ok) {
+          console.log(`[Admin Alert] Fallback WA Personal → entregado a ${cleanNumForPersonal}`);
+        } else {
+          console.warn(`[Admin Alert] WA Personal también falló para ${cleanNumForPersonal}: ${r.error}`);
+        }
+      } catch (personalErr: any) {
+        console.warn(`[Admin Alert] Error del WA Personal para ${cleanNumForPersonal}:`, personalErr?.message);
+      }
+    }
+  }
+
+  // 🪞 Copia "a mí mismo" en el WhatsApp Personal: aunque Twilio y todo lo
+  // demás falle, Jan puede abrir su chat consigo mismo y ver el mensaje ahí,
+  // como un log de respaldo que sobrevive cualquier caída de infraestructura.
+  // Solo se envía si el número personal está conectado y no coincide con un
+  // admin ya notificado (para no duplicar).
+  if (personalConectado && jefeSelfWa) {
+    const yaNotificadoAlSelf = admins.some(n =>
+      n.trim().replace("whatsapp:", "").replace(/\D/g, "") === jefeSelfWa
+    );
+    if (!yaNotificadoAlSelf) {
+      try {
+        const marcado = `📌 *Copia para ti* (respaldo)\n\n${message}`;
+        await enviarPersonalWhatsApp(jefeSelfWa, marcado);
+      } catch (selfErr: any) {
+        console.warn("[Admin Alert] No se pudo enviar copia a self por WA Personal:", selfErr?.message);
+      }
     }
   }
 }
