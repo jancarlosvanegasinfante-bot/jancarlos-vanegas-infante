@@ -5129,12 +5129,31 @@ async function finalizeOrder(
         : true;
       const capiToken = storeConfig?.metaCapiAccessToken || process.env.META_CAPI_ACCESS_TOKEN || "";
       if (storeConfig?.metaPixelId && capiToken) {
+        // 🔗 URL de la ficha del producto: Meta la usa para emparejar la venta
+        // con el ViewContent que dejó el cliente en la landing. Sin esto, Meta
+        // acepta el Purchase pero no lo atribuye a ningún anuncio de website.
+        const baseUrl = (currentAppUrl || process.env.APP_URL || "https://chatbotjanadsia.up.railway.app").replace(/\/$/, "");
+        const productoSlug = String(orderInfo.productId || "").trim();
+        const eventSourceUrlProducto = productoSlug && productoSlug !== "manual"
+          ? `${baseUrl}/${productoSlug}`
+          : `${baseUrl}/landing`;
+
+        // fbp/fbc del customer: cuando entra por landing, la web los guarda
+        // (track_event). Al cerrar por WhatsApp los adjuntamos al Purchase
+        // para que Meta empareje con el click original del anuncio de website.
+        const fbpGuardado = customerProfile?.fbp || undefined;
+        const fbcGuardado = customerProfile?.fbc || undefined;
+
         const purchaseBase: any = {
           pixelId: storeConfig.metaPixelId,
           accessToken: capiToken,
           eventName: "Purchase",
           eventId: `wa_purchase_${newOrderId}`,
           customerPhone: orderInfo.customerPhone,
+          fbp: fbpGuardado,
+          fbc: fbcGuardado,
+          userAgent: customerProfile?.userAgent || undefined,
+          clientIp: customerProfile?.clientIp || undefined,
           customData: {
             currency: "COP",
             value: orderInfo.totalPrice,
@@ -5148,12 +5167,12 @@ async function finalizeOrder(
           sendMetaCapiEvent({ ...purchaseBase, actionSource: "business_messaging", messagingChannel: "whatsapp", ctwaClid }).catch(() => {});
         } else {
           // Venta por WhatsApp SIN click de anuncio (ej. llegó por la landing y
-          // cerró en el chat): igual la enviamos para que Meta APRENDA de TODAS
-          // las compras reales (hace match por el teléfono del cliente). No se
-          // atribuye a un anuncio puntual, pero alimenta la optimización.
-          sendMetaCapiEvent({ ...purchaseBase }).catch(() => {});
+          // cerró en el chat): la enviamos como "website" con la URL de la ficha
+          // del producto, así Meta la cuenta como conversión de la campaña web
+          // y hace match por fbp/fbc/teléfono con el ViewContent original.
+          sendMetaCapiEvent({ ...purchaseBase, actionSource: "website", eventSourceUrl: eventSourceUrlProducto }).catch(() => {});
         }
-        console.log(`[CTWA] Purchase enviado a Meta para pedido ${newOrderId} (atribuido a anuncio: ${!!ctwaClid}).`);
+        console.log(`[CTWA] Purchase enviado a Meta para pedido ${newOrderId} (atribuido a anuncio: ${!!ctwaClid}, url: ${eventSourceUrlProducto}).`);
       }
     } catch (e: any) {
       console.error("[CTWA] No se pudo enviar Purchase de WhatsApp (no crítico):", e?.message);
@@ -5331,10 +5350,11 @@ interface MetaCapiParams {
   actionSource?: string;      // "website" (default) o "business_messaging" (Click-to-WhatsApp)
   ctwaClid?: string;          // id del click del anuncio Click-to-WhatsApp
   messagingChannel?: string;  // "whatsapp" cuando actionSource = business_messaging
+  eventTime?: number;         // unix seconds; solo para backfill retroactivo (Meta acepta hasta 7d)
 }
 
 async function sendMetaCapiEvent(params: MetaCapiParams): Promise<void> {
-  const { eventName, eventId, eventSourceUrl, customerPhone, fbp, fbc, clientIp, userAgent, customData, actionSource, ctwaClid, messagingChannel } = params;
+  const { eventName, eventId, eventSourceUrl, customerPhone, fbp, fbc, clientIp, userAgent, customData, actionSource, ctwaClid, messagingChannel, eventTime } = params;
   // Se limpian espacios: el id del pixel llego a estar guardado como
   // " 841277818494170", y con un id mal formado Meta descarta los eventos, que
   // es justo lo que la campana necesita para optimizar.
@@ -5359,9 +5379,14 @@ async function sendMetaCapiEvent(params: MetaCapiParams): Promise<void> {
     if (ctwaClid) userData.ctwa_clid = ctwaClid;
 
     const fuente = actionSource || "website";
+    // eventTime solo se usa en backfill: Meta acepta hasta 7 días atrás. Si no
+    // viene, se manda "ahora" como siempre (comportamiento previo intacto).
+    const finalEventTime = (typeof eventTime === "number" && eventTime > 0)
+      ? Math.floor(eventTime)
+      : Math.floor(Date.now() / 1000);
     const evento: Record<string, any> = {
       event_name: eventName,
-      event_time: Math.floor(Date.now() / 1000),
+      event_time: finalEventTime,
       event_id: eventId,
       action_source: fuente,
       user_data: userData,
@@ -5390,6 +5415,109 @@ function getClientIp(req: express.Request): string {
     return forwarded.split(",")[0].trim();
   }
   return req.socket?.remoteAddress || "";
+}
+
+// ── Helper reutilizable: envía el Purchase server-side de una orden ya guardada.
+// Se llama desde /api/orders/update-status al pasar a "confirmado" y desde el
+// endpoint de backfill. Es 100% aditivo:
+//   - Si falta pixelId o token, no hace nada.
+//   - Si el orden ya se envió como Purchase (mismo event_id), Meta deduplica.
+//   - Nunca lanza: cualquier error se loguea y se ignora para no frenar el flujo.
+// Elige action_source según origen y ctwa_clid del customer, y adjunta fbp/fbc
+// guardados en el customer (si llegó por landing y luego cerró por WA).
+async function dispararPurchaseParaOrder(order: any, opts: { retroactive?: boolean } = {}): Promise<{ok: boolean, reason?: string, eventId?: string, actionSource?: string}> {
+  try {
+    if (!order || !order.id) return { ok: false, reason: "sin_orden" };
+    if (order.status === "cancelado") return { ok: false, reason: "cancelado" };
+
+    // storeConfig del pedido (por defecto la tienda default)
+    const targetStoreId = order.storeId || "default";
+    let storeConfig: any = {};
+    try {
+      const snap = await getDoc(doc(db, "stores", targetStoreId));
+      if (snap.exists()) storeConfig = snap.data();
+    } catch { /* store sin config → seguirá con env vars */ }
+
+    const capiToken = storeConfig?.metaCapiAccessToken || process.env.META_CAPI_ACCESS_TOKEN || "";
+    const pixelId = String(storeConfig?.metaPixelId || "").trim();
+    if (!pixelId || !capiToken) return { ok: false, reason: "sin_pixel_o_token" };
+
+    // Cliente: fbp/fbc/userAgent/ip/ctwa guardados si vinieron por landing.
+    let customerProfile: any = null;
+    try {
+      const cxId = customerDocId(targetStoreId, String(order.customerPhone || "").replace(/\D/g, ""));
+      const cxSnap = await getDoc(doc(db, "customers", cxId));
+      if (cxSnap.exists()) customerProfile = cxSnap.data();
+    } catch { /* ignore */ }
+
+    const ctwaClid = customerProfile?.ctwaClid || "";
+    const ctwaAgeOk = customerProfile?.ctwaClidAt
+      ? (Date.now() - Number(customerProfile.ctwaClidAt)) < 7 * 24 * 60 * 60 * 1000
+      : true;
+
+    // URL de la ficha del producto para el matching de website
+    const baseUrl = (currentAppUrl || process.env.APP_URL || "https://chatbotjanadsia.up.railway.app").replace(/\/$/, "");
+    const slug = String(order.productId || "").trim();
+    const eventSourceUrl = slug && slug !== "manual"
+      ? `${baseUrl}/${slug}`
+      : `${baseUrl}/landing`;
+
+    // event_id determinístico → Meta deduplica si esta orden ya se envió antes
+    const origen = String(order.origin || "manual");
+    const eventId = `purchase_${origen}_${order.id}`;
+
+    // event_time: para backfill usa el createdAt real (no supera los 7 días)
+    let eventTime: number | undefined = undefined;
+    if (opts.retroactive) {
+      const raw = order.createdAt || order.updatedAt;
+      const parsed = raw?.toDate ? raw.toDate().getTime()
+        : (raw?.seconds ? raw.seconds * 1000 : (raw ? new Date(raw).getTime() : Date.now()));
+      const ageDays = (Date.now() - parsed) / (24 * 60 * 60 * 1000);
+      if (Number.isFinite(parsed) && ageDays >= 0 && ageDays < 7) {
+        eventTime = Math.floor(parsed / 1000);
+      }
+    }
+
+    const purchaseBase: any = {
+      pixelId,
+      accessToken: capiToken,
+      eventName: "Purchase",
+      eventId,
+      customerPhone: order.customerPhone,
+      fbp: customerProfile?.fbp || undefined,
+      fbc: customerProfile?.fbc || undefined,
+      userAgent: customerProfile?.userAgent || undefined,
+      clientIp: customerProfile?.clientIp || undefined,
+      customData: {
+        currency: "COP",
+        value: Number(order.totalPrice) || 0,
+        content_ids: [order.productId || "manual"],
+        content_type: "product",
+        num_items: Number(order.quantity) || 1,
+      },
+    };
+    if (eventTime) (purchaseBase as any).eventTime = eventTime;
+
+    // Regla de action_source:
+    //  - Click-to-WhatsApp: business_messaging (Meta lo atribuye al anuncio de WA)
+    //  - Cualquier otro origen: website (Meta lo cuenta como conversión del
+    //    pixel web y hace match por fbp/fbc/teléfono con el ViewContent del sitio)
+    let params: MetaCapiParams;
+    let usedSource: string;
+    if (ctwaClid && ctwaAgeOk && (origen === "whatsapp" || origen === "whatsapp_personal")) {
+      params = { ...purchaseBase, actionSource: "business_messaging", messagingChannel: "whatsapp", ctwaClid };
+      usedSource = "business_messaging";
+    } else {
+      params = { ...purchaseBase, actionSource: "website", eventSourceUrl };
+      usedSource = "website";
+    }
+
+    await sendMetaCapiEvent(params);
+    return { ok: true, eventId, actionSource: usedSource };
+  } catch (e: any) {
+    console.error("[Purchase CAPI Helper] Error (no crítico):", e?.message);
+    return { ok: false, reason: e?.message || "error" };
+  }
 }
 
 function normalizePhone(phone: string): string {
@@ -7772,6 +7900,30 @@ DEVUELVE EXACTAMENTE UN JSON válido con este shape (sin markdown, sin texto ext
         });
       }
 
+      // 🔗 Enlace fbp/fbc → cliente: cuando el evento trae un phone (p.ej. el
+      // Contact desde la ficha de producto), guardamos las cookies de Meta en
+      // el customer para que al cerrar por WhatsApp se puedan adjuntar al
+      // Purchase server-side y Meta empareje la venta con el click original
+      // del anuncio de website. 100% aditivo: si no hay phone o no hay fbp/fbc,
+      // no toca nada. Errores logueados y no interrumpen el flujo.
+      try {
+        const phoneDigits = String(customerPhone || "").replace(/\D/g, "");
+        if (phoneDigits && (fbp || fbc || eventSourceUrl)) {
+          const cxId = customerDocId(targetStoreId, phoneDigits);
+          const cxPatch: any = { landingPixelUpdatedAt: Date.now() };
+          if (fbp) cxPatch.fbp = fbp;
+          if (fbc) cxPatch.fbc = fbc;
+          if (eventSourceUrl) cxPatch.lastEventSourceUrl = eventSourceUrl;
+          const uaHdr = req.headers["user-agent"];
+          if (uaHdr) cxPatch.userAgent = String(uaHdr);
+          const ip = getClientIp(req);
+          if (ip) cxPatch.clientIp = ip;
+          await setDoc(doc(db, "customers", cxId), cxPatch, { merge: true });
+        }
+      } catch (linkErr: any) {
+        console.warn("[Track Event] No se pudo enlazar fbp/fbc al customer (no crítico):", linkErr?.message);
+      }
+
       // Record real-time activity for live admin audio/voice notifications
       try {
         await addDoc(collection(db, "activities"), {
@@ -7932,6 +8084,28 @@ DEVUELVE EXACTAMENTE UN JSON válido con este shape (sin markdown, sin texto ext
             num_items: orderInfo.quantity,
           },
         }).catch(() => {});
+      }
+
+      // 🔗 Persistir fbp/fbc/user_agent/ip en el customer del cliente que acabó
+      // de comprar por landing. Si este cliente después vuelve a escribir por
+      // WhatsApp (repite compra), el finalizeOrder puede adjuntar sus cookies al
+      // Purchase y Meta va a atribuir mejor la nueva venta. 100% aditivo.
+      try {
+        const phoneDigits = String(orderInfo.customerPhone || "").replace(/\D/g, "");
+        if (phoneDigits) {
+          const cxId = customerDocId(targetStoreId, phoneDigits);
+          const cxPatch: any = { landingPixelUpdatedAt: Date.now() };
+          if (fbp) cxPatch.fbp = fbp;
+          if (fbc) cxPatch.fbc = fbc;
+          if (eventSourceUrl) cxPatch.lastEventSourceUrl = eventSourceUrl;
+          const uaHdr = req.headers["user-agent"];
+          if (uaHdr) cxPatch.userAgent = String(uaHdr);
+          const ip = getClientIp(req);
+          if (ip) cxPatch.clientIp = ip;
+          await setDoc(doc(db, "customers", cxId), cxPatch, { merge: true });
+        }
+      } catch (linkErr: any) {
+        console.warn("[Landing Order] No se pudo enlazar fbp/fbc al customer (no crítico):", linkErr?.message);
       }
 
       // 3b. Send automatic WhatsApp confirmation to customer
@@ -8108,6 +8282,73 @@ _El pedido ya se guardó y está listo en tu tablero._`;
   // ==============================================
   // 📱 NOTIFICACIÓN AUTOMÁTICA DE CAMBIO DE ESTADO
   // ==============================================
+  // 🔁 Backfill: reenvía a Meta el Purchase de las ventas confirmadas en los
+  // últimos días (Meta acepta hasta 7 días atrás con event_time retroactivo).
+  // Sirve para "recuperar" las ventas que Meta no vio en su momento (WhatsApp,
+  // personal, manual). Usa event_id determinístico → si una venta ya se envió,
+  // Meta la deduplica y no la cuenta dos veces.
+  app.post("/api/admin/backfill-purchases", express.json(), async (req, res) => {
+    if (!isAdminRequestAuthorized(req)) return res.status(401).json({ success: false, error: "no autorizado" });
+    try {
+      const { days = 6, storeId, dryRun = false } = req.body || {};
+      const maxDays = Math.max(1, Math.min(7, Number(days) || 6));
+      const cutoffMs = Date.now() - maxDays * 24 * 60 * 60 * 1000;
+
+      // Traemos las órdenes CONFIRMADAS de los últimos N días
+      if (!supabaseServer) return res.status(500).json({ success: false, error: "supabase no disponible" });
+      const { data, error } = await supabaseServer
+        .from("orders")
+        .select("id, data, updatedAt")
+        .order("updatedAt", { ascending: false })
+        .limit(200);
+      if (error) return res.status(500).json({ success: false, error: error.message });
+
+      const candidatos: any[] = [];
+      for (const row of (data || [])) {
+        const order = { id: row.id, ...(row.data || {}) };
+        if (order.status !== "confirmado" && order.status !== "entregado" && order.status !== "despachado") continue;
+        if (storeId && order.storeId !== storeId) continue;
+        const raw = order.createdAt || order.updatedAt || row.updatedAt;
+        const parsed = raw?.toDate ? raw.toDate().getTime()
+          : (raw?.seconds ? raw.seconds * 1000 : (raw ? new Date(raw).getTime() : 0));
+        if (!Number.isFinite(parsed) || parsed < cutoffMs) continue;
+        candidatos.push(order);
+      }
+
+      const resultados: any[] = [];
+      for (const order of candidatos) {
+        if (dryRun) {
+          resultados.push({ id: order.id, name: order.customerName, product: order.productName, total: order.totalPrice, origin: order.origin, action: "dry-run" });
+          continue;
+        }
+        const r = await dispararPurchaseParaOrder(order, { retroactive: true });
+        resultados.push({
+          id: order.id,
+          name: order.customerName,
+          product: order.productName,
+          total: order.totalPrice,
+          origin: order.origin,
+          ok: r.ok,
+          reason: r.reason,
+          eventId: r.eventId,
+          actionSource: r.actionSource,
+        });
+      }
+
+      return res.json({
+        success: true,
+        count: candidatos.length,
+        dryRun,
+        maxDays,
+        cutoffISO: new Date(cutoffMs).toISOString(),
+        results: resultados,
+      });
+    } catch (e: any) {
+      console.error("[Backfill Purchases] Error:", e?.message);
+      return res.status(500).json({ success: false, error: e?.message || "error" });
+    }
+  });
+
   app.post("/api/orders/update-status", express.json(), async (req, res) => {
     try {
       const { orderId, status, notifyCustomer = true, orderData, transportadora } = req.body;
@@ -8148,6 +8389,7 @@ _El pedido ya se guardó y está listo en tu tablero._`;
 
       let notificationSent = false;
       let messageText = "";
+      let notifyErrorReason: string | null = null;
 
       if (notifyCustomer && currentOrder && currentOrder.customerPhone) {
         const customerName = currentOrder.customerName || "Cliente";
@@ -8208,7 +8450,35 @@ _El pedido ya se guardó y está listo en tu tablero._`;
           });
           console.log(`[Order Status WhatsApp] Notification sent to ${customerPhone} for order ${orderId} (${status})`);
         } catch (sendErr: any) {
-          console.error(`[Order Status WhatsApp Error] Failed sending to ${customerPhone}:`, sendErr.message);
+          const rawMsg = sendErr?.message || "envío bloqueado";
+          const code = sendErr?.code ? ` (code=${sendErr.code})` : "";
+          // Errores típicos: 63016 (fuera de ventana 24h sin template) y 63024
+          // (template inválido). Se los pasamos al UI para que sepa que puede
+          // reintentar por el WhatsApp personal (Baileys) sin ventana.
+          notifyErrorReason = `${rawMsg}${code}`;
+          console.error(`[Order Status WhatsApp Error] Failed sending to ${customerPhone}:`, rawMsg);
+        }
+      }
+
+      // 🎯 Meta CAPI Purchase: cuando el pedido pasa a "confirmado" (venta real),
+      // le decimos a Meta para que la campaña aprenda. Vale para TODOS los canales
+      // (landing, whatsapp bot, whatsapp personal, manual): Meta deduplica por
+      // event_id determinístico si ya se envió antes desde otro punto. 100% aditivo
+      // y con try/catch: si falla, el status ya quedó guardado y no afecta el flujo.
+      if (status === "confirmado" && currentOrder && currentOrder.customerPhone) {
+        try {
+          const orderForCapi = { ...currentOrder, id: orderId, status };
+          dispararPurchaseParaOrder(orderForCapi).then((r) => {
+            if (r.ok) {
+              console.log(`[CAPI Purchase] Confirmación → Meta OK (orderId=${orderId}, event=${r.eventId}, source=${r.actionSource})`);
+            } else {
+              console.warn(`[CAPI Purchase] Confirmación NO enviada (orderId=${orderId}, motivo=${r.reason})`);
+            }
+          }).catch((e: any) => {
+            console.warn(`[CAPI Purchase] Error enviando (no crítico):`, e?.message);
+          });
+        } catch (capiErr: any) {
+          console.warn(`[CAPI Purchase] Error inesperado (no crítico):`, capiErr?.message);
         }
       }
 
@@ -8216,7 +8486,10 @@ _El pedido ya se guardó y está listo en tu tablero._`;
         success: true,
         message: `Estado actualizado a "${status}"`,
         notificationSent,
-        messageText
+        messageText,
+        customerPhone: currentOrder?.customerPhone || null,
+        customerName: currentOrder?.customerName || null,
+        errorReason: notifyErrorReason
       });
     } catch (e: any) {
       console.error("[Update Order Status Endpoint Error]", e);

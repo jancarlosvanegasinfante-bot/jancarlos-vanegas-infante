@@ -755,6 +755,37 @@ function JanAdmin() {
     });
   }, [activities, startDate, endDate]);
 
+  // 🔔 Total de clientes con mensajes sin responder (agrupa por número).
+  // Se muestra como badge en el nav "Reportes" y en el título de la pestaña.
+  // Un cliente cuenta si escribió y su último mensaje quedó DESPUÉS del último
+  // mensaje del bot/humano (o si nunca hemos contestado).
+  const totalUnreadChats = useMemo(() => {
+    const buckets: Record<string, { lastIn: number, lastOut: number }> = {};
+    for (const a of activities) {
+      const from = a.from || "";
+      const senderType = a.senderType || "";
+      const isOut = senderType === 'bot' || senderType === 'admin' || senderType === 'agent' || !!a.manualAgent || from.includes('14155238886') || from.includes('15072233213') || a.status === "respondido";
+      const rawUser = isOut ? (a.customerPhone || a.recipient || a.to || "") : (a.customerPhone || a.from || "");
+      if (!rawUser) continue;
+      const uid = canonicalizePhone(rawUser);
+      if (!uid || uid === '+') continue;
+      const botNums = ['14155238886', '15072233213'];
+      if (botNums.some(n => uid.includes(n))) continue;
+      const raw = a.timestamp || a.receivedAt || a.createdAt;
+      const ts = raw?.toDate ? raw.toDate().getTime() : (raw ? new Date(raw).getTime() : 0);
+      if (!Number.isFinite(ts)) continue;
+      if (!buckets[uid]) buckets[uid] = { lastIn: 0, lastOut: 0 };
+      if (isOut) buckets[uid].lastOut = Math.max(buckets[uid].lastOut, ts);
+      else buckets[uid].lastIn = Math.max(buckets[uid].lastIn, ts);
+    }
+    let n = 0;
+    for (const uid of Object.keys(buckets)) {
+      const b = buckets[uid];
+      if (b.lastIn > 0 && b.lastIn > b.lastOut) n++;
+    }
+    return n;
+  }, [activities]);
+
   const copyToClipboard = () => {
     navigator.clipboard.writeText(webhookUrl);
     setCopied(true);
@@ -806,6 +837,69 @@ function JanAdmin() {
             id: "status_notify_" + orderId,
             duration: 5000
           });
+        } else if (data.success && !data.notificationSent && data.messageText && data.customerPhone) {
+          // ⚠️ Twilio no pudo enviar (fuera de ventana 24h u otro error). Le
+          // ofrecemos a Jan reenviar desde su WhatsApp personal (Baileys), que
+          // no depende de la ventana ni de templates aprobados por Meta.
+          toast.dismiss("status_notify_" + orderId);
+          toast.custom((t) => (
+            <div className="bg-neutral-900 border border-amber-500/40 rounded-xl p-4 shadow-2xl max-w-sm">
+              <div className="flex items-start gap-3">
+                <div className="text-2xl">⚠️</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-black text-amber-400 uppercase mb-1">Bot no pudo enviar el mensaje</p>
+                  <p className="text-[11px] text-neutral-300 leading-snug mb-3">
+                    Estado <b className="text-white">{status.toUpperCase()}</b> quedó guardado, pero WhatsApp bloqueó el envío al cliente
+                    {data.customerName ? <> <b className="text-white">{data.customerName}</b></> : ""} (posible ventana de 24h cerrada).
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={async () => {
+                        toast.dismiss(t.id);
+                        const sendId = "wa_personal_" + orderId;
+                        toast.loading("Enviando por tu WhatsApp personal...", { id: sendId });
+                        try {
+                          const stR = await fetch("/api/admin/personal-wa/status", { headers: { ...adminAuthHeaders() } });
+                          const st = stR.ok ? await stR.json() : null;
+                          if (!st?.connected) {
+                            toast.error("Tu WhatsApp personal no está conectado. Ve a la sección 'WhatsApp Personal' y escanea el QR.", { id: sendId, duration: 6000 });
+                            return;
+                          }
+                          const r = await fetch("/api/admin/personal-wa/send", {
+                            method: "POST",
+                            headers: { "Content-Type": "application/json", ...adminAuthHeaders() },
+                            body: JSON.stringify({ phone: data.customerPhone, message: data.messageText })
+                          });
+                          const rj = await r.json();
+                          if (rj.success) {
+                            toast.success(`📲 Mensaje enviado por tu WhatsApp personal a ${data.customerName || 'cliente'}.`, { id: sendId, duration: 5000 });
+                          } else {
+                            toast.error(`No se pudo enviar por personal: ${rj.error || 'error desconocido'}`, { id: sendId, duration: 6000 });
+                          }
+                        } catch (e: any) {
+                          toast.error(`Error: ${e.message || 'fallo de red'}`, { id: sendId });
+                        }
+                      }}
+                      className="px-3 py-1.5 rounded-md bg-emerald-500 hover:bg-emerald-400 text-black text-[10px] font-black uppercase tracking-wider"
+                    >
+                      📲 Enviar por mi WhatsApp
+                    </button>
+                    <button
+                      onClick={() => toast.dismiss(t.id)}
+                      className="px-3 py-1.5 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-[10px] font-bold uppercase"
+                    >
+                      Cerrar
+                    </button>
+                  </div>
+                  {data.errorReason && (
+                    <p className="text-[9px] text-neutral-500 mt-2 font-mono truncate" title={data.errorReason}>
+                      {data.errorReason}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </div>
+          ), { duration: 20000 });
         } else if (data.success) {
           toast.success(`Estado actualizado a "${status.toUpperCase()}"`, {
             id: "status_notify_" + orderId
@@ -1033,7 +1127,7 @@ function JanAdmin() {
           <NavItem active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<TrendingUp size={18} />} label="Dashboard" />
           <NavItem active={activeTab === 'informes'} onClick={() => setActiveTab('informes')} icon={<BarChart3 size={18} />} label="Informes en Vivo" />
           <NavItem active={activeTab === 'crm'} onClick={() => setActiveTab('crm')} icon={<User size={18} />} label="CRM / Pipeline" />
-          <NavItem active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<History size={18} />} label="Reportes" />
+          <NavItem active={activeTab === 'reports'} onClick={() => setActiveTab('reports')} icon={<History size={18} />} label="Reportes" count={totalUnreadChats} />
           <NavItem active={activeTab === 'monitor'} onClick={() => setActiveTab('monitor')} icon={<Clock size={18} />} label="Monitor" />
           <NavItem active={activeTab === 'recovery'} onClick={() => setActiveTab('recovery')} icon={<Zap size={18} />} label="Recuperación" />
           <NavItem active={activeTab === 'orders'} onClick={() => setActiveTab('orders')} icon={<Truck size={18} />} label="Pedidos" count={orders.filter(o => o.status === 'pendiente').length} />
@@ -2032,11 +2126,31 @@ function ReportsTab({
       const incomingMsg = sortedMessages.find(m => m.senderType !== 'bot' && m.senderType !== 'admin' && m.senderType !== 'agent');
 
       const resolvedName = conv.customerName || customerNameMap[userId] || customerNameMap[userId.replace("+", "")] || null;
-      
+
       const custDoc = customers.find(c => {
         const p = c.phone || c.id || "";
         return p.includes(userId.replace("+", "")) || userId.includes(p.replace(/\D/g, ""));
       });
+
+      // 🔔 Contador estilo WhatsApp: cuántos mensajes entrantes del cliente
+      // quedaron SIN respuesta (después del último mensaje del bot/humano).
+      // Si nunca hubo respuesta, todos los mensajes del cliente cuentan.
+      let lastOutgoingTs = 0;
+      for (const m of sortedMessages) {
+        const isOut = m.senderType === 'bot' || m.senderType === 'admin' || m.senderType === 'agent' || !!m.manualAgent || m.from?.includes('14155238886') || m.from?.includes('15072233213');
+        if (!isOut) continue;
+        const raw = m.timestamp || m.receivedAt || m.createdAt;
+        const ts = raw?.toDate ? raw.toDate().getTime() : (raw ? new Date(raw).getTime() : 0);
+        if (Number.isFinite(ts) && ts > lastOutgoingTs) lastOutgoingTs = ts;
+      }
+      let unreadCount = 0;
+      for (const m of sortedMessages) {
+        const isIn = !(m.senderType === 'bot' || m.senderType === 'admin' || m.senderType === 'agent' || !!m.manualAgent || m.from?.includes('14155238886') || m.from?.includes('15072233213'));
+        if (!isIn) continue;
+        const raw = m.timestamp || m.receivedAt || m.createdAt;
+        const ts = raw?.toDate ? raw.toDate().getTime() : (raw ? new Date(raw).getTime() : 0);
+        if (ts > lastOutgoingTs) unreadCount++;
+      }
 
       result[userId] = {
         ...conv,
@@ -2047,7 +2161,8 @@ function ReportsTab({
         lastMessage: lastText,
         timestamp: lastMsg?.timestamp || conv.timestamp,
         platform: lastMsg?.platform || conv.platform || 'whatsapp',
-        pageId: incomingMsg?.to || conv.pageId
+        pageId: incomingMsg?.to || conv.pageId,
+        unreadCount
       };
     });
 
@@ -2309,6 +2424,12 @@ function ReportsTab({
           {userIds.map(uid => {
             const conv = processedUserConversations[uid];
             const isSelected = selectedCanonicalPhone === uid;
+            const unread = (conv as any).unreadCount || 0;
+            // Cuando abres el chat, no bajamos el contador a 0 en tiempo real
+            // (eso requeriría marcar "leído" con timestamp); pero sí lo
+            // ocultamos visualmente para el chat seleccionado, así no ves un
+            // globito verde en el chat que ya estás mirando.
+            const showUnread = unread > 0 && !isSelected;
 
             return (
               <button
@@ -2316,10 +2437,11 @@ function ReportsTab({
                 onClick={() => setSelectedUser(uid)}
                 className={cn(
                   "w-full p-4 flex items-center gap-4 transition-all border-b border-neutral-900/50 group text-left",
-                  isSelected ? "bg-dark-accent/10 border-l-4 border-l-dark-accent" : "hover:bg-white/5"
+                  isSelected ? "bg-dark-accent/10 border-l-4 border-l-dark-accent" : "hover:bg-white/5",
+                  showUnread && !isSelected && "bg-emerald-500/5"
                 )}
               >
-                <div className="w-12 h-12 rounded-2xl bg-neutral-900 flex items-center justify-center border border-neutral-800 shrink-0 group-hover:border-dark-accent/30 transition-colors">
+                <div className="w-12 h-12 rounded-2xl bg-neutral-900 flex items-center justify-center border border-neutral-800 shrink-0 group-hover:border-dark-accent/30 transition-colors relative">
                   {conv.platform === 'instagram' ? (
                     <Instagram size={20} className={cn(isSelected ? "text-pink-500" : "text-neutral-600")} />
                   ) : conv.platform === 'messenger' ? (
@@ -2327,12 +2449,20 @@ function ReportsTab({
                   ) : (
                     <MessageSquare size={20} className={cn(isSelected ? "text-green-500" : "text-neutral-600")} />
                   )}
+                  {showUnread && (
+                    <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-emerald-500 text-black text-[9px] font-black flex items-center justify-center border-2 border-neutral-950 shadow-lg animate-pulse">
+                      {unread > 99 ? '99+' : unread}
+                    </span>
+                  )}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-center mb-1">
                     {conv.customerName ? (
                       <div className="min-w-0 flex-1 pr-2">
-                        <p className={cn("text-xs font-black truncate uppercase", isSelected ? "text-dark-accent" : "text-white")}>
+                        <p className={cn(
+                          "text-xs truncate uppercase",
+                          showUnread ? "font-black text-emerald-300" : (isSelected ? "font-black text-dark-accent" : "font-black text-white")
+                        )}>
                           {conv.customerName}
                         </p>
                         <p className="text-[9px] text-neutral-500 font-mono truncate">
@@ -2340,16 +2470,25 @@ function ReportsTab({
                         </p>
                       </div>
                     ) : (
-                      <p className={cn("text-xs font-black truncate uppercase font-mono", isSelected ? "text-dark-accent" : "text-white")}>
+                      <p className={cn(
+                        "text-xs truncate uppercase font-mono",
+                        showUnread ? "font-black text-emerald-300" : (isSelected ? "font-black text-dark-accent" : "font-black text-white")
+                      )}>
                         {uid}
                       </p>
                     )}
-                    <span className="text-[8px] text-neutral-600 font-mono shrink-0 ml-1">
+                    <span className={cn(
+                      "text-[8px] font-mono shrink-0 ml-1",
+                      showUnread ? "text-emerald-400 font-bold" : "text-neutral-600"
+                    )}>
                       {safeFormat(conv.timestamp, 'dd/MM HH:mm')}
                     </span>
                   </div>
                   <div className="flex items-center justify-between gap-2 mt-1">
-                    <p className="text-[10px] text-neutral-500 truncate italic flex-1">
+                    <p className={cn(
+                      "text-[10px] truncate italic flex-1",
+                      showUnread ? "text-neutral-200 font-semibold not-italic" : "text-neutral-500"
+                    )}>
                       "{conv.lastMessage}"
                     </p>
                     {((conv as any).customerEtapa === 'comprado' || (conv as any).customerEtapa === 'finalizado') ? (
