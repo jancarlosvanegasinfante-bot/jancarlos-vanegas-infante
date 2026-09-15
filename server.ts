@@ -8563,6 +8563,42 @@ _El pedido ya se guardó y está listo en tu tablero._`;
           // reintentar por el WhatsApp personal (Baileys) sin ventana.
           notifyErrorReason = `${rawMsg}${code}`;
           console.error(`[Order Status WhatsApp Error] Failed sending to ${customerPhone}:`, rawMsg);
+
+          // 🚑 Fallback AUTOMÁTICO: si Twilio bloqueó el envío al cliente
+          // (típicamente la ventana de 24h), reintentamos por el WhatsApp
+          // Personal (Baileys), que NO tiene esa limitación. Así el cliente
+          // recibe la notificación de estado aunque Twilio no pueda.
+          try {
+            const personalStatus = getPersonalWaStatus();
+            if (personalStatus?.connected) {
+              const cleanCustomerPhone = String(customerPhone || "").replace(/\D/g, "");
+              const personalMsg = messageText;
+              const rPersonal = await enviarPersonalWhatsApp(cleanCustomerPhone, personalMsg);
+              if (rPersonal.ok) {
+                notificationSent = true;
+                notifyErrorReason = null;
+                console.log(`[Order Status WA Personal] ✅ Fallback vía Baileys → entregado a ${cleanCustomerPhone}`);
+                await addDoc(collection(db, "activities"), {
+                  type: "status_notification",
+                  customerName,
+                  customerPhone,
+                  orderId,
+                  newStatus: status,
+                  channel: "personal",
+                  text: `📲 Notificación (${status.toUpperCase()}) entregada a ${customerName} (${customerPhone}) por WhatsApp Personal (Twilio bloqueado)`,
+                  createdAt: new Date().toISOString(),
+                  timestamp: serverTimestamp(),
+                });
+              } else {
+                console.warn(`[Order Status WA Personal] Baileys también falló para ${cleanCustomerPhone}: ${rPersonal.error}`);
+                notifyErrorReason = `${notifyErrorReason} | WA Personal: ${rPersonal.error}`;
+              }
+            } else {
+              console.warn("[Order Status WA Personal] WA Personal no conectado, no se pudo hacer fallback.");
+            }
+          } catch (fbErr: any) {
+            console.warn("[Order Status WA Personal] Error del fallback (no crítico):", fbErr?.message);
+          }
         }
       }
 
