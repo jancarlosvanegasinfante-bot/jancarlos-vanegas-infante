@@ -2521,15 +2521,25 @@ Quiero realizar el siguiente pedido desde la Landing Page:`
                       <Truck size={12} className="text-amber-400 shrink-0" />
                       Despachamos hoy · Llega en 1 a 3 días · No pagas nada por adelantado
                     </p>
-                    <button
-                      type="button"
-                      disabled={cart.length === 0}
-                      onClick={() => handleWhatsAppOrder()}
-                      className="w-full py-4 rounded-2xl btn-cta-whatsapp text-white font-black text-sm uppercase tracking-wider flex items-center justify-center gap-3 cursor-pointer disabled:opacity-40"
-                    >
-                      <MessageCircle size={16} fill="currentColor" />
-                      O Prefiero Pedir por WhatsApp 🚀
-                    </button>
+                    {/* 🎯 Antes había un botón grande verde "O Prefiero Pedir por
+                        WhatsApp" que competía visualmente con el CTA principal y se
+                        estaba llevando la conversión: la gente llegaba al PASO 3,
+                        ya con datos escritos, y se iba a WhatsApp en el último
+                        segundo, cortando la venta a un click de cerrar. Se dejó
+                        solo un LINK discreto para quien de verdad tiene una duda
+                        de último momento — sin CTA compitiendo con "Pedir ahora". */}
+                    <p className="text-center text-[11px] text-slate-500 pt-1">
+                      ¿Dudas antes de pagar?{" "}
+                      <button
+                        type="button"
+                        disabled={cart.length === 0}
+                        onClick={() => handleWhatsAppOrder()}
+                        className="text-emerald-400 hover:text-emerald-300 underline underline-offset-2 font-semibold disabled:opacity-40 disabled:cursor-not-allowed inline-flex items-center gap-1"
+                      >
+                        <MessageCircle size={11} fill="currentColor" />
+                        Chatea con nosotros
+                      </button>
+                    </p>
 
                     {/* La Ley 1581 pide avisar QUE se recogen datos y PARA QUE,
                         en el momento en que la persona los entrega. Aqui, no
