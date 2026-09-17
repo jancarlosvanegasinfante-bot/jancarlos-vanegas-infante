@@ -210,6 +210,22 @@
       "dropiId": "2205368"
     },
     {
+      "id": "game-tv-stick-pro-fg009",
+      "name": "Game TV Stick PRO 8K AndroidTV Netflix Disney",
+      "category": "tecnologia",
+      "cost": 92000,
+      "stock": 484,
+      "freight": 15000,
+      "imageUrl": "/images/game-tv-stick-pro-fg009.png",
+      "currency": "COP",
+      "provider": "EL IMPACTO",
+      "description": "El Game TV Stick PRO FG009 convierte tu TV en un centro de entretenimiento total: consola de +10.000 juegos clásicos Y Android TV Box en un solo dispositivo del tamaño de una USB. Corre en resolución 8K Ultra HD con HDR, conexión 5G Wi-Fi y HDMI para plug-and-play en cualquier televisor. Trae acceso directo a las apps de streaming que ya usas: YouTube, Netflix, Prime Video, Spotify, Disney+, HBO, ESPN, Star, Fox Sports, IMDB. Y del lado gaming, arranca con más de 10.000 juegos de NES, SNES, Sega, PS1, N64, GBA — Mario, Sonic, Contra, FIFA, GTA y muchísimos más. Incluye 2 controles inalámbricos 2.4G originales con joystick 3D antideslizante, cable HDMI y el stick principal. Sistema Android TV con Google Play para instalar cualquier otra app. Sin suscripciones, sin cuentas, sin complicaciones — conectas y en 60 segundos ya estás jugando o viendo tu serie favorita. Diferente del modelo M8 básico: este es la versión PRO con 8K, streaming completo, 5G y HDR.",
+      "price": 199900,
+      "originalPrice": 299900,
+      "videoUrl": "/videos/game-tv-stick-pro-1.mp4",
+      "dropiId": "596750"
+    },
+    {
       "id": "batido-fibra-verde-linaza",
       "name": "Batido Fibra Verde — Linaza & Té Verde x450g",
       "category": "bienestar",

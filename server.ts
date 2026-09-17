@@ -4765,6 +4765,13 @@ const PUNTOS_DE_VENTA: Record<string, string[]> = {
     "*Salida 4K y 64GB*: conectas el HDMI y en un minuto estás jugando",
     "*Sin instalar nada* y sin suscripciones"
   ],
+  "game-tv-stick-pro-fg009": [
+    "*Consola + Android TV Box en uno*: +10.000 juegos Y streaming (Netflix, Disney+, HBO, Prime Video, YouTube)",
+    "*Resolución 8K Ultra HD con HDR* + *WiFi 5G* — imagen y velocidad de última generación",
+    "*2 controles inalámbricos 2.4G* con joystick 3D antideslizante + cable HDMI incluidos",
+    "*Convierte cualquier TV en Smart TV* — perfecto para televisores que no son inteligentes",
+    "*Versión PRO* — más avanzada que el modelo M8 básico, con streaming y 8K"
+  ],
   "soporte-de-carga-magnetica": [
     "El celular *se pega solo con imán*, sin pelear con cables",
     "Carga *celular, audífonos y reloj al mismo tiempo* con 15W",
@@ -6513,11 +6520,16 @@ const OBJECIONES_CHECKOUT: { re: RegExp; resp: string }[] = [
   { re: /descuento|mas barato|rebaja|precio especial|me lo dejas en|econom|muy caro|esta caro|costoso|mucha plata|vale mucho|bajale/, resp: "El precio ya trae *envío GRATIS incluido* y es contra entrega (pagas al recibir) 🙌 Por lo que ofrece, es una súper inversión. ¿Te lo aseguro antes de que se agote? 🔥" },
   { re: /no tengo plata|sin plata|no tengo dinero|estoy sin plata|cuando me paguen|hasta la quincena|no me alcanza ahora|ando corto/, resp: "¡No hay lío! Como es *contra entrega*, no pagas ahora — pagas cuando te llegue (en 1-3 días) 😊 Así tienes tiempo. ¿Te lo despacho? 🚚" },
   { re: /lo pienso|lo consulto|mas tarde|manana te digo|luego te digo|no por ahora|dejame pensar|despues te aviso|lo voy a pensar/, resp: "¡Tranquilo! 😊 Solo te cuento: quedan *pocas unidades* y el envío gratis es por tiempo limitado. Si quieres te lo *aparto sin compromiso* (pagas solo al recibir). ¿Te lo guardo? 🔥" },
-  // — Game Stick —
+  // — Game Stick (Retro M8 y PRO FG009) —
   { re: /cuantos juegos|que juegos|trae.*juego|top gear|mario|sonic|nintendo|sega|playstation|gta|fifa|pes|clasico/, resp: "¡Trae *+10.000 juegos* clásicos! 🎮 Mario, Sonic, Contra, PlayStation, Nintendo y muchísimos más. ¡Horas de diversión para toda la familia!" },
   { re: /cuantos controles|control.*incluye|mandos|palancas|joystick/, resp: "¡Incluye *2 controles inalámbricos*! 🎮 Listos para jugar en pareja o con la familia." },
-  { re: /sirve.*tv|cualquier tele|que tv|se conecta|hdmi|4k|resolucion|lo conecto/, resp: "Se conecta por *HDMI a cualquier TV* 📺 y tiene salida *4K*. Conectas y juegas al instante." },
-  { re: /necesita internet|requiere internet|wifi para jugar|con internet/, resp: "¡No necesita internet! 📴 Los juegos ya vienen incluidos, juegas sin conexión." },
+  { re: /sirve.*tv|cualquier tele|que tv|se conecta|hdmi|4k|resolucion|lo conecto/, resp: "Se conecta por *HDMI a cualquier TV* 📺 (no necesita ser Smart). El modelo *M8* tiene salida 4K; el *PRO* salida *8K con HDR*. Conectas y juegas al instante." },
+  { re: /necesita internet|requiere internet|wifi para jugar|con internet/, resp: "Para *jugar NO necesita internet* 📴 (los juegos vienen incluidos). Solo lo necesita para ver Netflix/streaming en el modelo *PRO*." },
+  // — Game TV Stick PRO específicas (streaming + 8K + AndroidTV) —
+  { re: /netflix|disney|hbo|prime video|streaming|apps|aplicaciones|smart.?tv|convierte.*tv|android.?tv|tv.?box/, resp: "¡Sí! El *Game TV Stick PRO* trae *Android TV* con acceso directo a *Netflix, Disney+, HBO, Prime Video, YouTube, Spotify* y muchas más. Convierte cualquier TV en Smart TV 📺✨" },
+  { re: /8k|calidad.*imagen|resolucion.*alta|hdr|ultra.?hd/, resp: "El modelo *PRO* corre en *8K Ultra HD con HDR* — la imagen se ve nítida al máximo. Además trae *WiFi 5G* para streaming sin lag. 🚀" },
+  { re: /diferencia.*modelo|cual.*mejor|m8.*vs.*pro|pro.*vs.*m8|cual.*me.*conviene|cual.*compro|cual.*recomienda/, resp: "El *M8 ($119.900)* es la versión clásica: +10.000 juegos y salida 4K, ideal si solo quieres jugar. El *PRO ($199.900)* es todo eso PERO en *8K con Android TV* — Netflix, Disney+, HBO, Prime Video incluidos. Si tu tele no es Smart, el PRO te sale más completo. 🎮📺" },
+  { re: /google play|instalar.*app|otras.*app|puedo.*descargar/, resp: "El *PRO* trae *Google Play Store* — descargas cualquier app extra que quieras. Como una Smart TV normal. 📲" },
   // — Cargador Aromatizante —
   { re: /sirve.*carro|cualquier carro|mi carro|12v|24v|camioneta|para moto|en la moto|enciende dor/, resp: "¡Sirve en *cualquier carro, camioneta o SUV* (12V-24V)! 🚗 Se conecta al encendedor del carro." },
   { re: /cuantas esencias|esencias|aromas|olores|fragancia/, resp: "¡Incluye *3 esencias aromáticas de regalo*! 🌿 Para que lo estrenes el mismo día." },

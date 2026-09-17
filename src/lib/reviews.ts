@@ -166,6 +166,18 @@ export const REVIEWS: Record<string, Review[]> = {
     { name: "Paulina M.", city: "Cartagena",   rating: 5, date: "hace 6 días",     verified: true,  text: "Excelente atención, me resolvieron todas las dudas antes de comprar. El pedido llegó en el tiempo prometido." },
     { name: "Estefany N.",city: "Popayán",     rating: 5, date: "hace 4 semanas",  verified: true,  text: "Lo recomiendo. Los ingredientes vienen bien listados y las cápsulas son fáciles de tomar con agua." },
   ],
+  "game-tv-stick-pro-fg009": [
+    { name: "Juan D.",    city: "Bogotá",       rating: 5, date: "hace 4 días",    verified: true,  text: "Netflix, Disney+ y HBO todo en la tele del cuarto y sin cambiar de aparato. Los juegos son un plus enorme para los sobrinos. Se ve en 4K perfecto en mi tele." },
+    { name: "Andrés M.",  city: "Medellín",     rating: 5, date: "hace 1 semana",  verified: true,  text: "Lo pedí porque quería reemplazar el Chromecast y darle algo de juegos a mi hijo. Cumple las dos cosas. La caja trae los dos controles y el HDMI." },
+    { name: "Camila R.",  city: "Cali",         rating: 5, date: "hace 3 semanas", verified: true,  text: "Conecté al televisor de la sala y en menos de 5 minutos ya estaba viendo YouTube. La interfaz de Android TV es rápida y navega fácil." },
+    { name: "Felipe G.",  city: "Barranquilla", rating: 4, date: "hace 6 días",    verified: true,  text: "Muy bueno pero la app de Netflix pide iniciar sesión con tu cuenta, no la trae incluida (obvio). Los juegos preinstalados están completísimos, no faltó Mario ni Sonic." },
+    { name: "Laura V.",   city: "Bucaramanga",  rating: 5, date: "hace 2 semanas", verified: true,  text: "Compré esta versión PRO en vez de la M8 porque quería el 8K y el streaming en el mismo. Vale la pena la diferencia, se ve con muchísima calidad." },
+    { name: "Sergio T.",  city: "Pereira",      rating: 5, date: "hace 5 días",    verified: true,  text: "Ideal para casas donde la TV no es Smart. La convierte de una. Con el WiFi de la casa funciona muy bien, sin lag." },
+    { name: "Diana P.",   city: "Ibagué",       rating: 5, date: "hace 1 semana",  verified: true,  text: "Mi papá está encantado con los juegos clásicos. Le puse Mario Bros y no lo pude sacar. Y ahora en la noche ven Netflix como si fuera un Smart TV." },
+    { name: "Marcela H.", city: "Cartagena",    rating: 4, date: "hace 3 días",    verified: true,  text: "Se demora un poquito en cargar la primera vez pero después va rápido. Los controles se sienten cómodos, no son de mala calidad." },
+    { name: "David C.",   city: "Villavicencio",rating: 5, date: "hace 4 semanas", verified: true,  text: "Sobra decir que 10.000 juegos son muchísimos. Uno se pierde escogiendo. Y aparte Netflix y Prime en la misma. Súper compra." },
+    { name: "Natalia F.", city: "Neiva",        rating: 5, date: "hace 2 semanas", verified: true,  text: "Excelente relación calidad precio. Comparado con un Chromecast + una consola, esto sale muchísimo más económico y hace las dos cosas bien." },
+  ],
   "batido-fibra-verde-linaza": [
     { name: "Laura V.",   city: "Bogotá",       rating: 5, date: "hace 3 días",    verified: true,  text: "Llevo 10 días tomándolo en ayunas y ya siento la barriga más plana. Sabor rico, sin ese sabor amargo de otros batidos verdes." },
     { name: "Andrea M.",  city: "Medellín",     rating: 5, date: "hace 1 semana",  verified: true,  text: "Me quitó el estreñimiento en 3 días. Voy al baño todos los días como reloj. Nunca creí que un batido hiciera tanto." },
