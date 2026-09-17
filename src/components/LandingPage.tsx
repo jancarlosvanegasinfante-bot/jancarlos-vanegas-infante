@@ -216,6 +216,19 @@ export const TRENDING_PRODUCTS = [
     stock: 98,
     badge: "🌸 BIENESTAR FEMENINO",
   },
+  {
+    id: "batido-fibra-verde-linaza",
+    name: "Batido Fibra Verde — Linaza & Té Verde 450g",
+    category: "Bienestar",
+    description: "Batido NutriPlan natural con linaza, té verde, alcachofa, apio y perejil. Baja medidas, mejora digestión, elimina hinchazón. 15 porciones.",
+    price: 59900,
+    originalPrice: 89900,
+    imageUrl: "/images/batido-fibra-verde-linaza.png",
+    rating: 4.9,
+    reviews: 118,
+    stock: 96,
+    badge: "🌿 SÚPER TENDENCIA",
+  },
 ];
 
 // El descuento por invitar exige llevar 2+ productos: en un pedido de dos el

@@ -166,6 +166,18 @@ export const REVIEWS: Record<string, Review[]> = {
     { name: "Paulina M.", city: "Cartagena",   rating: 5, date: "hace 6 días",     verified: true,  text: "Excelente atención, me resolvieron todas las dudas antes de comprar. El pedido llegó en el tiempo prometido." },
     { name: "Estefany N.",city: "Popayán",     rating: 5, date: "hace 4 semanas",  verified: true,  text: "Lo recomiendo. Los ingredientes vienen bien listados y las cápsulas son fáciles de tomar con agua." },
   ],
+  "batido-fibra-verde-linaza": [
+    { name: "Laura V.",   city: "Bogotá",       rating: 5, date: "hace 3 días",    verified: true,  text: "Llevo 10 días tomándolo en ayunas y ya siento la barriga más plana. Sabor rico, sin ese sabor amargo de otros batidos verdes." },
+    { name: "Andrea M.",  city: "Medellín",     rating: 5, date: "hace 1 semana",  verified: true,  text: "Me quitó el estreñimiento en 3 días. Voy al baño todos los días como reloj. Nunca creí que un batido hiciera tanto." },
+    { name: "Juliana P.", city: "Cali",         rating: 4, date: "hace 2 semanas", verified: true,  text: "Me gustó el sabor y la digestión ha mejorado. Yo esperaba bajar más rápido pero apenas llevo 2 semanas, hay que ser paciente." },
+    { name: "Diana R.",   city: "Barranquilla", rating: 5, date: "hace 4 días",    verified: true,  text: "El paquete llegó bien sellado, con la fecha de vencimiento clara. Me lo tomo con jugo de piña y sabe delicioso." },
+    { name: "Camila S.",  city: "Bucaramanga",  rating: 5, date: "hace 3 semanas", verified: true,  text: "Bajé 3 kilos en 3 semanas combinándolo con caminar 40 minutos al día. Sin dieta estricta, y me siento con más energía." },
+    { name: "Marcela T.", city: "Pereira",      rating: 5, date: "hace 6 días",    verified: true,  text: "Le mandé uno a mi mamá y ella también lo está usando. A ella la ha ayudado mucho con el colon, dice que ya no se siente pesada." },
+    { name: "Natalia G.", city: "Ibagué",       rating: 5, date: "hace 2 semanas", verified: true,  text: "Yo desconfiaba por lo del contra entrega pero llegó a los 2 días y en perfecto estado. Buen servicio y buen producto." },
+    { name: "Sara H.",    city: "Cartagena",    rating: 4, date: "hace 5 días",    verified: true,  text: "La cafeína del té verde se siente al principio, si eres sensible tómalo con comida. A mí me da energía y no me quita el sueño porque lo tomo en la mañana." },
+    { name: "Katherine O.",city: "Villavicencio",rating: 5, date: "hace 1 semana", verified: true,  text: "El sabor a manzana verde y limón es rico, no da asco como otros que he probado. La bolsa rinde 15 días como dicen." },
+    { name: "Paola F.",   city: "Neiva",        rating: 5, date: "hace 4 semanas", verified: true,  text: "Me lo tomo a diario en ayunas y he notado que la piel se me ve más limpia. Y bajé 2 tallas del pantalón en un mes." },
+  ],
 };
 
 // FAQ genéricas (aplican a todos los productos) + específicas por categoría

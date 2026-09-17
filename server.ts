@@ -4821,6 +4821,13 @@ const PUNTOS_DE_VENTA: Record<string, string[]> = {
     "*100 cápsulas* por frasco — te rinde un mes completo con la dosis diaria",
     "Ingredientes *100% naturales* usados tradicionalmente para el bienestar femenino",
     "*Calidad premium* Natural Medix"
+  ],
+  "batido-fibra-verde-linaza": [
+    "Batido en polvo con *linaza, té verde, alcachofa, apio, perejil, kiwi, limón, pera y manzana verde*",
+    "*Ayuda a bajar medidas, mejorar la digestión y limpiar el colon* sin dietas estrictas",
+    "*450g = 15 porciones (medio mes)* de rendimiento",
+    "*106mg de cafeína natural* del té verde para acelerar el metabolismo",
+    "*Sin colorantes, sin conservantes, sin azúcar añadida* — 100% natural"
   ]
 };
 
